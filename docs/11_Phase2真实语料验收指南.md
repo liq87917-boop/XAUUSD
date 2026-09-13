@@ -227,6 +227,15 @@ python scripts/compare_extractor_baselines.py `
 
 > 我会在你说"数据已准备好"之后实现该脚本 + 单测（并同步 `docs/05` 与本指南 §5 的"已实现"状态）。
 
+### 方案 C（第三方托管抓取：compliant-scrapers / Apify）——**已完成调研，本阶段不用于验收语料**
+
+- 调研结论见 **`docs/12_compliant-scrapers接入方案.md`**：该服务合规（源码级 robots.txt fail-closed）、便宜
+  （**from $0.50/1,000 results**，Free 计划送 $5 无需信用卡），但**只输出标题**（无正文）、
+  **无发布时间**（只有抓取时刻 `fetched_at`）、无作者 → **不满足本指南 §1.1 的列契约**，
+  无法用于评估 `stance` / `stop_loss` / `take_profit`。
+- 结论：**Phase 2 验收语料仍按方案 A 自备**（作者帖子，含正文与发布时间）；
+  该服务拟作为 **Phase 3 的标题级新闻源**接入（`docs/12 §3.1 路线 1`），**待人工确认后**再实施。
+
 ---
 
 ## 6. 验收指标与判定
