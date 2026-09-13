@@ -428,10 +428,18 @@ def render_report(
         f"（{'、'.join(FIELD_LABEL_CN.get(n, n) for n in failed) or '无'}）；"
         f"同一口径下正则 PASS {regex_passed} 项。"
     )
-    add(
-        "- 信息类型若未达 90%：按 `docs/10 §4.9` 规则 9（L1~L6 阶梯）继续收敛口径，"
-        "或把对应格子提交**人工二次裁决**（模型纠正人工 / 人工纠正模型都属正常对齐）。"
-    )
+    info_accuracy = llm_stats["information_type"].accuracy
+    if info_accuracy >= 0.90:
+        add(
+            f"- 信息类型 **{_pct(info_accuracy)}**（≥ 90%）；残余分歧集中在 "
+            "**「操作块 + 驱动尾句」**形态，逐格见 §5.2，已登记 **TD-29**（待真实语料复核）。"
+        )
+    else:
+        add(
+            f"- 信息类型 **{_pct(info_accuracy)}**（< 90%）：按 `docs/10 §4.9` 规则 9（L1~L6 阶梯）"
+            "继续收敛口径，或把 §5.2 的格子提交**人工二次裁决**"
+            "（模型纠正人工 / 人工纠正模型都属正常对齐）。"
+        )
     add(
         "- 本批语料为 **Mock 语料**（模板生成、含 126 条对抗样本）；"
         "**真实语料验收必须用真实作者帖子 + 全人工裁决重新抽样**（`docs/08 §5`）。"
