@@ -1,0 +1,40 @@
+# ---- 环境与密钥（严禁入库，06_Cline开发规则 第 18 / 第 15 条）----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ---- 数据与产物（原始数据永久保存，但本地数据文件不入 Git）----
+data/
+logs/
+notebooks/.ipynb_checkpoints/
+experiments/artifacts/
+
+# ---- LLM 真实 API 返回的原始数据（**严禁入库**）----
+# `logs/` 已整体忽略，这里再写一条显式规则：缓存文件里是付费 API 的原始响应，
+# 属"原始数据"，只允许本地留存（数据完整性原则），绝不进版本库。
+logs/llm_cache/
+
+# ---- 本地数据库文件（仅测试用）----
+*.db
+*.sqlite3
+
+# ---- IDE ----
+.idea/
+.vscode/settings.json

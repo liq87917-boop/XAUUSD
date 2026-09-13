@@ -1,0 +1,32 @@
+"""${message}
+
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+注意事项（03_数据库完整设计 第 19 节 / 06_Cline开发规则 第 10 条）：
+- 迁移一旦上线禁止修改，只能新增 revision。
+- 必须提供可回滚的 downgrade 实现，或在本文件顶部写明不可回滚的原因。
+"""
+
+from __future__ import annotations
+
+from typing import Sequence, Union
+
+from alembic import op
+import sqlalchemy as sa
+${imports if imports else ""}
+
+# revision identifiers, used by Alembic.
+revision: str = ${repr(up_revision)}
+down_revision: Union[str, None] = ${repr(down_revision)}
+branch_labels: Union[str, Sequence[str], None] = ${repr(branch_labels)}
+depends_on: Union[str, Sequence[str], None] = ${repr(depends_on)}
+
+
+def upgrade() -> None:
+    ${upgrades if upgrades else "pass"}
+
+
+def downgrade() -> None:
+    ${downgrades if downgrades else "pass"}
