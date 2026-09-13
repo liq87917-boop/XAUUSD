@@ -557,7 +557,7 @@
 - Prompt 升 **`opinion-prompt-v6`**（`parser_version=llm-deepseek-v6`）：L3 改为"操作价位优先"、
   rule 8 增加"短线思路→15m"、few-shot 增至 13 条（含"价位 + 情绪背景 → TECHNICAL"对比样例）。
 
-**2) 全量 200 条实测（真实 DeepSeek API，30 条额度内**）
+**2) 全量 200 条实测（真实 DeepSeek API，`--llm-max-api-calls 250` 预算门禁内）**
 
 | 指标 | 正则（`mock-regex-v1`） | LLM（`llm-deepseek-v6`） | 提升 |
 |---|---|---|---|
