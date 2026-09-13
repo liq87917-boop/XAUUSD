@@ -64,9 +64,9 @@ from src.processors.prompt_opinion import (
 __all__ = ["DEFAULT_CACHE_DIR", "DEFAULT_PARSER_VERSION", "LLMOpinionExtractor"]
 
 #: 入库版本号（`author_opinions.parser_version`）；换模型 / 换 Prompt 必须换版本
-#: v6：配合 `opinion-prompt-v6`（few-shot 去污染 + 决策阶梯 L1~L6 + `no_opinion` 语义
-#: + 观望→FLAT / 情绪≠FLAT + **L3 操作价位优先于情绪** + 「短线思路→15m」周期补丁）
-DEFAULT_PARSER_VERSION: Final[str] = "llm-deepseek-v6"
+#: v13（**最终定版**）：v6 的 horizon 规则（实测最优）+ v11/v12 的信息类型阶梯
+#: （**L2.5 消息→NEWS** + "交易理由 vs 背景附注"判别线，只作用于情绪/消息，禁止尾句升格）
+DEFAULT_PARSER_VERSION: Final[str] = "llm-deepseek-v13"
 #: 默认缓存目录（仓库根 `logs/llm_cache`）
 DEFAULT_CACHE_DIR: Final[Path] = Path(__file__).resolve().parents[2] / "logs" / "llm_cache"
 #: 允许模型输出的键（其余一律剔除并记警告）

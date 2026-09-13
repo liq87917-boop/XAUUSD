@@ -45,9 +45,17 @@ DEFAULT_REGEX: Final[Path] = REPO_ROOT / "logs" / "extractor_eval.csv"
 DEFAULT_LLM: Final[Path] = REPO_ROOT / "logs" / "extractor_eval_llm.csv"
 DEFAULT_USAGE: Final[Path] = REPO_ROOT / "logs" / "extractor_eval_llm_usage.json"
 DEFAULT_GOLD: Final[Path] = REPO_ROOT / "logs" / "ground_truth_200.csv"
+#: 金标准的**改判前**版本（用于识别"模型纠正人工"的格子；不存在则本节跳过）
+DEFAULT_GOLD_BEFORE: Final[Path] = (
+    REPO_ROOT / "logs" / "archive" / "ground_truth_200_pre_20260913.csv"
+)
+#: 帖子正文（用于在案例里引用原文）
+DEFAULT_TEXTS: Final[Path] = REPO_ROOT / "logs" / "annotation_sample.csv"
 DEFAULT_REPORT: Final[Path] = (
     REPO_ROOT / "docs" / "experiments" / "Phase 2 基线对比报告.md"
 )
+#: 案例小节最多列多少格
+DEFAULT_CASE_LIMIT: Final[int] = 20
 #: 对比的字段顺序（核心四字段 + 侧字段）
 COMPARE_FIELDS: Final[tuple[str, ...]] = (*CORE_FIELDS, "information_type")
 OUTCOME_HIT: Final[str] = "correct_value"
@@ -205,6 +213,108 @@ def _usage_lines(usage: Mapping[str, Any] | None) -> list[str]:
     return [f"- `{key}`：`{value}`" for key, value in sorted(usage.items())]
 
 
+def read_gold_cells(path: Path) -> dict[tuple[str, str], dict[str, str]]:
+    """读金标准长表 → ``{(post_id, field): row}``（只用 value/source/reviewer/note）。"""
+    rows: dict[tuple[str, str], dict[str, str]] = {}
+    reader = csv.DictReader(path.read_text(encoding="utf-8-sig").splitlines())
+    for row in reader:
+        key = (row.get("post_id", ""), row.get("field", ""))
+        if key[0] and key[1]:
+            rows[key] = {(name or ""): (value or "") for name, value in row.items() if name}
+    return rows
+
+
+def read_texts(path: Path) -> dict[str, str]:
+    """读帖子正文（`post_id -> text_content`）。"""
+    rows: dict[str, str] = {}
+    reader = csv.DictReader(path.read_text(encoding="utf-8-sig").splitlines())
+    for row in reader:
+        post_id = (row.get("post_id") or "").strip()
+        if post_id:
+            rows[post_id] = (row.get("text_content") or "").strip()
+    return rows
+
+
+def _snippet(text: str, *, width: int = 60) -> str:
+    return text if len(text) <= width else f"{text[:width]}…"
+
+
+def _gold_adoption_lines(
+    comparison: Comparison,
+    gold_before: Mapping[tuple[str, str], Mapping[str, str]] | None,
+    gold_now: Mapping[tuple[str, str], Mapping[str, str]] | None,
+    texts: Mapping[str, str],
+    *,
+    limit: int = DEFAULT_CASE_LIMIT,
+) -> list[str]:
+    """**模型纠正人工**：金标准被改判的格子 + LLM 是否已对齐。"""
+    if not gold_before or not gold_now:
+        return ["- （未提供改判前金标准 `--gold-before`，本节跳过）"]
+    changed = sorted(
+        key
+        for key in set(gold_before) & set(gold_now)
+        if (gold_before[key].get("value") or "") != (gold_now[key].get("value") or "")
+    )
+    if not changed:
+        return ["- （未发现金标准改判记录）"]
+    lines: list[str] = []
+    for post_id, field_name in changed[:limit]:
+        before = gold_before[(post_id, field_name)].get("value", "")
+        after = gold_now[(post_id, field_name)]
+        reviewer = after.get("reviewer", "") or "（未记）"
+        note = _snippet(after.get("note", ""), width=120)
+        llm = comparison.pairs.get((post_id, field_name), ({}, {}))[1]
+        pred = llm.get("pred_value", "")
+        aligned = (
+            "✅ 已对齐（LLM 与改判后金标准一致）"
+            if pred == after.get("value", "")
+            else f"⚠️ 未对齐（LLM 现判 `{pred or '未给出'}`）"
+        )
+        label = FIELD_LABEL_CN.get(field_name, field_name)
+        lines.append(
+            f"- **`{post_id}` / {label}**：`{before}` → `{after.get('value', '')}`"
+            f"（裁决人 `{reviewer}`；改判理由：{note}）"
+        )
+        lines.append(f"  - {aligned}")
+        text = texts.get(post_id)
+        if text:
+            lines.append(f"  - 原文：{_snippet(text)}")
+    return lines
+
+
+def _model_error_lines(
+    comparison: Comparison,
+    texts: Mapping[str, str],
+    *,
+    source: str = SOURCE_HUMAN,
+    limit: int = DEFAULT_CASE_LIMIT,
+) -> list[str]:
+    """**人工纠正模型**：金标准维持、模型判错的格子（逐格给原文，便于人工解释或再裁决）。"""
+    lines: list[str] = []
+    for key in sorted(comparison.pairs):
+        regex_row, llm_row = comparison.pairs[key]
+        if llm_row.get("outcome") not in {OUTCOME_WRONG, OUTCOME_MISSED}:
+            continue
+        if llm_row.get("gold_source") != source:
+            continue
+        post_id, field_name = key
+        gold = llm_row.get("gold_value") or "未给出"
+        pred = llm_row.get("pred_value") or "未给出"
+        label = FIELD_LABEL_CN.get(field_name, field_name)
+        lines.append(
+            f"- **`{post_id}` / {label}**：金标准 `{gold}` ↔ 模型 `{pred}`"
+            f"（{llm_row.get('outcome')}）；正则侧 `{regex_row.get('pred_value') or '未给出'}`"
+        )
+        text = texts.get(post_id)
+        if text:
+            lines.append(f"  - 原文：{_snippet(text)}")
+        if len(lines) >= limit * 2:
+            lines.append(f"- …（仅列前 {limit} 格）")
+            break
+    return lines or ["- （人工子集内没有「金标准对、模型错」的格子）"]
+
+
+
 
 
 def render_report(
@@ -216,8 +326,13 @@ def render_report(
     gold_digest: str,
     generated_at: datetime,
     usage: Mapping[str, Any] | None = None,
+    gold_before: Mapping[tuple[str, str], Mapping[str, str]] | None = None,
+    gold_now: Mapping[tuple[str, str], Mapping[str, str]] | None = None,
+    texts: Mapping[str, str] | None = None,
+    case_limit: int = DEFAULT_CASE_LIMIT,
 ) -> str:
     """生成《Phase 2 基线对比报告.md》（纯函数，便于单测）。"""
+    texts = texts or {}
     regex_stats = field_stats(comparison, side="regex")
     llm_stats = field_stats(comparison, side="llm")
     regex_all = field_stats(comparison, side="regex", source=None)
@@ -289,7 +404,17 @@ def render_report(
     add("")
     lines.extend(_usage_lines(usage))
     add("")
-    add("## 5. 结论与下一步")
+    add("## 5. 人工 ↔ 模型 对齐案例")
+    add("")
+    add("### 5.1 模型纠正人工（金标准按模型的答案改判）")
+    add("")
+    lines.extend(_gold_adoption_lines(comparison, gold_before, gold_now, texts))
+    add("")
+    add("### 5.2 人工纠正模型（金标准维持、模型判错——需人工解释或再裁决）")
+    add("")
+    lines.extend(_model_error_lines(comparison, texts))
+    add("")
+    add("## 6. 结论与下一步")
     add("")
     passed = [
         n for n in COMPARE_FIELDS if n in THRESHOLDS and llm_stats[n].accuracy >= THRESHOLDS[n]
@@ -332,6 +457,17 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--llm", default=str(DEFAULT_LLM), help="LLM 抽取器逐格明细")
     parser.add_argument("--usage", default=str(DEFAULT_USAGE), help="LLM token/费用台账 JSON")
     parser.add_argument("--gold", default=str(DEFAULT_GOLD), help="金标准（仅用于记录摘要）")
+    parser.add_argument(
+        "--gold-before",
+        default=str(DEFAULT_GOLD_BEFORE),
+        help="改判前的金标准（用于 5.1「模型纠正人工」小节；不存在则跳过）",
+    )
+    parser.add_argument(
+        "--texts", default=str(DEFAULT_TEXTS), help="帖子正文（用于案例小节引用原文）"
+    )
+    parser.add_argument(
+        "--case-limit", type=int, default=DEFAULT_CASE_LIMIT, help="案例小节最多列多少格"
+    )
     parser.add_argument("--report", default=str(DEFAULT_REPORT), help="报告输出路径")
     parser.add_argument("--dry-run", action="store_true", help="只打印统计，不写报告")
     return parser.parse_args(argv)
@@ -392,6 +528,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             usage = raw if isinstance(raw, Mapping) else payload
     gold_path = Path(args.gold)
     report_path = Path(args.report)
+    gold_before_path = Path(args.gold_before)
+    texts_path = Path(args.texts)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         render_report(
@@ -402,6 +540,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             gold_digest=file_digest(gold_path) if gold_path.exists() else "（未知）",
             generated_at=datetime.now(UTC),
             usage=usage,
+            gold_before=read_gold_cells(gold_before_path) if gold_before_path.exists() else None,
+            gold_now=read_gold_cells(gold_path) if gold_path.exists() else None,
+            texts=read_texts(texts_path) if texts_path.exists() else {},
+            case_limit=args.case_limit,
         ),
         encoding="utf-8",
     )

@@ -19,13 +19,27 @@
     L3 情绪 → SENTIMENT、L4 引用/复盘 → OTHER、L5 无驱动时的操作或纯图表 → TECHNICAL。
   - TD-26（`no_opinion` 语义）：宏观数据播报 = `stance=UNKNOWN` + `information_type=MACRO` +
     `no_opinion=true`（"没有可交易的方向性观点" ≠ "没有信息"）。
-- **v3（20 条试点后收口，均为已冻结口径的忠实实现）**：
-  - 规则 12（来自 `§4.1`）：**"观望 / 不参与 / 等信号 / 已平仓离场" → `FLAT`**，
-    `UNKNOWN` 只留给"无法判定方向"（v2 缺这条，导致 `mock-post-0028` 的"观望"被判 `UNKNOWN`）；
-  - 阶梯 L3 收紧：情绪**必须被用来判定方向**才算 `SENTIMENT`；
-    若主旨是操作计划、情绪只是附带描述（"盘面情绪指标显示多空分歧仍在"）→ 落 L5 判 `TECHNICAL`
-    （v2 过宽，把 `mock-post-0020` 的正确 `TECHNICAL` 误判成 `SENTIMENT`）；
-  - 新增 2 条 few-shot（观望→FLAT、操作+附带情绪→TECHNICAL），共 11 条。
+- **v6（20 条试点后收口）**：L3 改为"操作价位优先于情绪"（`mock-post-0009` 裁决）；
+  规则 8 增加「**短线思路 → `15m`**」（`docs/10 §4.2` 补丁）。
+- **v7（全量 200 后按 TD-28 收口，走"路径 B"）**：
+  ①阶梯补 **`L2.5` 消息/事件驱动 → `NEWS`**（此前枚举里有 `NEWS` 但阶梯漏了这一级，
+  导致所有消息驱动帖都落到 `TECHNICAL`）；
+  ②L3 增加**两个例外** + 一条**判别线**——"**是交易理由，还是背景/附注**"：
+  情绪/消息句与方向有因果连接（"因此/导致/引发"）→ 按驱动分类（`SENTIMENT` / `NEWS`）；
+  仅"关注…""情绪指标显示分歧"这类补充说明 → 走 L3 判 `TECHNICAL`；
+  ③few-shot 增至 **15 条**（新增"情绪是交易理由 → SENTIMENT"与"消息是波动来源 → NEWS"两例）。
+- **v8（20 条回归验证后修正 v7 的两处措辞）**：
+  ①**判别线只管情绪/消息**——`L1` 持仓 与 `L2` 宏观**不受"背景附注"降级影响**；
+  ②**明确周期词优先于"短线思路"**。
+- **v9（v8 的再修正：两处"过宽"措辞，均有金标准反例）**：
+  ①`L2` 宏观驱动必须是**具体宏观变量/事件**；泛泛的"宏观环境/宏观面"与免责声明式提及
+  （"若宏观环境变化将及时更新"）**不算**驱动（v8 把 `mock-post-0019` 的正确 `OTHER`
+  误判成 `MACRO`）；
+  ②`horizon` 改为**按明确度排序取首个线索**（见规则 8）。
+- **v11（最终定版）**：在 v9 规则基础上**只保留**一条经验证的 few-shot
+  （第 16 条："操作价位 + 关注<具体宏观变量> → `MACRO`"，修 `mock-post-0027`），
+  **撤回** v10 试过的两处"宏观优先"措辞（它们让 `mock-post-0009/0019` 由对变错）。
+  实证：v9 → 20 条仅 1 格残余（0027）；v10 → 2 格（0009/0019）→ v11 取二者之长。
 """
 
 from __future__ import annotations
@@ -42,7 +56,7 @@ __all__ = [
     "prepare_text",
 ]
 
-PROMPT_VERSION: Final[str] = "opinion-prompt-v6"
+PROMPT_VERSION: Final[str] = "opinion-prompt-v13"
 MAX_TEXT_CHARS: Final[int] = 4000
 
 _RULES: Final[str] = """\
@@ -67,7 +81,7 @@ _RULES: Final[str] = """\
    stop_loss 只填**一个**值；文本没给就填 null（**禁止填 0、禁止猜测**）。
 8) horizon 只在文本有周期线索时填：超短/分钟级→15m；**"短线思路"/"短线观望"/"思路更新"
    （计划型表述）→15m**；半小时/30 分钟→30m；短线/日内（执行型表述）→1h；
-   半天/几小时/美盘→4h；中线/本周/趋势/日线→1d；否则 null（不要默认 1d）。
+   半天/几小时/美盘/4 小时级别→4h；中线/本周/趋势/日线→1d；否则 null（不要默认 1d）。
 9) instrument 只在文本**明确提到**标的时填（黄金/金价/XAUUSD/gold→XAUUSD；美元指数→DXY；
    白银→XAGUSD；原油→WTI…），**禁止默认 XAUUSD**；没提到就 null。
 10) rationale：≤120 字，摘录原文关键片段（点位与方向词），不要写你的推理过程。
@@ -80,19 +94,24 @@ _RULES: Final[str] = """\
 
 information_type 决策阶梯（人工裁决口径：**操作优先，驱动决定分类**）。按顺序判断，**命中即停**：
   L1 有持仓/资金流驱动（ETF 持仓、投机净多头/净空头、增减仓、持仓变化、资金流）→ POSITIONING
-  L2 有宏观驱动（CPI/PCE/非农/FOMC、利率、美债收益率、美元指数、通胀、就业）→ MACRO
-  L3 文本含**明确入场 / 止损 / 目标价**（操作）→ TECHNICAL
-     —— **即使同时提到情绪背景**（risk-on/risk-off、避险、恐慌、承压、多空分歧）也照样判 TECHNICAL
-     （即"操作优先于情绪"）
-  L4 情绪/风险偏好是文本**主旨**，且**没有明确操作价位** → SENTIMENT
+  L2 有宏观驱动（CPI/PCE/非农/FOMC、利率、美债收益率、美元指数、实际利率、通胀、就业）→ MACRO
+     —— 泛泛的"宏观环境 / 宏观面 / 宏观层面"或免责声明式提及（"若宏观环境变化将及时更新"）不算；
+  L2.5 有消息/事件驱动（突发消息、地缘或政策突发事件；**消息被指为波动来源**）→ NEWS
+  L3 操作价位优先：文本含**明确入场 / 止损 / 目标价** → TECHNICAL（**即使同时提到情绪背景**）。
+     但有**两个例外**，必须按驱动分类，不判 TECHNICAL：
+       (a) 情绪/风险偏好被明确写成**交易理由**（与方向有因果连接）→ SENTIMENT（走 L4）
+       (b) 消息/事件被明确写成**波动来源或交易理由** → NEWS（走 L2.5）
+  L4 情绪/风险偏好是文本**主旨**（且无明确操作价位），或是 L3 的例外 (a) → SENTIMENT
   L5 引用/转述他人观点（作者未表态）或事后复盘且无其它驱动 → OTHER
-  L6 纯粹是图表分析（"看图操作"）→ TECHNICAL；仍无法归类 → OTHER
-注意：优先级总链条 **L1 持仓 > L2 宏观 > L3 操作 > L4 情绪 > L5 引用/复盘 > L6 兜底**：
-  - 带 ETF 持仓数据的操作帖 → POSITIONING（L1 压过 L3）；
-  - 带美债收益率判断的操作帖 / 整篇纯宏观研报（即使带点位）→ MACRO（L2 压过 L3）；
-  - 有明确操作价位 + 情绪背景（即使情绪句给出方向）→ TECHNICAL（L3 压过 L4）；
-  - 纯情绪/态度表达且**无操作价位** → SENTIMENT（L4）；
-  - 只有点位、或只有图、或无任何驱动 → TECHNICAL（L3 / L6）。
+  L6 只有图表、无任何驱动 → TECHNICAL；仍无法归类 → OTHER
+**判别线："是交易理由，还是背景/附注"——只适用于 L4 情绪与 L2.5 消息**：
+  - 交易理由：情绪/消息句与方向之间有**因果连接**（"因此 / 所以 / 受此影响 / 导致 / 引发"），
+    或该句本身就在解释方向来源（如"风险偏好转弱，因此做多"、"消息引发波动率跳升"）；
+  - 背景附注：情绪/消息仅出现在补充说明里（"关注 risk-on 情绪"、"盘面情绪指标显示多空分歧"），
+    不解释方向来源 → 只算背景 → 走 L3 判 TECHNICAL。
+  - **判别线只作用于 L4 情绪 与 L2.5 消息**：`L1` 持仓/资金流 与 `L2` 宏观 照常按各自规则判断
+    （即：文本确实把持仓/宏观当作主要驱动时才走 L1/L2），**不要**因为判别线把宏观/持仓降级成
+    `TECHNICAL`，也**不要**把一笔带过的宏观/情绪尾句升格成 `MACRO`/`SENTIMENT`。
 """
 
 _SCHEMA: Final[str] = """\
@@ -178,7 +197,25 @@ _FEW_SHOT: Final[str] = """\
     输出：{"opinions":[{"stance":"SHORT","instrument":"XAUUSD","horizon":null,"confidence":0.7,
 "entry_low":2695,"entry_high":2703,"stop_loss":2728,"take_profit":2629,
 "information_type":"TECHNICAL",
-"rationale":"逢高沽空，进场 2695-2703，防守 2728，目标 2629（情绪句不改操作分类）"}],
+"rationale":"逢高沽空，进场 2695-2703，防守 2728，目标 2629（情绪句只是背景）"}],
+"no_opinion":false}
+[14] 输入：避险情绪明显升温，资金持续往金市挪，因此我选择逢低做多，进场 2712-2720，防守 2694，
+    目标 2770。
+    输出：{"opinions":[{"stance":"LONG","instrument":"XAUUSD","horizon":null,"confidence":0.7,
+"entry_low":2712,"entry_high":2720,"stop_loss":2694,"take_profit":2770,
+"information_type":"SENTIMENT",
+"rationale":"避险情绪升温、资金流入，因此做多（情绪是交易理由）"}],"no_opinion":false}
+[15] 输入：金管局意外上调黄金储备配置，消息一出金价跳空走高，我跟进做多，进场 2687 附近，
+    防守 2668，目标 2745。
+    输出：{"opinions":[{"stance":"LONG","instrument":"XAUUSD","horizon":null,"confidence":0.7,
+"entry_low":2687,"entry_high":2687,"stop_loss":2668,"take_profit":2745,
+"information_type":"NEWS",
+"rationale":"金管局上调黄金储备，消息引发跳空（消息是波动来源）"}],"no_opinion":false}
+[16] 输入：黄金逢高沽空，进场 2676 附近，防守 2702，目标 2618；同时关注美债收益率回落对估值的支撑。
+    输出：{"opinions":[{"stance":"SHORT","instrument":"XAUUSD","horizon":null,"confidence":0.7,
+"entry_low":2676,"entry_high":2676,"stop_loss":2702,"take_profit":2618,
+"information_type":"MACRO",
+"rationale":"逢高沽空，进场 2676，防守 2702；关注美债收益率回落（宏观驱动，非尾句升格）"}],
 "no_opinion":false}
 """
 

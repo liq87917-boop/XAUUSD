@@ -85,15 +85,43 @@ def _longest_common_substring(left: str, right: str) -> str:
     return best
 
 
-def test_prompt_version_is_v6() -> None:
-    assert PROMPT_VERSION == "opinion-prompt-v6"
+def test_prompt_version_is_v13() -> None:
+    assert PROMPT_VERSION == "opinion-prompt-v13"
 
 
-def test_rules_put_price_levels_ahead_of_sentiment() -> None:
-    """v6（人工二次裁决）：**操作优先于情绪**——有明确价位即判 TECHNICAL，情绪只是背景。"""
-    assert "操作优先于情绪" in SYSTEM_PROMPT
-    assert "L3 操作" in SYSTEM_PROMPT or "L3 文本含" in SYSTEM_PROMPT
-    assert "L1 持仓 > L2 宏观 > L3 操作 > L4 情绪" in SYSTEM_PROMPT
+def test_rules_require_specific_macro_variable() -> None:
+    """v9/v12：泛泛"宏观环境"或免责声明式提及**不算**宏观驱动（`mock-post-0019` 反例）。"""
+    assert "宏观环境" in SYSTEM_PROMPT and "不算" in SYSTEM_PROMPT
+
+
+def test_rules_scope_the_reason_vs_background_line_to_sentiment_and_news() -> None:
+    """v8/v12：判别线只管情绪/消息；既不许把宏观降级，也不许把尾句升格成 MACRO/SENTIMENT。"""
+    assert "只适用于 L4 情绪与 L2.5 消息" in SYSTEM_PROMPT
+    assert "判别线只作用于 L4 情绪 与 L2.5 消息" in SYSTEM_PROMPT
+    assert "升格" in SYSTEM_PROMPT
+
+
+def test_rules_order_horizon_cues_by_explicitness() -> None:
+    """v6/v13（实测最优的 horizon 规则）：分钟级/短线思路→15m、30 分钟→30m、
+    短线·日内→1h、美盘·几小时·4 小时级别→4h、中线·本周·日线→1d，无线索留空。"""
+    assert "超短/分钟级→15m" in SYSTEM_PROMPT
+    assert "短线思路" in SYSTEM_PROMPT and "短线/日内（执行型表述）→1h" in SYSTEM_PROMPT
+    assert "4 小时级别→4h" in SYSTEM_PROMPT and "日线→1d" in SYSTEM_PROMPT
+    assert "不要默认 1d" in SYSTEM_PROMPT
+
+
+def test_rules_add_news_level_and_reason_vs_background_line() -> None:
+    """v7（TD-28 路径 B）：补 L2.5 消息驱动，并写明"交易理由 vs 背景附注"判别线。"""
+    assert "L2.5" in SYSTEM_PROMPT
+    assert "NEWS" in SYSTEM_PROMPT
+    assert "交易理由" in SYSTEM_PROMPT and "背景附注" in SYSTEM_PROMPT
+    assert "因果连接" in SYSTEM_PROMPT
+
+
+def test_rules_keep_operation_first_with_two_exceptions() -> None:
+    """v7：L3 操作价位优先，但情绪/消息若为交易理由则按驱动分类。"""
+    assert "操作价位优先" in SYSTEM_PROMPT
+    assert "两个例外" in SYSTEM_PROMPT
 
 
 def test_rules_map_short_term_plan_to_15m() -> None:
@@ -101,9 +129,10 @@ def test_rules_map_short_term_plan_to_15m() -> None:
     assert "短线思路" in SYSTEM_PROMPT and "15m" in SYSTEM_PROMPT
 
 
-def test_l3_requires_direction_bearing_sentiment() -> None:
-    """v5/v6：情绪作为主旨（且**无操作价位**）才判 SENTIMENT。"""
-    assert "没有明确操作价位" in SYSTEM_PROMPT
+def test_l4_sentiment_requires_main_theme_or_reason() -> None:
+    """v7：`SENTIMENT` 只在"情绪是主旨"或"情绪是交易理由"时成立（背景附注不算）。"""
+    assert "情绪/风险偏好是文本**主旨**" in SYSTEM_PROMPT
+    assert "或是 L3 的例外" in SYSTEM_PROMPT
 
 
 def test_rules_define_flat_semantics() -> None:
@@ -131,7 +160,7 @@ def test_rules_document_no_opinion_semantics() -> None:
 def test_few_shot_outputs_are_valid_json_with_allowed_keys() -> None:
     outputs = _outputs()
 
-    assert len(outputs) == 13
+    assert len(outputs) == 16
     for payload in outputs:
         assert isinstance(payload["opinions"], list)
         assert isinstance(payload["no_opinion"], bool)
@@ -140,15 +169,38 @@ def test_few_shot_outputs_are_valid_json_with_allowed_keys() -> None:
 
 
 def test_few_shot_covers_all_adversarial_scenarios() -> None:
-    """13 条示例必须覆盖：条件/引用/复盘/弱化/多目标/宏观播报/持仓/情绪/纯图表/观望/情绪对比。"""
+    """15 条示例覆盖：条件/引用/复盘/弱化/多目标/宏观播报/持仓/情绪/图表/观望/消息。"""
     outputs = _outputs()
     info_types = [
         opinion.get("information_type") for out in outputs for opinion in out["opinions"]
     ]
     stances = [opinion.get("stance") for out in outputs for opinion in out["opinions"]]
 
-    assert {"OTHER", "POSITIONING", "MACRO", "SENTIMENT", "TECHNICAL"} <= set(info_types)
+    assert {"OTHER", "POSITIONING", "MACRO", "NEWS", "SENTIMENT", "TECHNICAL"} <= set(info_types)
     assert {"UNKNOWN", "LONG", "SHORT", "FLAT"} <= set(stances)
+
+
+def test_few_shot_sentiment_as_trade_reason_beats_price_levels() -> None:
+    """v7：情绪是**交易理由**（"因此…"）+ 有价位 → `SENTIMENT`（不走 TECHNICAL）。"""
+    prompts = [prompt for prompt, _ in _example_blocks()]
+    outputs = _outputs()
+    index = next(i for i, prompt in enumerate(prompts) if "因此我选择逢低做多" in prompt)
+    opinion = outputs[index]["opinions"][0]
+
+    assert opinion["information_type"] == "SENTIMENT"
+    assert opinion["take_profit"] == 2770 and opinion["stop_loss"] == 2694
+
+
+def test_few_shot_news_as_volatility_source_beats_price_levels() -> None:
+    """v7：消息是**波动来源/交易理由** + 有价位 → `NEWS`。"""
+    prompts = [prompt for prompt, _ in _example_blocks()]
+    outputs = _outputs()
+    index = next(i for i, prompt in enumerate(prompts) if "金管局" in prompt)
+    opinion = outputs[index]["opinions"][0]
+
+    assert opinion["information_type"] == "NEWS"
+    assert opinion["take_profit"] == 2745
+
 
 
 

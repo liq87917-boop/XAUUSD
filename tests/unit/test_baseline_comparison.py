@@ -24,6 +24,8 @@ from scripts.compare_extractor_baselines import (
     join_runs,
     main,
     read_eval_csv,
+    read_gold_cells,
+    read_texts,
     render_report,
 )
 
@@ -214,6 +216,90 @@ def test_main_dry_run_writes_nothing(tmp_path: Path, capsys) -> None:
     assert exit_code == 0
     assert not (tmp_path / "report.md").exists()
     assert "正则" in capsys.readouterr().out
+
+
+def test_gold_adoption_section_reports_model_correction(tmp_path: Path) -> None:
+    """5.1「模型纠正人工」：金标准被改判 + LLM 是否已对齐。"""
+    comparison, _, _ = _analysis(tmp_path)
+    gold_before = {
+        ("p1", "information_type"): {"value": "SENTIMENT", "source": SOURCE_HUMAN},
+    }
+    gold_now = {
+        ("p1", "information_type"): {
+            "value": "TECHNICAL",
+            "source": SOURCE_HUMAN,
+            "reviewer": "chenxiangxie",
+            "note": "二次裁决：操作优先 → TECHNICAL",
+        }
+    }
+
+    report = render_report(
+        comparison,
+        regex_path=tmp_path / "regex.csv",
+        llm_path=tmp_path / "llm.csv",
+        gold_path=tmp_path / "gold.csv",
+        gold_digest="x",
+        generated_at=datetime(2026, 9, 13, tzinfo=UTC),
+        gold_before=gold_before,
+        gold_now=gold_now,
+        texts={"p1": "黄金 2380 做多，止损 2365"},
+    )
+
+    assert "人工 ↔ 模型 对齐案例" in report
+    assert "模型纠正人工" in report
+    assert "`SENTIMENT` → `TECHNICAL`" in report
+    assert "chenxiangxie" in report
+    assert "原文：黄金 2380 做多" in report
+
+
+def test_gold_adoption_section_skipped_without_history(tmp_path: Path) -> None:
+    comparison, _, _ = _analysis(tmp_path)
+
+    report = render_report(
+        comparison,
+        regex_path=tmp_path / "regex.csv",
+        llm_path=tmp_path / "llm.csv",
+        gold_path=tmp_path / "gold.csv",
+        gold_digest="x",
+        generated_at=datetime(2026, 9, 13, tzinfo=UTC),
+    )
+
+    assert "未提供改判前金标准" in report
+
+
+def test_model_error_section_lists_human_corrected_cells(tmp_path: Path) -> None:
+    """5.2「人工纠正模型」：金标准维持、模型判错的格子（带原文）。"""
+    comparison, _, _ = _analysis(tmp_path)
+
+    report = render_report(
+        comparison,
+        regex_path=tmp_path / "regex.csv",
+        llm_path=tmp_path / "llm.csv",
+        gold_path=tmp_path / "gold.csv",
+        gold_digest="x",
+        generated_at=datetime(2026, 9, 13, tzinfo=UTC),
+        texts={"p1": "如果跌破 2380 则转空"},
+    )
+
+    assert "人工纠正模型" in report
+    assert "金标准 `TECHNICAL` ↔ 模型 `SENTIMENT`" in report
+    assert "原文：如果跌破 2380 则转空" in report
+
+
+def test_read_gold_cells_and_read_texts(tmp_path: Path) -> None:
+    gold = tmp_path / "gold.csv"
+    gold.write_text(
+        "post_id,field,value,source,reviewer,note\n"
+        "p1,stance,LONG,human-adjudicated,me,ok\n",
+        encoding="utf-8-sig",
+    )
+    texts_path = tmp_path / "texts.csv"
+    texts_path.write_text(
+        "post_id,text_content,has_media\np1,黄金做多,false\n", encoding="utf-8-sig"
+    )
+
+    assert read_gold_cells(gold)[("p1", "stance")]["value"] == "LONG"
+    assert read_texts(texts_path) == {"p1": "黄金做多"}
 
 
 def test_main_writes_report_and_reads_usage(tmp_path: Path) -> None:
