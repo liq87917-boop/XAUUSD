@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from database.models.enums import SourceType
+from src.collectors.macro import DEFAULT_W0_2_SERIES
 
 __all__ = ["SOURCE_SEEDS", "SourceSeed"]
 
@@ -65,6 +66,44 @@ SOURCE_SEEDS: Final[tuple[SourceSeed, ...]] = (
             # 因此不设阈值（0=不检查），避免把"正常安静"误报成告警；可用性由 health_check 兜底
             "min_records_per_run": 0,
             "note": "美联储官方新闻稿 RSS（公开、稳定）；宏观政策类新闻的权威来源",
+        },
+    ),
+    SourceSeed(
+        name="fred_blog",
+        source_type=SourceType.NEWS,
+        base_url="https://fredblog.stlouisfed.org",
+        timezone="UTC",
+        config_json={
+            "collector": "rss_collector",
+            "sources_path": "config/rss_sources.json",
+            "source_ids": ["fred_blog"],
+            "interval_minutes": 1440,
+            "min_records_per_run": 0,
+            "note": "FRED Blog 官方公开 RSS；W0-3 新闻回填与宏观背景源",
+        },
+    ),
+    SourceSeed(
+        name="manual-汇通网",
+        source_type=SourceType.NEWS,
+        base_url="https://gold.fx678.com",
+        timezone="Asia/Shanghai",
+        enabled=False,
+        config_json={
+            "collector": "manual_import",
+            "min_records_per_run": 0,
+            "note": "人工整理的历史中文黄金快讯；只允许本地显式导入，不自动抓取",
+        },
+    ),
+    SourceSeed(
+        name="manual-华尔街见闻",
+        source_type=SourceType.NEWS,
+        base_url="https://wallstreetcn.com",
+        timezone="Asia/Shanghai",
+        enabled=False,
+        config_json={
+            "collector": "manual_import",
+            "min_records_per_run": 0,
+            "note": "人工整理的历史中文黄金快讯；只允许本地显式导入，不自动抓取",
         },
     ),
     SourceSeed(
@@ -121,12 +160,7 @@ SOURCE_SEEDS: Final[tuple[SourceSeed, ...]] = (
             "provider": "fred",
             # 密钥只从环境变量读取：绝不写入源码、配置或数据库（团队批复）
             "api_key_env": "FRED_API_KEY",
-            "series": [
-                {"series_id": "CPIAUCSL", "country": "US", "unit": "index"},
-                {"series_id": "PCEPI", "country": "US", "unit": "index"},
-                {"series_id": "PAYEMS", "country": "US", "unit": "thousand_persons"},
-                {"series_id": "DFF", "country": "US", "unit": "percent"},
-            ],
+            "series": [dict(series) for series in DEFAULT_W0_2_SERIES],
             # 宏观观测按日/月/季发布，30 分钟窗口内通常没有新观测 → 用回看窗口复采（幂等）
             "lookback_days": 45,
             "min_records_per_run": 1,
@@ -158,6 +192,18 @@ SOURCE_SEEDS: Final[tuple[SourceSeed, ...]] = (
             "collector": "market_collector",
             "provider": "yahoo_chart",
             "symbols": ["XAUUSD", "DXY", "US10Y", "USDCNY"],
+            # 项目标的 → provider ticker（**实测校准，2026-09-15**）：
+            #   XAUUSD → GC=F（COMEX 黄金连续合约；Yahoo 无 XAUUSD）
+            #   DXY    → DX-Y.NYB（ICE 美元指数；DX=F 已失效，裸 DXY 返回 0 根 bar）
+            #   USDCNY → CNY=X
+            #   US10Y  → ^TNX（CBOE 10 年期收益率指数）
+            # 注意：`US10Y_REAL`（实际利率）Yahoo **没有**序列 → 由 FRED `DFII10` 提供（W0-2）。
+            "provider_symbols": {
+                "XAUUSD": "GC=F",
+                "DXY": "DX-Y.NYB",
+                "USDCNY": "CNY=X",
+                "US10Y": "^TNX",
+            },
             "timeframes": ["1m", "5m", "15m", "30m", "1h", "4h", "1d"],
             "interval_minutes": 30,
             # 行情条数由"窗口 ÷ 周期"自动推断（MarketCollector 覆盖 _expected_min_records），

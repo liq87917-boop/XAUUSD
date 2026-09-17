@@ -111,11 +111,14 @@ class ParsedChart:
     points: tuple[MarketBarPoint, ...] = ()
     skipped: int = 0
     skipped_examples: tuple[int, ...] = ()
+    #: **尚未收盘**被拒的 bar 数（时间戳落在抓取瞬间的"进行中"bar，见 `parse_yahoo_chart`）
+    unclosed: int = 0
+    unclosed_examples: tuple[int, ...] = ()
 
     @property
     def total(self) -> int:
-        """provider 返回的 bar 总数（含被跳过的空 bar）。"""
-        return len(self.points) + self.skipped
+        """provider 返回的 bar 总数（含被跳过的空 bar 与未收盘 bar）。"""
+        return len(self.points) + self.skipped + self.unclosed
 
 
 def to_decimal(value: object) -> Decimal | None:
@@ -139,8 +142,16 @@ def parse_yahoo_chart(
     *,
     symbol: str,
     timeframe: str,
+    not_after: datetime | None = None,
 ) -> ParsedChart:
     """把 Yahoo chart JSON 解析为 K 线（纯函数，便于单元测试）。
+
+    `not_after`：**抓取瞬间**。provider 会在最后一根返回一根"进行中"的 bar，其时间戳
+    = 抓取墙钟（实测 2026-09-15：`USDCNY 1d` 连续三轮分别是 `05:04:08`/`05:12:48`/`05:19:02`，
+    `XAUUSD 1h` 出现 `04:58:13`/`05:08:45`）——这类 bar **永远不会收盘**，且每次抓取都产生
+    新主键，会让库无界膨胀、并可能引入"用未收盘数据做特征"的泄漏。因此：
+    **`close_time > not_after` 的 bar 一律拒绝入库**（只入库已收盘 K 线，与 W0-1 的
+    "4h 只输出满桶"同一原则）。`not_after=None` 时不做该过滤（保持纯解析语义）。
 
     Raises:
         CollectorError: 响应结构异常、provider 报错、缺少 result 或周期非法。
@@ -194,6 +205,8 @@ def parse_yahoo_chart(
     points: list[MarketBarPoint] = []
     skipped = 0
     skipped_examples: list[int] = []
+    unclosed = 0
+    unclosed_examples: list[int] = []
 
     for index, raw_timestamp in enumerate(timestamps):
         try:
@@ -232,10 +245,17 @@ def parse_yahoo_chart(
         seen.add(epoch)
 
         open_time = datetime.fromtimestamp(epoch, tz=UTC).replace(microsecond=0)
+        close_time = open_time + timedelta(seconds=bar_seconds)
+        if not_after is not None and close_time > not_after:
+            # 尚未收盘（含时间戳=抓取瞬间的"进行中"bar）→ 拒绝入库，避免无界垃圾行与泄漏
+            unclosed += 1
+            if len(unclosed_examples) < MAX_GAP_EXAMPLES:
+                unclosed_examples.append(epoch)
+            continue
         points.append(
             MarketBarPoint(
                 open_time=open_time,
-                close_time=open_time + timedelta(seconds=bar_seconds),
+                close_time=close_time,
                 open=open_price,
                 high=high_price,
                 low=low_price,
@@ -246,13 +266,15 @@ def parse_yahoo_chart(
 
     points.sort(key=lambda point: point.open_time)
     return ParsedChart(
-        points=tuple(points), skipped=skipped, skipped_examples=tuple(skipped_examples)
+        points=tuple(points),
+        skipped=skipped,
+        skipped_examples=tuple(skipped_examples),
+        unclosed=unclosed,
+        unclosed_examples=tuple(unclosed_examples),
     )
 
 
-def detect_bar_gaps(
-    open_times: Sequence[datetime], *, timeframe: str
-) -> tuple[datetime, ...]:
+def detect_bar_gaps(open_times: Sequence[datetime], *, timeframe: str) -> tuple[datetime, ...]:
     """返回缺失的 K 线起始时间（相邻两根间隔 > 周期 → 中间缺失）。
 
     用途：满足"行情数据缺了 1 分钟必须告警"的数据质量要求（08 §13 Market Gap）。
@@ -340,6 +362,17 @@ class MarketCollector(BaseCollector):
             raise CollectorError(f"所有配置周期都不被 {self.provider} 支持：{list(requested)}")
 
         self.symbols: tuple[str, ...] = symbols
+        #: 项目标的 → provider ticker 映射（`config_json["provider_symbols"]`）。
+        #: 背景（实测 2026-09-15）：Yahoo 没有 `XAUUSD`/`DXY` 这些项目代码
+        #: （`XAUUSD` → 403/404、裸 `DXY` → HTTP 200 但 0 根 bar），必须映射到
+        #: `GC=F` / `DX-Y.NYB` / `CNY=X` / `^TNX` 才能取到数据；**映射只影响请求 URL**，
+        #: `instruments` 解析、`raw_items` 幂等键、去重仍使用项目标的。
+        configured_map = config.get("provider_symbols") or {}
+        self._provider_symbols: dict[str, str] = (
+            {str(key): str(value) for key, value in configured_map.items()}
+            if isinstance(configured_map, Mapping)
+            else {}
+        )
         self.timeframes: tuple[str, ...] = supported
         self._plan: tuple[tuple[str, str], ...] = tuple(
             (symbol, timeframe) for symbol in symbols for timeframe in supported
@@ -360,8 +393,10 @@ class MarketCollector(BaseCollector):
         base_url = (self.source.base_url or "").rstrip("/")
         if not base_url:
             raise CollectorError(f"数据源 {self.source.name!r} 未配置 base_url，无法构造行情请求")
+        # provider ticker 映射（缺省 = 用项目标的本身，向后兼容）
+        provider_symbol = self._provider_symbols.get(symbol, symbol)
         return HttpRequest(
-            url=f"{base_url}{YAHOO_CHART_PATH.format(symbol=symbol)}",
+            url=f"{base_url}{YAHOO_CHART_PATH.format(symbol=provider_symbol)}",
             params={
                 "interval": YAHOO_INTERVAL_BY_TIMEFRAME[timeframe],
                 "period1": int(window.start_utc.timestamp()),
@@ -371,13 +406,10 @@ class MarketCollector(BaseCollector):
             },
         )
 
-
     # ------------------------------------------------------------------
     # 站点相关：翻页与载荷构造
     # ------------------------------------------------------------------
-    async def _do_fetch(
-        self, cursor: dict[str, Any] | None, window: CollectWindow
-    ) -> FetchPage:
+    async def _do_fetch(self, cursor: dict[str, Any] | None, window: CollectWindow) -> FetchPage:
         plan_index = int((cursor or {}).get("plan_index", 0))
         if plan_index >= len(self._plan):
             return FetchPage(next_cursor=None)
@@ -399,11 +431,21 @@ class MarketCollector(BaseCollector):
                 details={"status": response.status, "symbol": symbol, "timeframe": timeframe},
             )
 
-        parsed = parse_yahoo_chart(response.json_body, symbol=symbol, timeframe=timeframe)
+        parsed = parse_yahoo_chart(
+            response.json_body,
+            symbol=symbol,
+            timeframe=timeframe,
+            not_after=self._clock(),
+        )
         if parsed.skipped:
             self._extra_warnings.append(
                 f"{symbol} {timeframe}：provider 返回 {parsed.total} 根，"
                 f"其中 {parsed.skipped} 根为空值/非法已被跳过"
+            )
+        if parsed.unclosed:
+            self._extra_warnings.append(
+                f"{symbol} {timeframe}：provider 返回 {parsed.unclosed} 根**尚未收盘**"
+                "（时间戳=抓取瞬间的进行中 bar）已被拒绝入库"
             )
 
         payloads = tuple(
@@ -453,7 +495,6 @@ class MarketCollector(BaseCollector):
             source_url=source_url,
             published_at=point.close_time,
         )
-
 
     # ------------------------------------------------------------------
     # 落库：market_bars（结构化）+ raw_items（原始切片）
@@ -561,7 +602,3 @@ def _required_decimal(value: object, *, field: str) -> Decimal:
             f"K 线字段 {field} 无法解析为数值：{value!r}", details={"field": field}
         )
     return parsed
-
-
-
-

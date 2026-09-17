@@ -681,3 +681,777 @@
 3. Phase 2 收尾清单（报告归档、`docs/05` 路线图勾选）待确认后再动。
 
 
+
+---
+
+## 第七轮（2026-09-14）：Phase 2 主数据源改为**自建 RSS 采集器**（路线 1 裁决落地）
+
+### 1. 用户裁决（2026-09-14）
+
+1. **compliant-scrapers 降级**：定位为 **Phase 3 可选新闻源**（标题级）、**未验证第三方服务**、**默认禁用**；
+   **不注册 Apify 账号、不用于 Phase 2 验收**（`docs/12` 已按此重写 §0 定位 / §7 决议 / §8 排期）。
+2. **Phase 2 语料主数据源改为自建 RSS 采集器**（`feedparser` 新增依赖）；
+3. **执行顺序**：先交付代码 + Mock 测试（**不发真实请求**）→ 单测通过 → 小流量真实验证 20 条
+   → 抓 100 条产出 `logs/real_posts_*.csv` → **暂停等人工标注** → 正则 vs LLM 最终对比。
+
+### 2. 交付物（本轮）
+
+| 文件 | 内容 |
+|---|---|
+| `config/rss_sources.json`（**新建**） | 源清单：金十数据快讯 / 汇通网黄金频道 / 华尔街见闻 / Investing.com Gold。**全部 `enabled=false` + `verified=false` + `robots_check=true`**（候选 URL 待冒烟验证，TD-30） |
+| `src/collectors/rss_cache.py`（**新建**） | 响应缓存（与 `llm_cache` 同语义）：`auto`/`readonly`/`refresh`/`off`、`sha256(url)` 键、原子写、**失败也缓存**、损坏→miss |
+| `src/collectors/rss_collector.py`（**新建**） | `RssSourceSpec` + `load_rss_sources`（缺字段/非法 URL/id 重复 → 记问题并跳过）；`robots_allows`（**fail-closed**，并区分"规则禁止→skipped"与"取不到→failed"）；`parse_feed_entries`（feedparser 解析，**时间仍走项目自有"不猜时区"逻辑**）；`fetch_spec_entries`（robots→缓存→条件请求 304→解析→窗口过滤，采集器与 CLI **共用同一实现**）；`RssCollector(BaseCollector)`（每源一页 + `feed_index` 游标 + 单源失败隔离 + **所有源失败 → CollectorError → 运行记 FAILED**） |
+| `scripts/collect_rss.py`（**新建**） | CLI：**默认 `--dry-run`**（零网络，`--fixture` 或 `readonly` 缓存）；`--no-dry-run` 才真实抓取；导出 CSV 列 = `docs/11 §1.1` 契约 + `title/category/notes_collect`；退出码 0/2/3 |
+| 测试（**新增 56 项**） | `tests/unit/test_rss_cache.py`（9）、`tests/unit/test_rss_collector.py`（34：源清单/解析/robots/缓存协商/304/只读拒绝联网/窗口/映射/健康检查/统计）、`tests/integration/test_rss_collector_persistence.py`（6：落库字段契约/幂等/单源失败隔离/全失败→FAILED/游标续采/只读零请求复放）、`tests/unit/test_collect_rss_cli.py`（6：dry-run 不写不请求/离线导出列契约/退出码） |
+
+### 3. 关键工程决策（与既有架构一致）
+
+- **时间不猜**：feedparser 会把无时区时间当 UTC，本项目**不采用**它的时间解析结果，只用它解析结构与正文；
+  无时区/无法解析 → `published_at` 留空 + `raw_json` 记录 `published_raw`/`reason`，`effective_at` 回落 `collected_at`。
+- **缓存语义分层**：`auto` = 协商缓存（有 `ETag`/`Last-Modified` 就发条件请求，**否则直接复用缓存**）；
+  `readonly` = 纯重放（未命中即**拒绝联网**）→ `--dry-run` 的零请求保证由此而来。
+- **robots 判定分类**：`by_rule=True`（规则明确禁止）→ `skipped`；`by_rule=False`（403/超时/解析失败）→ `failed`
+  → 避免"网络全挂"被记成 SUCCESS 的静默成功。
+- **`feedparser>=6.0.11` 已写入 `pyproject.toml`**（团队批准；已安装 6.0.14）；**未新增迁移、未改 schema**。
+
+### 4. 门禁结果
+
+- `pytest` **1891 → 1947 passed / 1 skipped**（新增 56 项，全部零网络：靠 `MockTransport` + autouse 网络守卫）；
+  分块复核（每块一次 `pytest` 调用，逐块确认）：`tests/unit` **1624 passed / 1 skipped**（=收集数 1625）、
+  `tests/data_quality` **25 passed**、`tests/leakage` **20 passed**、`tests/integration` **278 passed**
+  （消息采集/行情/宏观/新闻/作者库/CLI/迁移/Phase1+Phase2 schema/RSS 落库 等 18 个文件逐一确认）；
+  合计 **1947 passed / 1 skipped = 收集数 1948**，与全量 `pytest -q` 一致；
+- `ruff check .` **0 issue**；`mypy` **70 source files** 全绿；
+- ⚠️ **`ruff format --check .` 不再全绿**：venv 里的 ruff 已升到 **0.16.7**，对全仓 **76** 个文件报
+  "would be reformatted"（其中 71 个是本次未改动的历史文件，属 88 列 black 风格 vs 配置 `line-length = 100`
+  的**版本漂移**，非本次引入）→ 记 **TD-33**，建议单独一次纯格式提交或钉住 ruff 版本，不与功能改动混合；
+- **本轮未发起任何真实网络请求**（符合用户"先不要跑真实网络请求"的要求）。
+
+### 5. 下一步（等用户放行）
+
+1. **放行小流量真实验证**：逐个源跑 `--no-dry-run --per-feed-limit 5`，核对 HTTP 状态 / robots / 条数 / 字段质量，
+   通过的源在 `config/rss_sources.json` 置 `enabled=true`/`verified=true`（TD-30）；
+2. 抓 100~200 条 → `logs/real_posts_<date>.csv` → **暂停等人工标注**；
+3. 标注完成后：`sample_annotation_set.py --no-mock-fill --require-full` → `build_ground_truth.py`
+   → `evaluate_extractor.py`（regex / llm）→ `compare_extractor_baselines.py` → 真实语料验收报告；
+4. **报告前不得进入 Phase 3**。
+
+---
+
+## 第八轮（2026-09-14）：ruff 钉版本 + 冒烟硬性要求落地 + **阶段一逐源冒烟（4/4 未通过）**
+
+### 1. 用户裁决
+
+1. **TD-33 选 (b)**：在 `pyproject.toml` **钉死 ruff 版本**（`ruff==0.16.7`，注释写明"升级必须独立提交 + 同次跑
+   `ruff format .` 与全量门禁"）→ 已落地；`.github/workflows/ci.yml` 的实际门禁是 `ruff check .` + `mypy` + `pytest -q`
+   （**不含 format --check**），故 CI 稳定性恢复；
+2. **放行阶段一真实抓取**，并追加三条硬性要求：robots 前置、请求间隔 ≥1s、**每源单独原始 JSON**；
+3. **不许自动启用任何源**（`enabled=true` 必须等人工确认）。
+
+### 2. 为此新增的工程能力（全部有 Mock 单测，零真实网络）
+
+| 变更 | 内容 |
+|---|---|
+| `src/collectors/rss_collector.py` | `FeedFetchResult` 新增 **`robots`（robots 判定与原因）** 与 **`http_status`** 两个观测字段（默认空，向后兼容），供《源验证报告》与复盘使用 |
+| `scripts/collect_rss.py` | 新增 **`--min-interval`**（任意两次请求最小间隔，**硬下限 1.0s**，低于则抬升 + 告警）与 **`RateLimiter`**（可注入 clock/sleep，便于零等待单测）；新增 **`--raw-dir`**（每源单独原始 JSON：spec / robots / HTTP / 缓存 ETag / 解析条目 / **原始响应体**）；`--feed-limit` 作为 `--per-feed-limit` 等价别名；终端逐源打印 `status / 条目 / http / robots` |
+| 缺陷修复 | ①CLI 用完 `AiohttpTransport` **未关闭会话**（真实运行打印 `Unclosed client session`）→ 在 `finally` 中 `close()`，并加回归测试 + 真实复跑确认告警消失；②3 个 CLI 测试会用默认 `--raw-dir` 往仓库 `logs/rss_raw` 写文件（发现 `feed_a_*.json` 污染）→ 全部改为 `--raw-dir ""` |
+| 测试 | `tests/unit/test_collect_rss_cli.py` 6 → **11** 项；`tests/unit/test_rss_collector.py` 33 → **34** 项（净新增 6 项，全部零网络：假时钟限速 / Mock 传输下的 robots+HTTP+原始 JSON / robots 禁止时零抓取 / 别名 / 会话关闭 / 观测字段） |
+
+### 3. 阶段一真实冒烟结果（2026-09-13 11:02 UTC，逐源执行）
+
+| 源 | robots.txt | feed HTTP | 条目 | 判定 |
+|---|---|---|---|---|
+| `jin10_flash` | 允许（robots 404 → 无限制） | **404** | 0 | ❌ 不可用 |
+| `fx678_gold` | 允许 | **404** | 0 | ❌ 不可用 |
+| `wallstreetcn_feed` | 允许 | **404** | 0 | ❌ 不可用 |
+| `investing_gold` | **403 → 不可验证（合规拒绝）** | 未请求 | 0 | ❌ 不可用 |
+
+- **结论：0/4 通过**，`config/rss_sources.json` **未做任何改动**（仍全 `enabled=false`/`verified=false`），
+  **阶段三（抓 100~200 条）不启动**；
+- 硬性要求实测：`--min-interval 1.5` 下第 2 个请求实际等待 **1.369 / 1.398 / 1.453 s**；
+  `investing_gold` 因 robots 403 **只发了 1 次请求**（未抓 feed）；4 份原始 JSON 已落 `logs/rss_raw/`；
+- 报告：**`docs/experiments/rss_source_verification_20260913.md`**（含留痕文件清单与复现命令）；
+- `docs/11 §1.0` 的 ⓪-2 已改写为「临时探测配置 + 逐源冒烟」的标准流程并挂上本轮结论。
+
+### 4. 门禁
+
+- `ruff check .` **0 issue**（ruff 已钉 0.16.7）、`mypy` **70 files** 全绿；
+- `pytest`：`tests/unit` + `data_quality` + `leakage` **1676 passed / 1 skipped**（分块复核）、
+  `tests/integration` 采集器相关批次 **31 passed**（RSS 落库 6 + runner 25）；
+- 本轮真实请求仅限 4 个源的 robots/feed 探测（共 7 次请求，1.5s 间隔），**未抓任何 HTML 页面**。
+
+### 5. 下一步（等用户决策，三选一）
+
+- **A** 用户提供**已验证的 feed 地址** → 走同一套冒烟；
+- **B** 用户批准"入口探测"（只读首页解析 `<link rel="alternate" type="application/rss+xml">`）；
+- **C** 换数据源（机器人友好的公开 RSS）。
+通过 ≥1 个源并**经人工确认**后，才改 `config/rss_sources.json` 的 `enabled/verified`，再执行阶段三。
+
+---
+
+## 第九轮（2026-09-13）：用户选 A 提供 4 个新源 → **前 2 个冒烟通过**；治 3 个真实缺陷
+
+### 1. 用户决策与输入
+
+- 选 **A**：用户人工验证并提供 4 个源（`fred_blog` / `fed_press` / `ecb_press` / `yahoo_gold`）；
+- 指令：**只启用前 2 个**做冒烟、不许自动启用其它源、robots 结果要记日志、非 200 立刻失败且重试 ≤3、
+  **全量抓取必须另行批准**。
+
+### 2. 落地
+
+- `config/rss_sources.json` → **`rss-sources-v2`**：新增 4 源，`fred_blog`/`fed_press` `enabled=true`
+  （`verified=false`，等冒烟 + 人工确认）；`ecb_press`/`yahoo_gold` 保持禁用；
+  旧 4 个失败候选保留并写明失败原因（可追溯）。
+- `tests/unit/test_rss_collector.py`：把"默认全禁用"旧契约升级为 **"只有人工批准的源才允许启用"**
+  （`APPROVED_ENABLED_SOURCES = {fred_blog, fed_press}` + 全部 `robots_check=true` + 全 https）。
+- CLI 新增 **`--verify-log`**（默认 `logs/rss_verification.log`，JSONL 追加）：每源一行记录
+  `robots_allowed` / `robots_by_rule` / `robots_reason` / `http_status` / `status` / `entries`（满足"robots 结果记日志"）。
+- CLI 新增 **`off`/`none`/`-` 关闭哨兵**：PowerShell 5.1 会吞掉空字符串参数（实测 `--raw-dir ""` 报缺参），
+  故 `_optional_path()` 统一处理，并有单测锁定。
+
+### 3. 冒烟结果（逐源；robots 前置 + `--min-interval 1.5` + 每源原始 JSON）
+
+| 源 | robots.txt | HTTP | 条目 | 13 列非空 | content 长度（min/median/max） | 结论 |
+|---|---|---|---|---|---|---|
+| `fred_blog` | 允许 | 200 | 5 | 5/5 | 2120 / 2523 / 4562 | ✅ 技术通过（**长文，可作观点语料候选**） |
+| `fed_press` | 允许（robots 404→无限制） | 200 | 5 | 5/5 | 74 / 100 / 154 | ✅ 技术通过（**正文=标题 → 建议仅作事件源**） |
+
+- `published_at` 两源均 100% 有时区 → 正常转 UTC，**无一条猜测**；
+- 留痕：`logs/_smoke_<id>.json`（统计）、`logs/rss_raw/<id>_*.json`（原始 JSON，67 KB / 20 KB）、
+  `logs/rss_verification.log`（JSONL）、`logs/rss_cache/`（响应缓存，复跑零请求）。
+
+### 4. 本轮真实抓取暴露的第 3 个缺陷（已修 + 测试）—— **HTML 实体未解码**
+
+- 现象：`fred_blog` 的 `content` 残留 `&#8217;` 等（原始 feed 63 处）→ 会污染抽取与人工标注；
+- 定位：`src/collectors/news.py::strip_html` 只去标签、未解码实体；
+- 修复：去标签后 `html.unescape`；新增 `test_strip_html_decodes_entities_from_real_feeds`；
+- 验证（**零网络**）：`--cache-mode readonly` 只读重放两源 → 残留实体 **34 → 0**，
+  正文变为 `New York Fed’s`（对照 `logs/_smoke_*_fixed.csv`）。
+
+### 5. 门禁
+
+- `pytest`：unit + data_quality + leakage **1702 passed / 1 skipped**；
+- `ruff check .` **0 issue**（ruff==0.16.7 已钉）；`mypy` **70 files** 全绿；
+- 本轮真实请求：`fred_blog`/`fed_press` 各 1 次 robots + 1 次 feed（共 4 次），
+  `ecb_press`/`yahoo_gold` **零请求**；未抓任何 HTML 页面。
+
+### 6. 未做（等批准）
+
+① 未把任何 `verified` 置 true；② 未冒烟后 2 个源；③ **未做全量抓取**（阶段三需明确批准）。
+
+---
+
+## 第十轮（2026-09-13）：四源最终定态 + **首轮真实语料 25 条**（含 2 个新缺陷修复）
+
+### 1. 用户裁决（选项 3 + 逐源批准）
+
+- `fred_blog` → enabled/verified=true, `source_type=NEWS`；
+- `fed_press` → enabled/verified=true, **`source_type=EVENT`**（只作宏观事件，不进观点语料）；
+- `ecb_press` → enabled/verified=true, `source_type=NEWS`（用户确认其冒烟 http=200 / robots 允许 / 5 条）；
+- `yahoo_gold` → 保持 enabled=false / verified=false（robots 403，合规拒绝）；
+- 抓 100 条（fred_blog + ecb_press，各 ~50），输出 `logs/real_posts_2026_09_14.csv`，抓完暂停等人工标注。
+
+### 2. 新增能力：`source_type`（采集侧用途标记）
+
+- 背景：DB 枚举 `SourceType`（WEIBO/NEWS/MARKET/MACRO）与 `RawItemType`（POST/NEWS/MACRO/QUOTE）**都没有 EVENT**，
+  为不伪造 DB 值，`source_type` 实现为**采集侧标记**：`NEWS`（可进观点语料）/ `EVENT`（不进观点语料）；
+- 落地：写入 `raw_json["source_type"]` + CSV `notes_collect`（"采集用途=EVENT（仅事件源，不进入观点语料）"）
+  + CLI 终端逐源打印 `type=EVENT`，下游抽样可按此过滤；
+- 测试：`test_load_sources_normalises_source_type_and_rejects_unknown`（大小写归一 / 非法值回退+记问题）、
+  载荷断言、CLI 的 CSV+原始 JSON 标记断言；
+- 配置测试升级：`APPROVED_ENABLED_SOURCES = {fred_blog, fed_press, ecb_press}`（**新增启用必须人工确认 + 同步本常量**）。
+
+### 3. 首轮真实语料抓取（`--source fred_blog --source ecb_press --no-dry-run --limit 100 --min-interval 1.5`）
+
+| 源 | 请求结果 | 条目 |
+|---|---|---|
+| `fred_blog` | HTTP **304**（robots 允许） | **10**（缓存重放） |
+| `ecb_press` | HTTP **304**（robots 允许） | **15**（缓存重放） |
+| 合计 | 2 robots + 2 条件请求 | **25 行** → `logs/real_posts_2026_09_14.csv` |
+
+- **HTTP 异常 = 0**（无 4xx/5xx、无超时、无重试）；`fed_press` 与 `yahoo_gold` 本轮**零请求**；
+- 字段完整性：**列顺序与 §1.1 契约逐列一致；13/13 列全为 25/25 非空**；`published_at` 缺失 0/25；
+  `effective_at != published_at` 0/25；残留 HTML 实体/标签 0；
+- **为什么不是 100 条**：两源均 304（无更新）+ 这两个 feed 自身只有 10/15 条 → 25 条是当前上限（记 TD-30）。
+
+### 4. 第 4 个真实缺陷（本次抓取暴露）：**304 会导致语料导出 0 条**
+
+- 现象：首次导出 `fred_blog` 返回 304 → `可用条目=0`（缓存里明明有内容）；
+- 修复：**304 时用本地缓存体重放条目**（`status=not_modified`、`http_status=304`、`warnings` 留痕
+  "条目改由本地缓存重放（可复现）"；DB 路径由幂等去重兜底）；
+- 测试：改写 `test_conditional_request_handles_304` + 新增 `test_304_without_cached_body_yields_no_entries`；
+- 效果：重跑即得 10+15=25 条，**零新增网络请求**。
+
+### 5. 关键质量发现（影响"能否做观点语料"）
+
+- **`ecb_press` 实测也是标题级源**（15 行 `content == title`，25~90 字符）→ 与 `fed_press` 同类，
+  建议改 `source_type=EVENT`（等用户批准）；
+- 25 行里**只有 10 行（fred_blog）有真正文**（median 2.5k），且每篇带图 → **观点语料可用量≈10 条**；
+- `notes_collect` 混入了源配置 notes（"✅ 冒烟通过…"）→ 记 **TD-34**（待批准后精简）。
+
+### 6. 门禁
+
+- `pytest`：unit + data_quality + leakage + RSS 落库集成 + collector_runner **1751 passed / 1 skipped**（35.07s, 裸跑）；
+- `ruff check .` **0 issue**（ruff==0.16.7 已钉）、`mypy` **70 files** 全绿；
+- 上一轮用户自跑的全量：**1984 passed / 1 skipped**（121.79s）。
+
+### 7. 暂停点（等人工标注）
+
+- **不自动进入下一轮**；待用户决定：①语料量如何补足（补全文源 / 先按 25 条走）；②`ecb_press` 是否改 EVENT；
+  ③是否精简 `notes_collect`；④是否开始人工标注。
+
+---
+
+## 第十一轮（2026-09-13）：四项裁决落地 + **黄金垂类源探测 0/5**
+
+### 1. 用户四项裁决
+
+1. ①语料量 → 补黄金垂类 RSS 源（本轮探测 5 个）；
+2. ②`ecb_press` → `source_type=EVENT`（与 `fed_press` 同组，只做宏观事件对照）+ **`enabled=false`**；
+3. ③`notes_collect` → 精简，剔除所有配置类内容；
+4. ④标注流程 → **暂不启动**，等正文语料 ≥100 条。
+
+### 2. 落地内容
+
+| 项 | 变更 |
+|---|---|
+| ② 配置 | `ecb_press`：`enabled=false`、`source_type=EVENT`、notes 写明理由（实测 15 行 content==title）；`APPROVED_ENABLED_SOURCES` 同步为 `{fred_blog, fed_press}` |
+| ③ 代码 | `_to_row` **不再拼接 `spec.notes`**，本列只留采集侧质量标记；新增回归测试 `test_csv_notes_exclude_config_metadata`（断言配置说明不入 CSV、质量标记仍在）；TD-34 解除 |
+| ① 配置 | 新增 5 个黄金垂类候选源（`kitco_news` / `mining_com` / `bullionvault` / `goldseek`，并把 `investing_gold` 换为用户给的新路径 `news_301`），**全部 `enabled=false`** 待冒烟 |
+
+### 3. 黄金垂类探测结果（每源一条命令；临时探测配置 `logs/_probe_gold.json`，正式清单不动）
+
+| 源 | robots.txt | feed HTTP | 条目 | 正文中位数 | 判定 |
+|---|---|---|---|---|---|
+| `kitco_news` | 允许 | **404** | 0 | — | ❌ 不可用 |
+| `mining_com` | **403 → 立即跳过** | 未请求 | 0 | — | ❌ 不可用 |
+| `bullionvault` | 允许 | **404** | 0 | — | ❌ 不可用 |
+| `goldseek` | **请求失败 → fail-closed** | 未请求 | 0 | — | ❌ 不可用 |
+| `investing_gold`（news_301） | **403 → 立即跳过** | 未请求 | 0 | — | ❌ 不可用 |
+
+- **0/5 通过**，且无一走到"正文 ≥200 字符"判定（要么 robots 拒绝，要么 feed 404）；
+- 请求纪律：robots 403/失败 → **立即跳过不重试**；feed 非 200 → **立即失败不重试**（无一条触发 429/5xx 重试）；
+- 结论：**黄金垂类公开 RSS 普遍对非浏览器 UA 关闭**；唯一有正文的可用源仍是 `fred_blog`（10 条）。
+
+### 4. 门禁
+
+- RSS 测试组（collector + CLI + cache）**60 passed**；`ruff check .` 0 issue；`mypy` 70 files 全绿；
+- 本轮真实请求：5 个源各 1 次 robots（其中 3 个还在 robots 允许后各 1 次 feed），**共 8 次**，
+  全部 ≥1.5s 间隔、零重试；**未抓任何 HTML 页面**。
+
+### 5. 暂停点（等用户决定 A/B/C/D）
+
+- **(A)** 用户提供已验证的"全文 RSS"（我逐个冒烟）；**(B)** 授权"入口探测"（只读首页找官方 feed 链接）；
+  **(C)** 调低验收目标到现有量级；**(D)** 另行评审合规/成本的新闻 API。
+  在拿到足够正文语料前，**不启动标注流程**。
+
+---
+
+## 第十二轮（2026-09-13）：B 方案入口探测（0/3）+ NewsAPI 调研（不建议作主源）
+
+### 1. 用户裁决
+
+- 执行 **B**：只探测 3 站首页（kitco.com / gold.org / gold-eagle.com），每站 **1 次请求**、不重试、间隔 ≥1.5s、
+  robots 前置（403 立即跳过）；找到 feed 后再单独 1 次冒烟验证"正文 ≥200 字符"；
+- **同步执行 D 兜底**：调研 NewsAPI.org 免费额度（用户以为"每月 100 次"）、是否返回正文；
+  **只写调研报告，不注册账号、不写代码**；Key 只放 `.env` 的 `NEWSAPI_API_KEY`；
+- 现有 10 条语料：**保持不动**并备份到 `D:\backup\`；语料源解决后再统一标注。
+
+### 2. 交付
+
+| 项 | 内容 |
+|---|---|
+| 新工具 | `src/collectors/rss_discovery.py` + `scripts/discover_rss_feeds.py`（默认 dry-run；robots fail-closed；每站 1 次请求、**绝不重试**；≥1.5s 限速）；`tests/unit/test_rss_discovery.py` **9 项 Mock 测试** |
+| 探测结果 | 3 站 robots 均**允许**、首页均 **HTTP 200**、**均未声明任何 RSS/Atom feed（0/3）** → 按规则不再发正文冒烟请求（本轮共 6 次请求，全 ≥1.5s、零重试） |
+| 留痕 | `logs/rss_discovery_20260913.json` |
+| 备份 | `D:\backup\gold-ai-rss-20260913\`（10 行语料 CSV + 25 行旧版 CSV + collect JSON） |
+| NewsAPI 报告 | **`docs/13_NewsAPI接入调研方案.md`**（只读官方文档；未注册/未申请 Key/未写代码） |
+
+### 3. NewsAPI 调研关键结论（纠正用户前提）
+
+- 免费 Developer 计划是 **100 requests / day**（**不是** 100 次/月），且不可加购；
+- **仅限开发环境**，官方明确禁止用于 staging/production（含内部）→ 不能作正式语料源；
+- **任何套餐都不提供全文**（官方 FAQ 原文），`content` 字段**截断到 200 字符**，`description` 亦为 snippet；
+- ⇒ **无法支撑观点抽取**（方向/入场/止损/目标都在正文里）；只能作"事件/摘要层"或"URL 发现层"。
+
+### 4. 门禁
+
+- `pytest`：RSS 测试组（discovery + CLI + collector + cache）**69 passed**；`ruff check .` 0 issue；
+  `mypy` **72 source files** 全绿。
+
+### 5. 暂停点（等用户决定）
+
+① 是否批准"页脚 `<a href>` 扫描"扩展（再各 1 次首页请求）；② 是否加一次**对照测试**
+（对已知有 feed 的 `fredblog.stlouisfed.org` 跑探测，证明工具有效，2 次请求）；
+③ 是否改走"用户提供全文 RSS"或"下调验收目标"；④ 标注流程继续暂停。
+
+---
+
+## 第十三轮（2026-09-13）：语料源分流落地（观点 10 / 事件 19）+ 两个 Excel 数据事故修复
+
+### 1. 用户裁决
+
+- 采用推荐项：把修正后的**真 CSV** 重存为 `logs/real_posts_2026_09_14.csv`（UTF-8 BOM），
+  原始 **xlsx 保留在 `D:\backup\`**；工具链只读 CSV；
+- `logs/real_posts_annotation_10.csv`（10 条待标注表）**保留不动**；
+- 手动快讯 **单独落盘并标 `source_type=EVENT`**，只作事件层输入，**不进观点提取管道**；
+- **不改 `docs/11 §1.1` 列契约**；**不进 Phase 3**。
+
+### 2. 事故一：`real_posts_2026_09_14.csv` 实为 Excel 工作簿（xlsx）
+
+- 现象：读取报 `UnicodeDecodeError: byte 0x87`；文件头 `50 4b 03 04`（ZIP）→ 内含 `xl/workbook.xml`；
+  即"在 Excel 里另存但保留 `.csv` 文件名"。
+- 处置：`logs/_recovered/` 下复制成真 `.xlsx` → openpyxl **无损读出 29 行** → 重存为 UTF-8 BOM 的
+  `logs/real_posts_2026_09_14.csv`（**原件转存** `D:\backup\gold-ai-rss-20260913\real_posts_2026_09_14_original.xlsx`）；
+- 新脚本 `scripts/import_manual_posts.py` 增加 **ZIP 魔数嗅探 → 按 xlsx 解析**（且必须用 `io.BytesIO`：
+  openpyxl 会按**扩展名**拒绝 `looks_like.csv`），并有回归测试锁定。
+
+### 3. 事故二：Excel 往返把 `has_media` 变成 `True/False`（大小写）
+
+- 风险：`sample_annotation_set` 的真值判定只认小写（`_TRUTHY_VALUES`）→ `"True"` 会被静默判成 False；
+- 处置：`normalize_rows` 对 `BOOLEAN_COLUMNS`（`has_media`）做 **true/false 小写归一**（+ 单测）；
+  重跑后复核：观点语料 `has_media` 取值集合 = `{'true'}` ✔。
+
+### 4. 新增脚本：`scripts/import_manual_posts.py`（双输入分流，504 行）
+
+| 项 | 内容 |
+|---|---|
+| 分流优先级 | ① `source_type=EVENT` ② `source` 以 `manual-` 开头（手工录入=快讯）③ `content < 200` 字符 ④ 其余 → **观点语料** |
+| 输入 | `--corpus`（默认 `logs/real_posts_2026_09_14.csv`）+ `--flash`（默认 `logs/manual_flash_news.csv`，缺失只告警）；CSV(UTF-8/GBK) 与 xlsx 均可 |
+| 输出 | `--out-corpus`（`real_posts_opinion_2026_09_14.csv`，13 列 + `source_type`）、`--out-flash`（`event_flash_news.csv`，强制 `source_type=EVENT` + notes 标记）、`--meta-out`（体检元数据） |
+| 红线 | **默认 `--dry-run`**；输出==输入 → 硬失败（除非 `--allow-in-place`）；**输入永不被改写**（单测断言字节不变） |
+| 校验 | 硬失败（缺列/空正文/时间缺时区/`effective_at < published_at`/未来时间）→ 退出码 2；软告警写 meta |
+| 测试 | `tests/unit/test_import_manual_posts.py` **12 项**（分流优先级、布尔归一、别名与保留列、5 类硬失败、去重、GBK、xlsx 伪装、dry-run 不落盘、输入只读、同路径拒绝、退出码） |
+
+### 5. 执行结果（dry-run 与实际分流一致）
+
+```
+[import] 读入 29 行（去重 0 条）→ 观点语料 10 / 事件层 19
+[import][告警] 观点语料：10 条；来源分布={'fred_blog': 10}；长度 min=2120 median=2588 max=4562
+[import][告警] 观点语料：1 条正文 > 4000 字符（抽取器可能截断）
+[import][告警] 事件层：19 条；来源分布={'manual-汇通网': 9, 'manual-华尔街见闻': 10}；长度 min=91 median=218 max=459
+```
+
+- 复核：`logs/real_posts_opinion_2026_09_14.csv` 10 行（14 列含 `source_type`，`has_media` 全 `true`）；
+  `logs/event_flash_news.csv` 19 行（`source_type` 全 `EVENT`）；输入 SHA256 未变 ✔；
+- 软告警（留痕待用户处理）：①1 条正文 > 4000 字符（抽取器可能截断）；②事件层 19 行的 `id`/`collected_at`
+  为空（§1.1 要求 `id`，但事件层不进观点管道，影响有限）；③其中 1 条事件行 `url` 指向 DeepSeek 会话
+  （非来源文章页），可追溯性下降。
+
+### 6. 门禁
+
+`pytest` 新增 12 项全绿；`ruff check .` 0 issue；`mypy` **73 files** 全绿。
+
+### 7. 下一步（等用户确认后执行）
+
+- 正则 vs **LLM（当前定版 `opinion-prompt-v13`）** 各跑一遍 10 条真实语料（v7 的 prompt 源码已不存在，
+  仅历史缓存里有 v7 调用记录 → 待用户确认版本口径）；
+- 生成《Phase 2 真实语料验收报告》（Mock 200 vs 真实 10 分栏 + N=10 置信度边界）；**不进 Phase 3**。
+
+
+
+
+
+
+
+
+## 第十四轮（2026-09-14）：开源标注基准对照（regex vs LLM v13，150 条）
+
+### 1. 用户裁决（本轮 5 个确认点）
+
+1. 无方向标签行：**跳过**，不加 `--include-unlabeled`；
+2. `information_type`：加 `--information-type empty`，该字段**全量留空**；
+3. 中文股吧数据集：**仅作辅助参考**，报告单独分层，不进核心结论；
+4. 正则英文边界：接受为**已知工具边界**（不是能力缺陷）；
+5. LLM 费用 $0.038 批准，直接跑。
+
+### 2. 用户追加的关键要求（已落地）
+
+- **`information_type` 必须标记 `NOT_EVALUATED`**：金标准全空时，若模型给出 `MACRO` 等值，
+  原 `classify_outcome` 会误判 `spurious`（假阳性）→ 新增机制：**金标准为空 + `scoring=NOT_EVALUATED` 时，
+  模型给值只记「模型给出了额外信息」，绝不计假阳性、不进任何分母**；
+- 报告结构：核心结论**只基于 `stance`**、显式标注 N=100/50 的置信度边界、
+  正则 vs LLM 的准确率/召回率/混淆矩阵、典型错误案例（正则误报 / LLM 漏判 / 标注存疑）、
+  股吧单独一节且不进主结论。
+
+### 3. 交付
+
+| 文件 | 说明 |
+|---|---|
+| `scripts/evaluate_extractor.py`（改） | 新增 `NOT_EVALUATED_MARKER` / `OUTCOME_NOT_EVALUATED`；`classify_outcome(..., scoring=)` **最高优先级**；`FieldMetrics.not_evaluated[_with_value]` 与 `scored_cells`；报告新增 §2.1「未评估字段」 |
+| `scripts/load_hf_benchmark.py`（改） | `GoldCellRow.scoring` 列；`--information-type empty` 落盘「空值 + `NOT_EVALUATED`」；meta 增加 `not_evaluated_cells` |
+| `scripts/report_hf_benchmark.py`（新） | Wilson 95% CI 报告生成器：§0 摘要 → §8 局限 + 附录（复现命令 / 输入 sha256）；股吧单列 §7 |
+| `tests/unit/test_report_hf_benchmark.py`（新，23 项） | Wilson 已知值、坏行报错、层过滤、案例启发式、报告必备内容、CLI（dry-run 不写盘 / 缺输入退 2） |
+| `tests/unit/test_{extractor_evaluation,load_hf_benchmark}.py`（改，+6 项） | 未评估标记（含**跨脚本字符串契约**守护）+ `--information-type empty` 落盘契约 |
+| `docs/10_标注规范.md` | 新增 **§7.1 未评估字段（`scoring=NOT_EVALUATED`）** |
+| `docs/11_Phase2真实语料验收指南.md` | 新增 **§1.6 开源标注数据集基准**；§6.3 增补 CI 与比较纪律 |
+| `docs/experiments/Phase 2 真实语料验收报告.md` | 本轮交付报告（251 行） |
+| `TECH_DEBT.md` | 登记 **TD-35/36/37** + 变更日志一行 |
+
+### 4. 执行结果（严格按 5 步走）
+
+1. `--dry-run --information-type empty`：150 条文本（黄金 100 + 股吧 50）、金标准 750 格（150×5）、
+   扫描 200 行跳过 **21** 行无方向标签、**零写盘** ✔；
+2. `--no-dry-run`：落盘四件套，契约经 `load_gold` / `load_texts` 读回验证 ✔；
+3. `evaluate_extractor.py --extractor regex`：150 条 → **无观点 135（90.0%）**、`UNKNOWN` 率 11.8%、逐格 750；
+4. `evaluate_extractor.py --extractor llm`（真实 API）：**150 次调用、失败 0、解析失败 0**，
+   输入 593,875 tokens（缓存命中 557,184）+ 输出 8,896 → **$0.0250**（峰值价；低谷价 $0.0125）；
+5. `report_hf_benchmark.py` → 《Phase 2 真实语料验收报告.md》（251 行，含 Wilson 区间与逐例错误）。
+
+### 5. 关键发现（诚实结论）
+
+- 黄金层 `stance`：**正则 2/100（2.0%，95% CI 0.6%~7.0%）**、**LLM 0/100（0.0%，95% CI 0.0%~3.7%）**，
+  两者 CI 重叠 → **差异不显著**；≥90% 门槛仅作参考（任务不同）；
+- **LLM 的 90 格提取错误 100% 是 `UNKNOWN` 方向拒答，无一格判反方向** → 它把"金价下跌 0.9%"
+  视为**事实描述**而非**可交易观点**（符合 `docs/10 §4.9.0` 与"只降不猜"）→ 登记 **TD-37 待一句话裁决**；
+- 正则**无观点 90%**、零假阳性 → 「零假阳性」是"几乎不作为"的结果，**不是精确性证据**（报告已写明）；
+- 中文股吧层（N=50，非黄金、标签口径冲突）：正则 6/50、LLM 7/50 —— 仅辅助参考；
+- **已明确写入报告**：本报告是工程对照，**不是** `docs/08 §5` 验收达标结论（登记 **TD-35**）。
+
+### 6. 门禁
+
+`pytest` 全套 **2261 passed / 1 skipped**（本轮 +45 项）；`ruff check .` 0 issue；
+`ruff format --check` 通过；`mypy` 全绿；LLM 台账与缓存均落在 `logs/`（gitignored，**未入库**）。
+
+### 7. 暂停点（**等用户确认，绝不进入 Phase 3**）
+
+- 待用户裁决：**TD-37**（描述型新闻标题是否要给方向）；
+- 若要真实语料验收，仍需**人工裁决语料**（`docs/11 §3` 流程）；
+- 本轮结论只作工程对照，`docs/05` 的 Phase 2 验收结论保持未勾选。
+
+## 第十五轮（2026-09-14）：Phase 2 正式收官
+
+### 1. 用户裁决（本轮）
+
+1. **TD-37 结案：不改 Prompt** —— 维持 `opinion-prompt-v13` 冻结。
+   理由（用户原话）：不要为了让 LLM 在标题级数据集上得高分，去教它把"金价下跌 0.9%"这类
+   描述性陈述标成 `SHORT`，**那会污染模型定义**，让它未来在真实博主观点提取时把新闻当预测；
+2. **报告定位调整**：新增《免责声明与适用范围》节 —— ①标题级方向分类 ≠ 观点提取任务（本质差异）；
+   ②LLM 的 `UNKNOWN` 是**合规行为**（拒绝把描述当观点），不是错误；③本基准**能证明**「正则英文语料失效 +
+   LLM 能识别无观点」、**不能证明** LLM 的观点提取能力；④真正的观点提取验证放到 **Phase 3**；
+3. **真正的观点提取验证移交 Phase 3**：用 19 条中文快讯或抓取真实博主帖子；标题级情感分类留 Phase 3 的 News Alpha；
+4. **Phase 2 正式收官**：归档 + `PROGRESS_LOG` + `docs/05`；
+5. **TD-35/36/37 全部按「已知边界」归档、不做代码修补**（本质是任务定义差异，不是代码缺陷）。
+
+### 2. 交付
+
+| 项 | 内容 |
+|---|---|
+| 报告改造（生成器内） | `scripts/report_hf_benchmark.py` 新增 `## 免责声明与适用范围` 节（四条裁决）+ §8 下一步改写（TD-35/36/37 已归档不修补）；`no_opinion_posts(run, layer=)` 支持按层统计（免责声明用**黄金层**数字） |
+| 报告再生成 | `docs/experiments/Phase 2 真实语料验收报告.md`（**258 行**，可复现） |
+| 归档 | `logs/archive/phase2_hf_benchmark/`：`hf_benchmark_{texts,gold,meta,eval_regex,eval_llm,eval_llm_usage}` + 报告副本 + **`MANIFEST.md`**（语料 / 结果 / 四条裁决 / 复现命令 / sha256 前 16 位 / gitignore 提示），共 8 个文件 |
+| `TECH_DEBT.md` | TD-35/36/37 → **✅ 已结案（按已知边界归档）**，TD-37 处置改写为用户裁决原文；§6 变更日志新增「Phase 2 收官」行 |
+| `docs/05_分阶段开发路线图.md` | 新增 **`## Phase 2 收官（2026-09-14，已通过）`** 表；真实语料验收 4 行状态更新（收集 ✅ / 导入脚本 ✅ / 人工标注 ⚠️未执行 / 报告 ✅）；「进入 Phase 3 ⛔ 禁止」行改为 **Phase 2 状态 ✅ 已通过**；验收章节新增「执行情况」；版本表 `V0.4 ✅ 已完成` |
+| `PROGRESS_LOG.md` | 本第十五轮记录 |
+
+### 3. 门禁
+
+`pytest`（新增免责声明断言后）**24 项报告测试全绿**；`ruff check` / `ruff format --check` / `mypy` 全绿；
+报告已由生成器重新产出（非手工编辑），归档文件与 `docs/experiments` 正本一致。
+
+### 4. 暂停点
+
+**Phase 2 状态：✅ 已通过（2026-09-14）**；**Phase 3 等用户人工审核报告通过后启动**。
+本轮至此**暂停**，未写任何 Phase 3 代码（`.clinerules` 第 2 条）。
+
+## 第十六轮（2026-09-14）：Phase 3 执行规划草案（**未开工，零代码**）
+
+### 1. 用户指令
+
+先不写任何代码，输出《Phase 3 执行规划》：①依赖盘点（对照 `docs/01 §7–8`，标注已落地/需新增）②里程碑 3.1–3.4 与验收标准
+③关键技术选型（Regime 方法、Alpha 模型、独立验证）④风险与未决问题（红线、需用户提供的资源）⑤只输出规划。
+
+### 2. 交付
+
+| 项 | 内容 |
+|---|---|
+| `docs/14_Phase3_执行规划.md`（**新建**） | §1 依赖盘点（含 Phase 1–2 真实落地状态表：✅已落地 / 🟡表在无数据 / 📐仅设计 / ❌缺失；逐模块输入清单；**G1–G5 数据缺口**；迁移 0006–0009 规划）→ §2 里程碑（3.0 数据底座 + 3.1 Regime + 3.2 Technical/Macro + 3.3 Author/News + 3.4 Ensemble 基础层，**每阶段给可判定验收标准**）→ §3 技术选型（Regime 规则/统计/HMM 三方案对比、LR→GBDT、验证协议含切分/embargo/walk-forward/IC·ICIR/Wilson CI/Brier、**标签口径防泄漏**）→ §4 风险（R1–R9 红线逐条对策、C1–C5 文档口径冲突、A1–A7 需用户提供资源、工程风险）→ §5 交付与门禁 → §6 **待裁决 D1–D7** → 附录 A 不做清单 + 附录 B 依据文件 |
+| `docs/05_分阶段开发路线图.md` | Phase 3 章节顶部加一行指向 `docs/14`，并标记"**未开工**，需先裁决 D1–D7" |
+
+### 3. 规划中的关键发现（供用户决策）
+
+- **真正卡点是数据量而非模型**：`market_bars` **仅 10 行**、`news_events`/`macro_events` **各 2 行**、`author_opinions` **0 行**
+  → 任何 Alpha 都无法做 OOS；Phase 3 必须先做**数据底座**（G1–G4）；
+- **新发现的前视风险（R3）**：`macro_events` 当前只记录**观测期**日期，未记录**发布时刻** →
+  Macro Alpha 若不补 `released_at`（ALFRED vintage）会天然泄漏未来信息；
+- **口径冲突需裁决（C1）**：`docs/01 §10`/`docs/07`/`docs/08 §10` 把 Meta Ensemble + 动态权重放在 **Phase 6**，
+  而本轮里程碑列为 **3.4** → 建议 3.4 只做「基础接口 + 离线 Ablation」，动态权重留 Phase 6；
+- **依赖待批（A3）**：`lightgbm`/`xgboost`/`hmmlearn` 均未安装；不批则全部用 sklearn（LR + `HistGradientBoosting`）；
+- **Dashboard 能力缺口（C2）**：`docs/05` 要求 Regime 面板/Prediction Dashboard，但项目无 web 框架 →
+  建议用静态报告替代（零新依赖），或由用户批准 FastAPI/Streamlit。
+
+### 4. 门禁与暂停点
+
+**本轮未写任何代码、未新增依赖、未改数据库**；`pytest` 仍为 **2264 passed / 1 skipped**（未触碰代码）。
+**等用户审阅 `docs/14` 并裁决 D1–D7 后**，再决定开工子阶段；Phase 3 **尚未开始**。
+
+## 第十七轮（2026-09-15）：Phase 3.0 W0-1 代码交付（**未执行真实回填**）
+
+### 1. 用户裁决（本轮）
+
+1. **跳过 D2**（10 年日线复核）：日线 10 年也只有 ~2500 根、OOS 窗口仍不足，且已证明与简单基准重叠
+   → **不再在技术面 Alpha 上投入资源**；
+2. **进入 Phase 3.0 数据底座**，按 W0-1 → W0-5 执行（每个工作包单独验收、单独更新本文件）；
+3. **探针结果归档**到 `logs/archive/phase3_probe_technical_ic/`（含 `MANIFEST.md`：四条裁决 + sha256 + 复现命令）；
+4. **教训**：以后任何 Alpha 探针先做小样本验证，再决定是否全量投入 → 已写入 `docs/14 §7`。
+
+### 2. 交付（W0-1 代码，**未运行真实回填**）
+
+| 文件 | 说明 |
+|---|---|
+| `scripts/_market_data.py`（新） | W0-1 共享工具：**保留空槽**的 provider 取数（UA + 候选链）、**数据驱动会话日历**、缺口四分类、TD-03 4h 聚合 |
+| `scripts/audit_market_gaps.py`（新） | 缺口审计 CLI：把 3059 个空 bar 拆成「常规休市 / 疑似假期 / **数据缺失** / **时间戳缺失**」；默认 `--dry-run` |
+| `scripts/backfill_market_bars.py`（新） | 行情回填 CLI：**走既有 `MarketCollector` + `run_collector`**（幂等/raw 留档/防泄漏语义全复用）；`--with-4h` 走 TD-03 聚合；默认 `--dry-run` |
+| `tests/unit/test_market_data_shared.py`（新） | **25 项**：取数/候选链/会话标定/四分类/4h 聚合/CLI 零落盘 |
+| `tests/integration/test_market_w0_1_backfill.py`（新） | **4 项**：`preflight`、4h 幂等与半桶丢弃、回填 CLI dry-run/no-dry-run |
+| `scripts/_console.py`（改） | `safe_print` 上移共享（探针与 W0-1 两个脚本共用）；`probe_ic.py` 改为引用它 |
+
+**实测固化的 provider 映射**（写进代码注释，避免反复踩）：`XAUUSD → GC=F`、`DXY → DX-Y.NYB`、
+`USDCNY → CNY=X`、`US10Y → ^TNX`；**`US10Y_REAL` Yahoo 无序列**（`DFII10` → 404）→ 由 W0-2 的 FRED 提供。
+
+### 3. 本轮修掉的 3 个真实缺陷（均有测试守护）
+
+| # | 缺陷 | 现象 | 修复 |
+|---|---|---|---|
+| 1 | `ensure_utc_from_database` 缺失 | SQLite 读回 naive `open_time` 与 aware `now` 比较 → `TypeError` | 在 DB 读回边界统一归一（`hourly_bars`） |
+| 2 | 同上根因导致**幂等去重失效** | 4h 复跑时 naive vs aware 集合不匹配 → 重复插入 → **撞 UNIQUE 约束** | 已存在 `open_time` 集合同样归一 |
+| 3 | `safe_print` 未导入 | 审计脚本 `--dry-run` 打印报告会 `NameError` | 统一从 `scripts/_console` 导入（并上移共享） |
+
+### 4. 门禁与状态
+
+`pytest` 全套 **2337 passed / 1 skipped**（本轮 +30）；`ruff check .` 0 issue；`mypy` **79 files** 全绿。
+
+**当前阻塞（等你确认后再处理）**：`database/gold_ai.db` **尚未创建**（`db_exists=False`）→
+真实回填前需先执行 `alembic upgrade head` + `python -m database.seeds --scope instruments,sources`；
+脚本已做**预检硬失败**并直接打印该修复指引（不会静默建库或半边写入）。
+
+### 5. 暂停点
+
+W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）。下一步：确认代码后跑 W0-1 实跑
+（审计 + 回填 + 4h），再进 W0-2（宏观 + `released_at`，R3，P0）。
+
+## 第十八轮（2026-09-15）：W0-1 真实回填落地（审计 → 回填 → 幂等；**修复 4 处生产缺陷**）
+
+### 1. 执行顺序（用户批准的 4 步，全部完成）
+
+| 步骤 | 命令 | 结果 |
+|---|---|---|
+| ① 建库 + 种子 | `alembic upgrade head` → `python -m database.seeds --scope instruments` → `--scope sources` | 迁移 0001→0005；标的 **11**、源 **9**（含 `market_yahoo`）|
+| ② 缺口审计（dry-run） | `python scripts/audit_market_gaps.py --symbols XAUUSD --timeframes 1h,1d --dry-run` | 零落盘；结论见 §3 |
+| ③ 真实回填 | `python scripts/backfill_market_bars.py --symbols XAUUSD,DXY,USDCNY --timeframes 1d,1h --no-dry-run --with-4h --report docs/experiments/Phase3_W0_1_行情回填报告.md` | 6/6 SUCCESS |
+| ④ 幂等复跑（×3） | 同上命令 | **6/6 `inserted=0`；4h 3/3 `新插入=0`** |
+
+⚠️ `--scope` **不接受逗号列表**（实测报错）→ 脚本预检提示已改为两条可直接执行的命令。
+
+### 2. 落库结果（canonical，清理后）
+
+| 标的 | 1d | 1h | 4h（派生，TD-03） |
+|---|---|---|---|
+| `XAUUSD` | 2509 | 11317 | 2445 |
+| `DXY` | 2510 | 11744 | 2831 |
+| `USDCNY` | 2543 | 9575 | 1545 |
+| **合计** | **7562** | **32636** | **6821**（≈ **47019** 根 bar）|
+
+`raw_items` 留档 **40174** 条（provider 原始 JSON，可追溯）。4h 半桶丢弃 620/239/1444。
+
+### 3. 缺口审计（**DST 修正后**；XAUUSD 为②的交付结论）
+
+| 标的 | 周期 | 槽数 | 有效 | 空槽 | 常规休市 | 疑似假期 | **数据缺失** | **时间戳缺失** |
+|---|---|---|---|---|---|---|---|---|
+| `XAUUSD` | 1h | 14506 | 11446 | 3060 | **2955** | 0 | **105** | **136** |
+| `XAUUSD` | 1d | 2516 | 2512 | 4 | 0 | **4** | **0** | **0** |
+| `DXY` | 1h | 14506 | 11953 | 2553 | 2454 | 0 | **99** | **136** |
+| `DXY` | 1d | 3038 | 2513 | 525 | 522 | **3** | **0** | **0** |
+| `USDCNY` | 1h | 12510 | 9664 | 2846 | 0 | 0 | **2846**（⚠方法退化）| **31** |
+| `USDCNY` | 1d | 2610 | 2601 | 9 | 0 | **8** | **1** | **0** |
+
+**关键修正**：初版按 `(UTC 星期, UTC 小时)` 分桶 → DST 造成 1d **954 条假阳性**、1h 602 条虚高。
+改为**按交易所本地时区分桶 + 本地日期核算**（CME = 美东）后：XAUUSD 空槽 **96.6% 是常规休市**，
+真正的异常只剩 **242 槽（1.67%）**。FX（`CNY=X`）会话不规则 → 其空槽无法按本地时段桶归因（已写入报告 §6.1）。
+
+### 4. 本轮修复的生产缺陷（全部带回归测试）
+
+1. **DB 读回时间戳无时区**（SQLite 不回 tz）→ 比较抛 `TypeError` + 4h 幂等失效（UNIQUE 冲突）→ `ensure_utc_from_database`；
+2. **采集器不认识 provider ticker**：项目标的直接进 URL → **全量 HTTP 403**（Phase 1 走 MockTransport，真实链路从未验证）→ 新增 `sources.config_json['provider_symbols']`（`XAUUSD→GC=F` 等）；
+3. **Yahoo 拒绝 aiohttp**（同参 httpx 200）→ 新增协议兼容 `HttpxTransport`（`scripts/_market_data.py`，`--transport httpx` 默认）；
+4. **provider “进行中”bar 污染库**（时间戳=抓取墙钟，每轮新增 1 根/标的，无界增长）→ `parse_yahoo_chart(not_after=…)` **拒收未收盘 bar**；
+   + 另修 2 处：`safe_print` 未导入（`NameError`）、种子命令提示有误。
+
+**清理留痕**：删除 9 根墙钟垃圾行（判据 `秒≠0`）+ 8 根未收盘 bar（判据 `close_time > collected_at`），
+证据 CSV 归档于 `logs/archive/phase3_w0_1_backfill/`；**提前收盘的 30 分钟 bar（如 2025-12-24 `17:30`）判为合法，未误删**。
+
+### 5. 归档与文档
+
+- `logs/archive/phase3_w0_1_backfill/`：审计日志、A/B/C/D/E/F 各轮日志、outcomes CSV、meta JSON、2 份删除证据 CSV + MANIFEST（sha256 + 复现命令）；
+- `docs/experiments/Phase3_W0_1_行情回填报告.md`（§6 实测约束与已修缺陷**随脚本固化**，不会因再生成而丢失）。
+
+### 6. 门禁与状态
+
+`ruff check .` 0 issue；`mypy` 79 files 全绿；`pytest` **2345 passed / 1 skipped**（本轮 +8；新增用例：`not_after` 未收盘拒收 ×3、`HttpxTransport` ×2、`provider_symbols` 映射 ×1、其余为断言强化）。
+**US10Y_REAL 保持标记为“交 W0-2 的 FRED”**（未静默跳过）。
+
+### 7. 暂停点
+
+**不进入 W0-2**，等用户审阅 W0-1 回填结果后再决定。
+
+## 第十九轮（2026-09-17）：W0-1 验收固化与 Phase 3 启动门禁
+
+### 1. 用户授权与范围
+
+- 用户批准按既定建议推进 Phase 3，并授权将已有未提交的 W0-1 回填、缺口审计与 IC 探针作为可维护基线；
+- 本轮只复核并固化 **W0-1**，不实现 Regime、特征、Alpha、Prediction、Strategy、Risk 或订单功能；
+- 不执行外部网络请求、不执行真实回填写库；`LIVE_TRADING=false` 与
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 经配置对象复核均保持 false。
+
+### 2. W0-1 验收结论：PARTIAL（受限数据底座）
+
+1. 质量门禁：W0-1 相关测试 **119 passed**；历史全量门禁 **2345 passed / 1 skipped**；
+   `pytest -m leakage` **20 passed**；`ruff` / `mypy` 通过；迁移 head 仍为 Phase 2 的 `0005`，
+   未错误提前创建 Alpha schema。
+2. 时间与数据完整性：未收盘 K 线拒收、4h 只聚合完整桶、半桶丢弃、回填 append-only 且连续复跑
+   `inserted=0`。这些结论仅覆盖 W0-1 数据管道，不等于 Alpha 有效。
+3. 强制限制：项目 `XAUUSD` 当前请求的是 `GC=F`（COMEX 连续期货），所以任何研究输出必须标注
+   期货代理，不能称为现货 XAUUSD 结论；XAUUSD/DXY 1h 存在异常缺口，USDCNY 1h 会话审计退化，
+   后续标签/特征必须丢弃含缺口 horizon，不插值或缩短窗口。
+4. TD-03：4h 功能已交付，但未写 `processed_items` / `data_versions` 的 Processor 血缘，保持部分解除。
+
+### 3. 下一工作包（唯一允许）
+
+进入 **W0-2：宏观回填 + `released_at` / vintage**。每条宏观数据必须能证明在 `released_at` 后才可用；
+缺真实发布时间的记录必须拒绝进入 Macro Alpha，并须配套“发布前不可取到”的 leakage 注入测试。
+
+## 第二十轮（2026-09-17）：W0-2 宏观 vintage 时间语义（工程契约完成，真实回填阻塞）
+
+### 1. 官方语义核对与设计
+
+- FRED `date` 是观测期，不是发布时间；ALFRED `realtime_start/realtime_end` 表示值在历史上的已知区间；
+- `series/vintagedates` 是整个序列发生新增或修订的日期集合，不能脱离 observation 冒充单条发布时间；
+- 因 API 只有日期精度，本项目保守使用 `realtime_start 次日 00:00 UTC` 作为 `released_at`，
+  `realtime_end 次日 00:00 UTC` 作为排他结束边界；`9999-12-31` 映射为 NULL；
+- `event_at` 重新明确为 observation period，严禁用于代表发布时间。
+
+### 2. 交付
+
+- migration `0006_macro_event_vintages`：增加 `released_at` / `vintage_end_at`、release 时间 CHECK、
+  vintage 唯一键和查询索引；旧行用既有 `effective_at` 作保守 release，不提前可见；
+- `MacroCollector` 改为请求完整 realtime period，raw 幂等键包含 release，CSV 缺 release 硬失败；
+- `src/processors/macro_vintages.py`：as-of 查询只返回当时真实可见的最新 vintage；
+- `macro_events` 加入 append-only ORM 保护；FRED 序列增加 DFII10/DGS10/DTWEXBGS/FEDFUNDS；
+- 新增 leakage 测试：发布前不可见、修订边界切换、非法时间窗拒绝、effective 早于 release 拒绝、
+  历史 vintage 不可覆盖。
+
+### 3. 数据库与阻塞
+
+- 正式本地 SQLite 库升级前备份：`logs/archive/phase3_w0_2/gold_ai_pre_0006.db`，
+  sha256=`75c95c6e256ca1807fd9e26f05413656d2fc7eddc64532674f6f9c516d12d6b5`；
+- 备份大小 69,611,520 bytes；升级前 `macro_events=0`；0005 → 0006 成功；
+- 当前环境 `FRED_API_KEY_CONFIGURED=False`，故未执行真实 API 冒烟与回填，W0-2 状态为 **PARTIAL**；
+  不进入 W0-3，不开发 Macro Alpha。
+
+### 4. 恢复后真实联调与 W0-2 收官（2026-09-17）
+
+- 修复 `.env` 接线：FRED Key 纳入 `Settings.fred_api_key: SecretStr`，MacroCollector 不再散读
+  `os.environ`；实测配置成功、repr 不含明文、Git 跟踪文件无 Key；
+- 真实探针发现两项 provider 约束：完整 realtime 区间有 5,125 vintage dates，超过 JSON 上限 2,000；
+  `output_type=1` 的 realtime 边界会被查询窗口裁剪。最终改用官方 `output_type=4`
+  （Initial Release Only），按 ≤365 天分块；
+- DFF 低量冒烟：SUCCESS、6 条、0 重试、时间约束通过、Key 泄漏 0；
+- 新增 `scripts/backfill_macro_vintages.py`：默认 dry-run、8 序列白名单、年度分块、显式
+  `--no-dry-run` 才联网写库；首轮 88 请求插入 11,674 条（加冒烟共 11,680）；
+- DTWEXBGS 的 2016–2018 三窗口由官方返回“does not exist in ALFRED”，系统保持为空并留告警，
+  禁止退回今天的修订终值；修复后第二轮 **inserted=0 / duplicate=11,680 / failed_chunks=0**；
+- 最终分布：CPIAUCSL 128、PCEPI 128、PAYEMS 129、DFF 3,912、DFII10 2,676、
+  DGS10 2,676、DTWEXBGS 1,902、FEDFUNDS 129；时间违规 0、重复键 0、Key 泄漏 0；
+- **W0-2 PASS（Initial Release Only）**。完整修订链未交付，后续 Macro Alpha 只允许使用初值口径。
+- 自动启动 W0-3：RSS 目标测试 56 passed；本地 fixture dry-run 因缺
+  `logs/rss_fixtures/{fred_blog,fed_press}.xml` 返回 0 条，进入缓存/fixture 补全审计，未伪装通过。
+
+## 第二十一轮（2026-09-17）：W0-3 RSS 新闻回填落库与幂等验收
+
+### 1. 续点与缺口修复
+
+- 复核确认 RSS 解析、缓存、robots fail-closed 已具备，但 `scripts/collect_rss.py --to-db` 仍是明确占位；
+- 接通正式落库路径：逐源执行 `run_collector`，写 `raw_items + news_events + collector_runs`；
+- `RssCollector` 与既有 `NewsCollector` 对齐：跨来源正文哈希去重；只有发布时间明确的条目才生成 `news_events`，时间不明只保留原始层；
+- 新增 `fred_blog` 来源种子及 `source_ids` 调度过滤，避免一个数据库来源错误承载整份 RSS 清单；
+- 新增默认 90 天窗口、来源分布统计和单源占比 >40% 自动告警。
+
+### 2. 零网络演练与正式落库
+
+- 复用 2026-09-13 已完成 robots/HTTP 验证的缓存，`--dry-run --cache-mode readonly` 解析 **30 条**：`fred_blog=10`、`fed_press=20`；
+- 首轮正式落库：两个源均 `SUCCESS`，**inserted=30 / failed=0**；
+- 幂等复跑：**inserted=0 / duplicate=30**；
+- 数据库核验：RSS `raw_items(NEWS)=30`、`news_events(parser_version=rss-feedparser-v1)=30`、时间违规 0；
+- 来源分布 33.3% / 66.7%，`fed_press` 的 **66.7% >40%** 告警按验收要求触发。
+
+### 3. 测试与状态
+
+- RSS/种子目标集：**118 passed**；新增 CLI 真实驱动集成用例覆盖 `raw_items + news_events + collector_runs` 三层落库；
+- W0-3 状态：**PASS（受限）**。限制是 RSS 当前快照只有 30 条且来源偏斜，不得描述为完整 90 天历史或可直接训练的 News Alpha 数据集；
+- 详细报告：`docs/experiments/Phase3_W0_3_新闻回填报告.md`；
+- 下一唯一工作包：**W0-4 作者观点链**，不提前进入 Regime / Alpha / Prediction / Strategy / Risk。
+
+## 第二十二轮（2026-09-17）：W0-4 真实作者观点链与前瞻收益标签
+
+### 1. 正式入库（方案 B）
+
+- 新增 `manual-汇通网` / `manual-华尔街见闻` 两个本地导入来源，默认禁用自动采集；
+- `scripts/import_real_posts.py` 将已验收 19 条真实中文快讯写入 `raw_items(POST) → author_posts`，同时幂等建立 2 位作者与 2 个账号；
+- 首轮 inserted=19，复跑 inserted=0 / duplicate=19；Mock 200 条未进入真实研究库；
+- 输入缺 `collected_at` 时沿用已审计 `effective_at`，逐条写 `collected_at_provenance=input_effective_at_fallback`，不隐藏时间来源限制。
+
+### 2. 观点管道
+
+- 新增 `scripts/run_opinion_pipeline.py`（默认 dry-run）；
+- `mock-regex-v1` 首轮处理 19 帖：无观点 14、观点 11、失败 0；帖子分布为 14×0、3×1、2×4；
+- 二轮扫描 0，`processed_items` 与 `author_opinions` 幂等生效。
+
+### 3. 前瞻收益标签
+
+- 新增 `src/processors/opinion_labels.py` 与 `scripts/build_opinion_labels.py`；
+- entry 严格取 `open_time > effective_at` 的下一根同 horizon bar；等时 bar 注入测试必须被排除；
+- 缺 horizon 不猜作者意图，按 1h/4h/1d 评价网格展开并写 `horizon_source=evaluation_grid`；
+- 31 个评价行：`LABELED=12`、`UNKNOWN_STANCE=16`、`MISSING_INSTRUMENT=3`；
+- 产物固定写明 `GC=F` / `COMEX_CONTINUOUS_FUTURES`，缺口不插值、不缩窗。
+
+### 4. 状态
+
+- W0-4 **PASS（受限工程链）**；由于每位作者有效样本远低于 30 条，禁止生成权重或宣称 Alpha；
+- 报告：`docs/experiments/Phase3_W0_4_作者观点链报告.md`；
+- 下一唯一工作包：**W0-5 特征底座**。
+
+## 第二十三轮（2026-09-17）：W0-5 前置冻结、可信度门禁与规划收口
+
+### 1. 现场冻结与恢复点
+
+- 暂停 W0-5 开发，先对 W0-1～W0-4 做只读盘点；
+- 本地研究库在 `database/backups/gold_ai_pre_w0_5_20260917.db` 建立同字节快照；
+- 原库与快照 SHA-256 均为
+  `486A7B2F75C7AA5F06A4A526B49D02FB1354CDEA52C2A359D1B61CB5462F7B7A`；
+- Alembic current / head 均为 `0006_macro_event_vintages`；
+- 未跟踪文件 `disabled` 经检查确认为 W0-3 只读 RSS 摘要，不含疑似密钥，已归档到
+  `logs/archive/phase3_w0_3_backfill/rss_readonly_summary.json`。
+
+### 2. 标签可信度门禁
+
+- 标签版本升级为 `forward-return-v2`；
+- `collected_at_provenance=input_effective_at_fallback` 的历史帖子统一返回
+  `UNTRUSTED_COLLECTION_TIME`，不再查询行情或产生收益标签；
+- 增加入场延迟门禁：`entry_at - effective_at` 超过被评价 horizon 时返回
+  `ENTRY_LAG_EXCEEDED`，避免周末 1h 观点在数十小时后仍被当作 1h 信号；
+- 当前库 dry-run 结果为 31 行全部 `UNTRUSTED_COLLECTION_TIME`，正式研究可用标签为 0；
+- 新增两个 leakage 测试覆盖回填采集时间和周末超长入场延迟。
+
+### 3. 规划与技术债校正
+
+- `0006` 已由宏观 vintage 使用，Phase 3 后续迁移整体顺延为 `0007`～`0010`；
+- 修正 TD-01 / TD-03 / TD-15 / TD-22 的过期描述；
+- TD-22 保持 P0 待用户确认：工作区已无旧明文密钥文件，但供应商侧是否完成轮换无法由代码证明；
+- PostgreSQL 端到端写路径仍未验证，当前环境没有配置可用连接，TD-02 继续阻塞 W0-5。
+
+### 4. 全量门禁
+
+- `ruff check .`：PASS；
+- `mypy config database src scripts`：PASS（85 个源文件）；
+- `pytest -q`：**2379 passed / 1 skipped**；
+- 待提交文件敏感信息扫描只命中测试假密钥和本地示例连接串，未发现新的真实凭据。

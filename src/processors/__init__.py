@@ -15,6 +15,7 @@
 - 抽取器不访问网络、不读取当前时间（Mock 与真实 LLM 实现都遵守，见 docs/10 §5）。
 """
 
+from src.processors.macro_vintages import macro_events_as_of
 from src.processors.opinion_extractor import (
     DiagnosticCode,
     ExtractionDiagnostic,
@@ -67,6 +68,7 @@ __all__ = [
     "build_drafts",
     "ensure_utc_from_database",
     "iter_draft_instruments",
+    "macro_events_as_of",
     "resolve_instrument_id",
     "resolve_opinion_effective_at",
     "store_propagation_edges",

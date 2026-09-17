@@ -37,12 +37,13 @@ WINDOW = CollectWindow(
 API_KEY = "test-api-key-do-not-leak"
 
 
-def _obs(day: str, value: object) -> dict[str, object]:
+def _obs(day: str, value: object, **extra: object) -> dict[str, object]:
     return {
         "realtime_start": "2026-09-12",
-        "realtime_end": "2026-09-12",
+        "realtime_end": "9999-12-31",
         "date": day,
         "value": value,
+        **extra,
     }
 
 
@@ -115,11 +116,12 @@ async def test_normal_run_persists_macro_events(
     assert first.actual_value == Decimal("319.6000000000")
     assert first.unit == "Index 2017=100"
     assert first.source_id == macro_source.id
-    # ★ 时间因果关系（04 §15）：event_at <= effective_at
-    assert first.effective_at >= first.event_at
+    # ★ event_at 是观测期；released_at 才是外部可用边界。
+    assert _as_utc(first.released_at) == datetime(2026, 9, 13, tzinfo=UTC)
+    assert first.vintage_end_at is None
+    assert _as_utc(first.effective_at) >= _as_utc(first.released_at)
     assert first.collected_at is not None
-    # FRED 观测不提供发布时间 → effective_at 取采集时间（防止未来信息泄漏）
-    assert first.effective_at == first.collected_at
+    assert _as_utc(first.effective_at) >= _as_utc(first.collected_at)
     # Phase 1 不凭空推断预期值/前值
     assert first.forecast_value is None
     assert first.previous_value is None
@@ -146,8 +148,8 @@ async def test_api_key_is_never_persisted(
     assert API_KEY not in str(raw.raw_json)
 
 
-def test_database_rejects_event_after_effective_at(session: Session, macro_source) -> None:
-    """★ 数据库层面兜底：``event_at`` 晚于 ``effective_at`` 的宏观记录必须被拒绝。
+def test_database_rejects_release_after_effective_at(session: Session, macro_source) -> None:
+    """★ 数据库层面兜底：``released_at`` 晚于 ``effective_at`` 必须被拒绝。
 
     这条 CHECK 是防未来数据泄漏的最后一道门（04 §15 / .clinerules 第二条）。
     """
@@ -157,8 +159,10 @@ def test_database_rejects_event_after_effective_at(session: Session, macro_sourc
             event_code="CPIAUCSL",
             country="US",
             event_at=now,
+            released_at=now,
+            vintage_end_at=None,
             collected_at=now,
-            effective_at=now - timedelta(minutes=1),  # 非法：可用时间早于事件时间
+            effective_at=now - timedelta(minutes=1),
             source_id=macro_source.id,
         )
     )
@@ -253,6 +257,33 @@ async def test_fred_error_payload_fails_with_message(
     assert _macro_events(session) == []
 
 
+async def test_alfred_unavailable_window_is_success_with_warning(
+    session: Session, macro_source, mock_transport
+) -> None:
+    """ALFRED 历史不存在时保持空值并留痕，绝不退回今天的修订终值。"""
+    response = HttpResponse(
+        status=400,
+        json_body={
+            "error_code": 400,
+            "error_message": (
+                "Bad Request. The series does not exist in ALFRED but may exist in FRED."
+            ),
+        },
+    )
+    collector = MacroCollector(
+        macro_source,
+        transport=mock_transport([response]),
+        api_key=API_KEY,
+    )
+
+    result = await run_collector(session, collector, window=WINDOW, resume=False)
+
+    assert result.status is CollectorRunStatus.SUCCESS
+    assert result.outcome is not None and result.outcome.fetched_count == 0
+    assert any("没有 ALFRED 历史版本" in warning for warning in result.warnings)
+    assert _macro_events(session) == []
+
+
 # ---------------------------------------------------------------------------
 # 3) 限流与超时重试（Mock 层）
 # ---------------------------------------------------------------------------
@@ -340,6 +371,34 @@ async def test_rerun_is_idempotent(session: Session, macro_source, mock_transpor
     assert len(_macro_events(session)) == 2
 
 
+async def test_new_release_for_same_observation_is_appended(
+    session: Session, macro_source, mock_transport
+) -> None:
+    """同观测期的新 release 不得被 content_hash 去重，也不得覆盖初值。"""
+    first = _fred_response(
+        [_obs("2026-07-01", "319.6", realtime_start="2026-08-12")]
+    )
+    revision = _fred_response(
+        [_obs("2026-07-01", "319.8", realtime_start="2026-09-12")]
+    )
+    transport = mock_transport([first, revision])
+
+    await run_collector(
+        session, MacroCollector(macro_source, transport=transport, api_key=API_KEY), window=WINDOW
+    )
+    await run_collector(
+        session,
+        MacroCollector(macro_source, transport=transport, api_key=API_KEY),
+        window=WINDOW,
+        resume=False,
+    )
+
+    events = _macro_events(session)
+    assert len(events) == 2
+    assert [str(event.actual_value) for event in events] == ["319.6000000000", "319.8000000000"]
+    assert len(_raw_macro(session)) == 2
+
+
 async def test_multi_series_resumes_from_cursor(
     session: Session, make_source, mock_transport
 ) -> None:
@@ -392,7 +451,9 @@ async def test_csv_mode_imports_offline_dataset(
     """CSV 兜底：无 FRED Key 的环境也能把框架跑通（团队批复允许的 mock 数据路径）。"""
     csv_file = tmp_path / "macro_fixture.csv"
     csv_file.write_text(
-        "series_id,date,value,unit\nCPIAUCSL,2026-06-01,318.1,index\nCPIAUCSL,2026-07-01,319.6,index\n",
+        "series_id,date,released_at,value,unit\n"
+        "CPIAUCSL,2026-06-01,2026-07-15,318.1,index\n"
+        "CPIAUCSL,2026-07-01,2026-08-15,319.6,index\n",
         encoding="utf-8",
     )
     source = make_source(
@@ -413,7 +474,7 @@ async def test_csv_mode_imports_offline_dataset(
     assert [event.event_at.date().isoformat() for event in events] == ["2026-06-01", "2026-07-01"]
     assert events[0].unit == "index"
     assert events[0].country == "US"
-    assert all(event.event_at <= event.effective_at for event in events)
+    assert all(_as_utc(event.released_at) <= _as_utc(event.effective_at) for event in events)
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +483,7 @@ async def test_csv_mode_imports_offline_dataset(
 async def test_no_future_leakage_for_macro_events(
     session: Session, macro_source, mock_transport
 ) -> None:
-    """★ 泄漏检查：所有宏观记录的 event_at 不晚于可用时间，也不晚于采集时间。"""
+    """★ 泄漏检查：所有宏观记录只在 release 与采集完成后可用。"""
     transport = mock_transport(
         [_fred_response([_obs("2026-07-01", "319.6"), _obs("2026-08-01", "320.9")])]
     )
@@ -434,8 +495,8 @@ async def test_no_future_leakage_for_macro_events(
     run = session.get(CollectorRun, result.run_id)
     assert run is not None
     for event in _macro_events(session):
-        assert _as_utc(event.event_at) <= _as_utc(event.effective_at)
-        # effective_at 由采集时间决定，绝不会"早于事件"或"晚于本轮结束"
+        assert _as_utc(event.released_at) <= _as_utc(event.effective_at)
+        assert _as_utc(event.collected_at) <= _as_utc(event.effective_at)
         assert _as_utc(event.effective_at) <= _as_utc(run.finished_at or run.started_at)
 
 

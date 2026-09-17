@@ -29,11 +29,14 @@ from scripts.evaluate_extractor import (
     DEFAULT_REPORT_LLM,
     DEFAULT_REPORT_REGEX,
     EVAL_COLUMNS,
+    NOT_EVALUATED_MARKER,
     OUTCOME_CORRECT_ABSENT,
     OUTCOME_CORRECT_VALUE,
     OUTCOME_MISSED,
+    OUTCOME_NOT_EVALUATED,
     OUTCOME_SPURIOUS,
     OUTCOME_WRONG,
+    CellResult,
     GoldCell,
     PostText,
     aggregate,
@@ -220,9 +223,7 @@ def _cells() -> list:
         CellResult(
             "p1", "stance", "LONG", SOURCE_HUMAN, "LONG", "LONG", "LONG", OUTCOME_CORRECT_VALUE
         ),
-        CellResult(
-            "p1", "horizon", "1D", SOURCE_HUMAN, "1d", "1D", "1d", OUTCOME_CORRECT_VALUE
-        ),
+        CellResult("p1", "horizon", "1D", SOURCE_HUMAN, "1d", "1D", "1d", OUTCOME_CORRECT_VALUE),
         CellResult("p1", "stop_loss", "2420", SOURCE_HUMAN, "2420", "", "", OUTCOME_MISSED),
         CellResult(
             "p1", "take_profit", "2292", SOURCE_HUMAN, "2292", "2400", "2400", OUTCOME_WRONG
@@ -271,9 +272,7 @@ def test_aggregate_sums_fields() -> None:
 def test_unknown_vs_no_opinion_is_counted() -> None:
     from scripts.evaluate_extractor import CellResult
 
-    cells = [
-        CellResult("p1", "stance", "UNKNOWN", SOURCE_HUMAN, "UNKNOWN", "", "", OUTCOME_MISSED)
-    ]
+    cells = [CellResult("p1", "stance", "UNKNOWN", SOURCE_HUMAN, "UNKNOWN", "", "", OUTCOME_MISSED)]
 
     metrics = field_metrics(cells, ("stance",))
 
@@ -896,3 +895,101 @@ def test_usage_lines_render_unknown_model_cost() -> None:
 
     assert "未知（模型不在价目表内）" in text
 
+
+# ---------------------------------------------------------------------------
+# `scoring=NOT_EVALUATED`：未评估字段（不计假阳性，只记「模型给出了额外信息」）
+# ---------------------------------------------------------------------------
+def test_classify_outcome_not_evaluated_has_top_priority() -> None:
+    """标记 `NOT_EVALUATED` → **最高优先级**：给值不算假阳性，沉默也不算真负类。"""
+    assert classify_outcome("", "", scoring=NOT_EVALUATED_MARKER) == OUTCOME_NOT_EVALUATED
+    assert classify_outcome("", "MACRO", scoring=NOT_EVALUATED_MARKER) == OUTCOME_NOT_EVALUATED
+    # 大小写/空格不敏感（金标准手写出错时不至于被静默当成假阳性）
+    assert classify_outcome("", "MACRO", scoring=" not_evaluated ") == OUTCOME_NOT_EVALUATED
+    # 未标记时口径**完全不变**
+    assert classify_outcome("", "MACRO") == OUTCOME_SPURIOUS
+    assert classify_outcome("", "") == OUTCOME_CORRECT_ABSENT
+
+
+def test_load_gold_reads_scoring_column(tmp_path: Path) -> None:
+    """金标准长表新增 `scoring` 列；**缺列 = 正常评分**（向后兼容旧金标准文件）。"""
+    path = tmp_path / "gold.csv"
+    path.write_text(
+        "post_id,field,value,value_raw,source,scoring\n"
+        "p1,stance,SHORT,Down=1,human-adjudicated,\n"
+        "p1,information_type,,negative,hf:saguaro-gold,NOT_EVALUATED\n",
+        encoding="utf-8",
+    )
+
+    gold, problems = load_gold(path)
+
+    assert problems == []
+    assert gold["p1"]["stance"].scoring == ""
+    assert gold["p1"]["information_type"].scoring == NOT_EVALUATED_MARKER
+
+
+def test_field_metrics_excludes_not_evaluated_cells() -> None:
+    """未评估格子不进 `gold_absent`（所以不会抬高假阳性率），只单独记账。"""
+    cells = [
+        CellResult("p1", "information_type", "", "hf", "", "MACRO", "MACRO", OUTCOME_NOT_EVALUATED),
+        CellResult("p2", "information_type", "", "hf", "", "", "", OUTCOME_NOT_EVALUATED),
+        CellResult("p3", "information_type", "", "hf", "", "MACRO", "MACRO", OUTCOME_SPURIOUS),
+    ]
+
+    metrics = field_metrics(cells, ("information_type",))
+    item = metrics["information_type"]
+
+    assert item.cells == 3 and item.scored_cells == 1
+    assert item.not_evaluated == 2 and item.not_evaluated_with_value == 1
+    assert item.gold_absent == 1  # 只有**参与评分**的空格才算"金标准未给出"
+    assert item.spurious == 1 and item.spurious_rate == 1.0  # 假阳性只来自未标记的格子
+    assert aggregate(metrics, label="合计").not_evaluated == 2
+
+
+def test_evaluate_records_not_evaluated_as_extra_info() -> None:
+    """端到端：金标准空 + 未评估标记 → `not_evaluated`，note 写「额外信息」，不计假阳性。"""
+    gold = {
+        "p1": {
+            "stance": GoldCell("p1", "stance", "SHORT", SOURCE_HUMAN, "Down=1"),
+            "information_type": GoldCell(
+                "p1", "information_type", "", "hf:saguaro-gold", "negative", NOT_EVALUATED_MARKER
+            ),
+        }
+    }
+
+    stats = evaluate(
+        gold,
+        _texts({"p1": "普通文本"}),
+        StubExtractor(),
+        fields=("stance", "information_type"),
+    )
+    by_field = {cell.field_name: cell for cell in stats.cells}
+
+    assert by_field["stance"].outcome == OUTCOME_CORRECT_VALUE
+    assert by_field["information_type"].outcome == OUTCOME_NOT_EVALUATED
+    assert "额外信息" in by_field["information_type"].note
+    assert "TECHNICAL" in by_field["information_type"].note  # 抽取器给了值也算额外信息
+    assert field_metrics(stats.cells, ("information_type",))["information_type"].spurious == 0
+
+
+def test_render_report_lists_not_evaluated_fields(tmp_path: Path) -> None:
+    """报告 §2.1 必须点明「未评估 = 不计分、不计假阳性」，防止读者误读为假阳性。"""
+    gold = {
+        "p1": {
+            "stance": GoldCell("p1", "stance", "SHORT", SOURCE_HUMAN, "Down=1"),
+            "information_type": GoldCell(
+                "p1", "information_type", "", "hf:saguaro-gold", "negative", NOT_EVALUATED_MARKER
+            ),
+        }
+    }
+    stats = evaluate(
+        gold,
+        _texts({"p1": "普通文本"}),
+        StubExtractor(),
+        fields=("stance", "information_type"),
+    )
+
+    text = _report(tmp_path, stats)
+
+    assert "### 2.1 未评估字段" in text
+    assert "未评估格子" in text and "不计假阳性" in text
+    assert "`not_evaluated`" in text

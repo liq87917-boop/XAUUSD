@@ -61,7 +61,12 @@ def test_source_seed_fields_follow_04(seed: SourceSeed) -> None:
 def test_disabled_sources_are_documented() -> None:
     """默认关闭的来源必须是有意为之且写明原因（避免"以为在跑其实没跑"）。"""
     disabled = sorted(seed.name for seed in SOURCE_SEEDS if not seed.enabled)
-    assert disabled == ["econ_calendar_investing", "market_stooq_backup"]
+    assert disabled == [
+        "econ_calendar_investing",
+        "manual-华尔街见闻",
+        "manual-汇通网",
+        "market_stooq_backup",
+    ]
 
     for seed in SOURCE_SEEDS:
         assert seed.config_json.get("note"), f"来源 {seed.name} 必须写明 note 说明用途/现状"

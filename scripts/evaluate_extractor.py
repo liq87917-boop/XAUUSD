@@ -75,9 +75,7 @@ DEFAULT_TEXTS: Final[Path] = REPO_ROOT / "logs" / "annotation_sample.csv"
 DEFAULT_EVAL_OUT_REGEX: Final[Path] = REPO_ROOT / "logs" / "extractor_eval.csv"
 DEFAULT_EVAL_OUT_LLM: Final[Path] = REPO_ROOT / "logs" / "extractor_eval_llm.csv"
 #: 报告输出（同样分开）：正则 = 基线报告；LLM = 试点/对比报告
-DEFAULT_REPORT_REGEX: Final[Path] = (
-    REPO_ROOT / "docs" / "experiments" / "Phase2_基线评估报告.md"
-)
+DEFAULT_REPORT_REGEX: Final[Path] = REPO_ROOT / "docs" / "experiments" / "Phase2_基线评估报告.md"
 DEFAULT_REPORT_LLM: Final[Path] = REPO_ROOT / "docs" / "experiments" / "Phase2_LLM试点报告.md"
 #: 兼容旧引用（= 正则口径的默认路径）
 DEFAULT_EVAL_OUT: Final[Path] = DEFAULT_EVAL_OUT_REGEX
@@ -151,12 +149,20 @@ OUTCOME_CORRECT_ABSENT: Final[str] = "correct_absent"  # 双方都判"未给出"
 OUTCOME_MISSED: Final[str] = "missed"  # **该判未判**
 OUTCOME_WRONG: Final[str] = "wrong_value"  # **提取错误**
 OUTCOME_SPURIOUS: Final[str] = "spurious"  # **不该判却判**（假阳性）
+#: 金标准显式声明「本字段本轮不评分」的标记（写在金标准长表的 `scoring` 列）。
+#: 语义：**金标准为空 + 带此标记时，抽取器给出任何值都不算假阳性**，只记为
+#: 「模型给出了额外信息」（`outcome=not_evaluated`），且该格不进任何准确率分母。
+#: 使用场景：外部标注数据集里某个字段**没有可信金标准**（如标题级数据的 `information_type`）。
+NOT_EVALUATED_MARKER: Final[str] = "NOT_EVALUATED"
+#: 未评估（**既不是命中也不是漏判/假阳性**，只做记账）
+OUTCOME_NOT_EVALUATED: Final[str] = "not_evaluated"
 OUTCOMES: Final[tuple[str, ...]] = (
     OUTCOME_CORRECT_VALUE,
     OUTCOME_CORRECT_ABSENT,
     OUTCOME_MISSED,
     OUTCOME_WRONG,
     OUTCOME_SPURIOUS,
+    OUTCOME_NOT_EVALUATED,
 )
 OUTCOME_LABEL_CN: Final[dict[str, str]] = {
     OUTCOME_CORRECT_VALUE: "命中",
@@ -164,6 +170,7 @@ OUTCOME_LABEL_CN: Final[dict[str, str]] = {
     OUTCOME_MISSED: "该判未判（漏判）",
     OUTCOME_WRONG: "提取错误（值不符）",
     OUTCOME_SPURIOUS: "不该判却判（假阳性）",
+    OUTCOME_NOT_EVALUATED: "未评估（不计分）",
 }
 #: 无观点标记（报告里显示用；内部一律用空串表示"未给出 / 无观点"）
 NO_OPINION_LABEL: Final[str] = "∅（未给出）"
@@ -207,6 +214,8 @@ class GoldCell:
     value: str
     source: str
     raw: str
+    #: 金标准的评分标记（金标准长表 `scoring` 列）；`NOT_EVALUATED` = 本轮不评分
+    scoring: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,6 +268,10 @@ class FieldMetrics:
     spurious: int = 0
     #: 其中"金标准 = UNKNOWN，抽取器却判无观点"的子计数（解释漏判来源）
     unknown_vs_no_opinion: int = 0
+    #: 金标准标记 `NOT_EVALUATED` 的格子数（**不计分**：不进任何分子/分母）
+    not_evaluated: int = 0
+    #: 上述格子中"抽取器仍给出了值"的数量（=「模型给出了额外信息」）
+    not_evaluated_with_value: int = 0
 
     @property
     def accuracy_on_gold_present(self) -> float:
@@ -277,9 +290,18 @@ class FieldMetrics:
         return self.correct_value / given if given else 0.0
 
     @property
+    def scored_cells(self) -> int:
+        """**参与评分**的格子数（剔除以 `NOT_EVALUATED` 标记的格子）。"""
+        return self.cells - self.not_evaluated
+
+    @property
     def exact_accuracy(self) -> float:
-        """严格全对率：(命中 + 双方都判未给出) / 全部格子。"""
-        return (self.correct_value + self.correct_absent) / self.cells if self.cells else 0.0
+        """严格全对率：(命中 + 双方都判未给出) / **参与评分**的格子。"""
+        return (
+            (self.correct_value + self.correct_absent) / self.scored_cells
+            if self.scored_cells
+            else 0.0
+        )
 
     @property
     def missed_rate(self) -> float:
@@ -339,6 +361,12 @@ def field_metrics(
         if source is not None and cell.gold_source != source:
             continue
         target.cells += 1
+        if cell.outcome == OUTCOME_NOT_EVALUATED:
+            # 未评估：金标准有值/无值**都不计**，抽取器给值也不算假阳性（只记"额外信息"）
+            target.not_evaluated += 1
+            if cell.pred_value:
+                target.not_evaluated_with_value += 1
+            continue
         if cell.gold_value:
             target.gold_present += 1
         else:
@@ -371,6 +399,8 @@ def aggregate(metrics: Mapping[str, FieldMetrics], *, label: str) -> FieldMetric
         total.wrong_value += item.wrong_value
         total.spurious += item.spurious
         total.unknown_vs_no_opinion += item.unknown_vs_no_opinion
+        total.not_evaluated += item.not_evaluated
+        total.not_evaluated_with_value += item.not_evaluated_with_value
     return total
 
 
@@ -403,6 +433,7 @@ def load_gold(
             value=(row.get("value") or "").strip(),
             source=(row.get("source") or "").strip(),
             raw=(row.get("value_raw") or "").strip(),
+            scoring=(row.get("scoring") or "").strip(),
         )
     return gold, problems
 
@@ -450,8 +481,14 @@ def predict_cell(result: OpinionExtractionResult, field_name: str) -> tuple[str,
     return normalize_value(field_name, raw), raw
 
 
-def classify_outcome(gold_value: str, pred_value: str) -> str:
-    """五类互斥判定（**该判未判** 与 **提取错误** 必须分开）。"""
+def classify_outcome(gold_value: str, pred_value: str, *, scoring: str = "") -> str:
+    """六类互斥判定（**该判未判** 与 **提取错误** 必须分开）。
+
+    `scoring=NOT_EVALUATED` 拥有**最高优先级**：该字段本轮不评分——
+    抽取器给值**不算假阳性**，只记 `not_evaluated`（"模型给出了额外信息"）。
+    """
+    if scoring.strip().upper() == NOT_EVALUATED_MARKER:
+        return OUTCOME_NOT_EVALUATED
     if gold_value and pred_value:
         return OUTCOME_CORRECT_VALUE if gold_value == pred_value else OUTCOME_WRONG
     if gold_value and not pred_value:
@@ -521,17 +558,19 @@ def evaluate(
             if cell is None:
                 continue
             pred_value, pred_raw = predict_cell(result, name)
-            outcome = classify_outcome(cell.value, pred_value)
+            outcome = classify_outcome(cell.value, pred_value, scoring=cell.scoring)
             note = ""
-            if outcome == OUTCOME_MISSED and not result.drafts:
+            if outcome == OUTCOME_NOT_EVALUATED:
+                note = f"字段未评分（scoring={NOT_EVALUATED_MARKER}）：" + (
+                    f"模型给出了额外信息 `{pred_value}`" if pred_value else "模型亦未给出"
+                )
+            elif outcome == OUTCOME_MISSED and not result.drafts:
                 note = "抽取器判无观点（drafts 为空）"
             elif outcome == OUTCOME_WRONG and name in stats.price_bands:
                 gold_price, pred_price = _price(cell.value), _price(pred_value)
                 if gold_price is not None and pred_price is not None:
                     diff = abs(gold_price - pred_price)
-                    band = next(
-                        (label for label, limit in PRICE_BANDS if diff <= limit), ">10"
-                    )
+                    band = next((label for label, limit in PRICE_BANDS if diff <= limit), ">10")
                     stats.price_bands[name][band] += 1
                     note = f"差值 {diff}"
             stats.cells.append(
@@ -570,11 +609,7 @@ def label_order(field_name: str, seen: Sequence[str]) -> tuple[str, ...]:
     """混淆矩阵的行列标签顺序：规范序 → 其余按字母序 → `∅（未给出）` 收尾。"""
     canonical = [label for label in CANONICAL_ORDER.get(field_name, ()) if label in set(seen)]
     extras = sorted(
-        {
-            label
-            for label in seen
-            if label and label != NO_OPINION_LABEL and label not in canonical
-        }
+        {label for label in seen if label and label != NO_OPINION_LABEL and label not in canonical}
     )
     return (*canonical, *extras, NO_OPINION_LABEL)
 
@@ -625,17 +660,13 @@ def text_cues(text: str, *, has_media: bool = False) -> tuple[str, ...]:
     return tuple(matched) or ("plain",)
 
 
-def _stratified(
-    ordered: Sequence[str], texts: Mapping[str, PostText], limit: int
-) -> list[str]:
+def _stratified(ordered: Sequence[str], texts: Mapping[str, PostText], limit: int) -> list[str]:
     """按线索桶轮询取样：**保证每个桶都进来**（条件句/引用/弱暗示等对抗样本不会被前 N 条挤掉）。"""
     order = [name for name, _ in CUE_RULES] + ["plain"]
     buckets: dict[str, list[str]] = {name: [] for name in order}
     for post_id in ordered:
         post = texts.get(post_id)
-        first = (
-            text_cues(post.text, has_media=post.has_media)[0] if post is not None else "plain"
-        )
+        first = text_cues(post.text, has_media=post.has_media)[0] if post is not None else "plain"
         buckets.setdefault(first, []).append(post_id)
     chosen: list[str] = []
     while len(chosen) < limit and any(buckets[name] for name in order):
@@ -812,7 +843,7 @@ def _examples(
         lines.append(
             f"- `{cell.post_id}` / {FIELD_LABEL_CN.get(cell.field_name, cell.field_name)}："
             f"金标准 `{cell.gold_value or NO_OPINION_LABEL}` ↔ 抽取 "
-                f"`{cell.pred_value or NO_OPINION_LABEL}`"
+            f"`{cell.pred_value or NO_OPINION_LABEL}`"
             f"{'（' + cell.note + '）' if cell.note else ''}"
         )
         lines.append(f"  - 原文：{excerpt}")
@@ -848,21 +879,23 @@ def render_report(
     add(f"- 抽取器：`{extractor_label}`（`parser_version = {stats.parser_version}`）")
     add(f"- 生成时间（UTC）：`{generated_at.isoformat(timespec='seconds')}`")
     add(f"- 金标准：`{gold_path}`（sha256 前 16 位 `{gold_digest}`，1000 格 = 200 样本 × 5 字段）")
-    add(f"- 帖子正文来源：`{texts_path}`（{stats.posts_total} 条；缺失 {len(stats.missing_texts)} "
-        "条）")
+    add(
+        f"- 帖子正文来源：`{texts_path}`（{stats.posts_total} 条；缺失 {len(stats.missing_texts)} "
+        "条）"
+    )
     add(f"- 逐格明细：`{eval_out}`（{len(stats.cells)} 行，可人工复核每一格）")
     if sample_note:
         add(f"- 本轮样本：{sample_note}")
     add("")
     add(
         "> **判定依据**：`source=human-adjudicated` 子集（226 格，人工裁决）"
-            "是唯一有验收效力的口径；"
+        "是唯一有验收效力的口径；"
         "`source=3-model-consensus` 子集（774 格）只作参考，不用于 PASS/FAIL。"
     )
     add(
         "> **两类失败严格区分**：`该判未判（missed）`= 金标准有值但抽取器未给出；"
         "`提取错误（wrong_value）`= 给了值但值不符；`不该判却判（spurious）`= "
-            "金标准为未给出却给了值。"
+        "金标准为未给出却给了值。"
     )
     add(
         "> **语料说明**：本批是 `logs/posts.csv` 生成的**Mock 语料**（含 8 类对抗样本共 126 条，"
@@ -918,6 +951,30 @@ def render_report(
             f"| {_pct(item.precision)} | {_pct(item.recall)} | {_pct(item.exact_accuracy)} |"
         )
     add("")
+    add("### 2.1 未评估字段（金标准显式标记 `scoring=NOT_EVALUATED`）")
+    add("")
+    if sum(item.not_evaluated for item in overall.values()):
+        add("| 字段 | 未评估格子 | 其中模型给出值 | 说明 |")
+        add("|---|---|---|---|")
+        for name in fields:
+            item = overall[name]
+            if not item.not_evaluated:
+                continue
+            ratio = _pct(item.not_evaluated_with_value / item.not_evaluated)
+            add(
+                f"| {FIELD_LABEL_CN.get(name, name)} | {item.not_evaluated} "
+                f"| {item.not_evaluated_with_value}（{ratio}） "
+                "| 金标准为空且标记未评估 → **不进准确率、不计假阳性** |"
+            )
+        add("")
+        add(
+            "> 规则（`docs/10 §7.1`）：金标准 `scoring=NOT_EVALUATED` 时，抽取器给出任何值都记 "
+            '`not_evaluated`（"模型给出了额外信息"），**绝不算 `spurious`（假阳性）**；'
+            "该格的 `value` 也**不进**任何准确率 / 精确率 / 召回率的分母。"
+        )
+    else:
+        add("- （本批金标准没有 `scoring=NOT_EVALUATED` 标记的格子）")
+    add("")
     add("## 3. 分层：人工子集（验收口径）vs 模型共识子集（仅参考）")
     add("")
     add("| 字段 | 人工：有值 | 人工：准确率 | 人工：漏判/错判/多判 | 共识：有值 | 共识：准确率 |")
@@ -959,9 +1016,11 @@ def render_report(
             + f" | {bands.get('>10', 0)} |"
         )
     add("")
-    add("> 差值 = |金标准 − 抽取值|。同一条文本里可能同时出现「第一目标 / 第二目标」，"
+    add(
+        "> 差值 = |金标准 − 抽取值|。同一条文本里可能同时出现「第一目标 / 第二目标」，"
         "若差值集中在 ≤5，多半是**取点口径**问题（应在 `docs/10 §4.4` 钉死取哪个），"
-        "而不是数字识别错误。")
+        "而不是数字识别错误。"
+    )
     add("")
     add("## 6. 典型案例（便于定位规则缺陷）")
     add("")
@@ -983,7 +1042,7 @@ def render_report(
     add("|---|---|---|")
     add(
         f"| Confidence 合法性 | 非法 {stats.confidence_invalid} / 未给出 "
-            f"{stats.confidence_missing} "
+        f"{stats.confidence_missing} "
         f"/ 共 {stats.drafts_total} | `docs/08`：数值必须在 0~1（非法即 FAIL） |"
     )
     add(f"| 无观点率 | {_pct(stats.no_opinion_rate)} | `drafts` 为空的帖子占比 |")
@@ -1025,9 +1084,9 @@ def render_report(
     failed = [name for name in fields if name in THRESHOLDS and name not in passed]
     add(
         f"- 人工子集口径下：**PASS {len(passed)} "
-            f"项**（{'、'.join(FIELD_LABEL_CN.get(n, n) for n in passed) or '无'}）；"
+        f"项**（{'、'.join(FIELD_LABEL_CN.get(n, n) for n in passed) or '无'}）；"
         f"**FAIL {len(failed)} "
-            f"项**（{'、'.join(FIELD_LABEL_CN.get(n, n) for n in failed) or '无'}）"
+        f"项**（{'、'.join(FIELD_LABEL_CN.get(n, n) for n in failed) or '无'}）"
     )
     add(
         "- 失败模式的构成（该判未判 vs 提取错误 vs 不该判却判）见第 2 节；"

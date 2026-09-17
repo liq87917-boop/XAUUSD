@@ -15,6 +15,14 @@ def test_defaults_are_safe() -> None:
     settings = Settings(_env_file=None)
     assert settings.live_trading is False
     assert settings.allow_external_order_submission is False
+    assert settings.fred_configured is False
+
+
+def test_fred_key_is_secret_and_reports_only_configuration_state() -> None:
+    settings = Settings(_env_file=None, fred_api_key="fred-secret-value")
+
+    assert settings.fred_configured is True
+    assert "fred-secret-value" not in repr(settings)
 
 
 def test_enabling_live_trading_is_rejected_at_config_load() -> None:

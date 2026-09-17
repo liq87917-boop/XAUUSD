@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # 抽取任务不需要思维链：新一代模型**默认开启**思考模式，显式关掉更便宜也更稳。
     deepseek_thinking_mode: str = Field(default="disabled")
 
+    # FRED / ALFRED（Phase 3.0 W0-2 宏观 vintage）；密钥同样只允许来自环境或 .env。
+    fred_api_key: SecretStr | None = Field(default=None)
+
     @field_validator("deepseek_thinking_mode")
     @classmethod
     def _validate_thinking_mode(cls, value: str) -> str:
@@ -84,6 +87,13 @@ class Settings(BaseSettings):
         if self.deepseek_api_key is None:
             return False
         return bool(self.deepseek_api_key.get_secret_value().strip())
+
+    @property
+    def fred_configured(self) -> bool:
+        """是否已配置可用的 FRED API Key（不暴露密钥内容）。"""
+        if self.fred_api_key is None:
+            return False
+        return bool(self.fred_api_key.get_secret_value().strip())
 
     @field_validator("live_trading", "allow_external_order_submission")
     @classmethod

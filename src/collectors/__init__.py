@@ -36,6 +36,13 @@ from src.collectors.registry import (
     register_collector,
     unregister_collector,
 )
+from src.collectors.rss_collector import (
+    RSS_PARSER_VERSION,
+    RssCollector,
+    RssSourceSpec,
+    load_rss_sources,
+    parse_feed_entries,
+)
 from src.collectors.runner import (
     CollectorRunResult,
     load_resume_cursor,
@@ -80,6 +87,9 @@ __all__ = [
     "NewsCollector",
     "RawItemPayload",
     "RetryPolicy",
+    "RssCollector",
+    "RssSourceSpec",
+    "RSS_PARSER_VERSION",
     "Transport",
     "TransportError",
     "TransportTimeoutError",
@@ -88,7 +98,9 @@ __all__ = [
     "collector_for_source",
     "get_collector_class",
     "load_resume_cursor",
+    "load_rss_sources",
     "new_cursor",
+    "parse_feed_entries",
     "register_collector",
     "run_collector",
     "run_collectors",

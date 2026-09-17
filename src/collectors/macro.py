@@ -9,11 +9,11 @@
     - 离线兜底：``config_json["csv_path"]`` 指向本地 CSV 时走 CSV 导入
       （mock/存档数据，用于无 Key 环境与框架验证）。
 
-时间对齐（团队批复，最高优先级）：
-    - ``event_at`` = 观测所属日期（00:00 UTC）—— 数据"实际生效/所属"的时间；
-    - FRED observations **不提供发布时间**，因此 ``published_at`` 置空 →
-      ``effective_at = max(event_at, collected_at) = collected_at``，
-      严格满足 04 §15 的 ``event_at <= effective_at``，**杜绝用未来信息回填**；
+时间对齐（Phase 3.0 W0-2，最高优先级）：
+    - ``event_at`` = 观测所属日期（00:00 UTC），不是发布时间；
+    - ALFRED ``realtime_start/realtime_end`` 表示 vintage 的已知区间。API 只有日期精度，
+      ``released_at`` 保守取 ``realtime_start`` 次日 00:00 UTC，禁止假设当天零点已知；
+    - ``effective_at = max(released_at, collected_at)``；缺 ``realtime_start`` 时硬失败；
     - 未来日期观测直接跳过并告警（防脏数据触发 CHECK 失败 / 泄露未来信息）。
 
 粒度（团队批复）：
@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import csv
 import io
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -44,6 +43,7 @@ from typing import Any, Final
 from sqlalchemy.orm import Session
 
 from config.logging import get_logger
+from config.settings import get_settings
 from database.models import MacroEvent, RawItem
 from database.models.enums import RawItemType, SourceType
 from src.collectors.base import BaseCollector
@@ -60,6 +60,7 @@ from src.collectors.types import (
 from src.common.time import parse_iso8601
 
 __all__ = [
+    "DEFAULT_W0_2_SERIES",
     "FRED_PARSER_VERSION",
     "MACRO_CSV_PARSER_VERSION",
     "MacroCollector",
@@ -68,18 +69,22 @@ __all__ = [
     "ParsedObservations",
     "parse_fred_observations",
     "parse_macro_csv",
+    "parse_realtime_boundary",
 ]
 
 _log = get_logger("collectors.macro")
 
-FRED_PARSER_VERSION: Final[str] = "macro_fred_parser@0.1.0"
-MACRO_CSV_PARSER_VERSION: Final[str] = "macro_csv_parser@0.1.0"
+FRED_PARSER_VERSION: Final[str] = "macro_alfred_vintage_parser@0.2.0"
+MACRO_CSV_PARSER_VERSION: Final[str] = "macro_vintage_csv_parser@0.2.0"
 
 #: FRED 观测端点路径（主机名来自 sources.base_url）
 FRED_OBSERVATIONS_PATH: Final[str] = "/fred/series/observations"
 
 #: FRED 用 "." 表示缺失观测（不可当作 0）
 FRED_MISSING_VALUE: Final[str] = "."
+
+#: FRED 对“该时期没有 ALFRED 历史版本”的官方错误文本片段。
+ALFRED_NOT_AVAILABLE_MARKER: Final[str] = "does not exist in ALFRED"
 
 #: 数值精度（03 §14：宏观值 NUMERIC(28,10)）
 VALUE_QUANT: Final[Decimal] = Decimal("0.0000000001")
@@ -89,6 +94,18 @@ FUTURE_DATE_TOLERANCE_DAYS: Final[int] = 1
 
 #: key 在 URL / 日志中的脱敏占位符
 REDACTED_KEY: Final[str] = "***"
+
+#: Phase 3.0 W0-2 批准的宏观序列；种子与回填脚本共用，防止清单漂移。
+DEFAULT_W0_2_SERIES: Final[tuple[dict[str, str], ...]] = (
+    {"series_id": "CPIAUCSL", "country": "US", "unit": "index"},
+    {"series_id": "PCEPI", "country": "US", "unit": "index"},
+    {"series_id": "PAYEMS", "country": "US", "unit": "thousand_persons"},
+    {"series_id": "DFF", "country": "US", "unit": "percent"},
+    {"series_id": "DFII10", "country": "US", "unit": "percent"},
+    {"series_id": "DGS10", "country": "US", "unit": "percent"},
+    {"series_id": "DTWEXBGS", "country": "US", "unit": "index"},
+    {"series_id": "FEDFUNDS", "country": "US", "unit": "percent"},
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,13 +123,18 @@ class MacroObservation:
 
     series_id: str
     event_at: datetime
+    released_at: datetime
+    vintage_end_at: datetime | None
     value: Decimal
     unit: str | None = None
 
     @property
     def record_id(self) -> str:
-        """raw_items 幂等键：``series_id:YYYY-MM-DD``（与采集次数无关）。"""
-        return f"{self.series_id}:{self.event_at.date().isoformat()}"
+        """raw_items 幂等键包含 vintage 起点，修订值会追加而不是覆盖。"""
+        return (
+            f"{self.series_id}:{self.event_at.date().isoformat()}:"
+            f"{self.released_at.date().isoformat()}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +172,21 @@ def parse_observation_date(value: object) -> datetime | None:
     except ValueError:
         return None
     return datetime(parsed.year, parsed.month, parsed.day, tzinfo=UTC)
+
+
+def parse_realtime_boundary(value: object, *, open_ended: bool = False) -> datetime | None:
+    """把 ALFRED 日期转换为保守的次日 UTC 边界。
+
+    ``realtime_start`` 只保证数据在该自然日内变得可知，使用次日 00:00 可避免日内前视。
+    ``9999-12-31`` 是开放上界哨兵，在 ``open_ended=True`` 时映射为 NULL。
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if open_ended and text == "9999-12-31":
+        return None
+    parsed = parse_observation_date(text)
+    return None if parsed is None else parsed + timedelta(days=1)
 
 
 def parse_fred_observations(
@@ -193,6 +230,7 @@ def parse_fred_observations(
 
     response_unit = payload.get("units")
     unit = str(response_unit) if response_unit else spec.unit
+    initial_release_only = str(payload.get("output_type") or "") == "4"
     future_limit = (
         None
         if window_end is None
@@ -202,7 +240,7 @@ def parse_fred_observations(
     points: list[MacroObservation] = []
     skipped = 0
     reasons: list[str] = []
-    seen_dates: set[str] = set()
+    seen_vintages: set[tuple[str, str]] = set()
 
     for raw in raw_observations:
         if not isinstance(raw, Mapping):
@@ -216,6 +254,31 @@ def parse_fred_observations(
             reasons.append("missing_or_invalid_date")
             continue
 
+        released_at = parse_realtime_boundary(raw.get("realtime_start"))
+        # output_type=4 的 realtime_end 可能只是查询边界，不是该初值真正的修订失效日。
+        vintage_end_at = (
+            None
+            if initial_release_only
+            else parse_realtime_boundary(raw.get("realtime_end"), open_ended=True)
+        )
+        if released_at is None:
+            raise CollectorError(
+                f"ALFRED observation 缺少合法 realtime_start：series={spec.series_id}",
+                details={
+                    "series_id": spec.series_id,
+                    "observation_date": raw.get("date"),
+                },
+            )
+        if vintage_end_at is not None and vintage_end_at <= released_at:
+            raise CollectorError(
+                f"ALFRED observation realtime 区间非法：series={spec.series_id}",
+                details={
+                    "series_id": spec.series_id,
+                    "realtime_start": raw.get("realtime_start"),
+                    "realtime_end": raw.get("realtime_end"),
+                },
+            )
+
         value = to_value_decimal(raw.get("value"))
         if value is None:
             skipped += 1
@@ -227,17 +290,19 @@ def parse_fred_observations(
             reasons.append("future_date")
             continue
 
-        date_key = event_at.date().isoformat()
-        if date_key in seen_dates:
+        vintage_key = (event_at.date().isoformat(), released_at.date().isoformat())
+        if vintage_key in seen_vintages:
             skipped += 1
-            reasons.append("duplicate_date")
+            reasons.append("duplicate_vintage")
             continue
-        seen_dates.add(date_key)
+        seen_vintages.add(vintage_key)
 
         points.append(
             MacroObservation(
                 series_id=spec.series_id,
                 event_at=event_at,
+                released_at=released_at,
+                vintage_end_at=vintage_end_at,
                 value=value,
                 unit=unit,
             )
@@ -249,14 +314,15 @@ def parse_fred_observations(
     )
 
 
-#: 宏观 CSV 兜底解析器的必需列
-CSV_REQUIRED_COLUMNS: Final[tuple[str, ...]] = ("series_id", "date", "value")
+#: 宏观 CSV 兜底解析器的必需列；released_at 禁止缺省或猜测。
+CSV_REQUIRED_COLUMNS: Final[tuple[str, ...]] = ("series_id", "date", "released_at", "value")
 
 
 def parse_macro_csv(csv_text: str) -> ParsedObservations:
     """从本地 CSV 导入宏观观测（离线兜底；无 FRED Key 的环境与框架验证用）。
 
-    必需列：``series_id`` / ``date`` / ``value``；可选列：``unit``。
+    必需列：``series_id`` / ``date`` / ``released_at`` / ``value``；
+    可选列：``vintage_end_at`` / ``unit``。
     日期按 ``YYYY-MM-DD`` 解析为 UTC 当日 00:00（保持日粒度）。
 
     Raises:
@@ -284,21 +350,29 @@ def parse_macro_csv(csv_text: str) -> ParsedObservations:
         }
         series_id = normalized.get("series_id")
         event_at = parse_observation_date(normalized.get("date"))
+        released_at = parse_observation_date(normalized.get("released_at"))
+        vintage_end_at = parse_observation_date(normalized.get("vintage_end_at"))
         value = to_value_decimal(normalized.get("value"))
+        if released_at is None:
+            raise CollectorError("宏观 CSV 存在缺失/非法 released_at；禁止猜测发布时间")
         if not series_id or event_at is None or value is None:
             skipped += 1
             reasons.append("incomplete_row")
             continue
+        if vintage_end_at is not None and vintage_end_at <= released_at:
+            raise CollectorError("宏观 CSV 的 vintage_end_at 必须晚于 released_at")
         points.append(
             MacroObservation(
                 series_id=series_id,
                 event_at=event_at,
+                released_at=released_at,
+                vintage_end_at=vintage_end_at,
                 value=value,
                 unit=normalized.get("unit") or None,
             )
         )
 
-    points.sort(key=lambda point: (point.series_id, point.event_at))
+    points.sort(key=lambda point: (point.series_id, point.event_at, point.released_at))
     return ParsedObservations(
         points=tuple(points), skipped=skipped, skip_reasons=tuple(dict.fromkeys(reasons))
     )
@@ -430,11 +504,17 @@ class MacroCollector(BaseCollector):
         self._skip_reason_counter.clear()
 
     def _resolve_api_key(self, explicit: str | None, config: Mapping[str, Any]) -> str:
-        """解析 FRED API Key：显式注入（测试）> 环境变量；缺失时给出可执行指引。"""
+        """解析 FRED API Key：显式注入（测试）> 全局 Settings（环境变量 / .env）。"""
         if explicit:
             return explicit.strip()
         env_name = str(config.get("api_key_env") or DEFAULT_API_KEY_ENV)
-        key = os.environ.get(env_name, "").strip()
+        if env_name != DEFAULT_API_KEY_ENV:
+            raise CollectorError(
+                f"自定义 api_key_env={env_name!r} 不受集中配置支持；请使用 {DEFAULT_API_KEY_ENV}",
+                details={"api_key_env": env_name},
+            )
+        secret = get_settings().fred_api_key
+        key = secret.get_secret_value().strip() if secret is not None else ""
         if not key:
             raise CollectorError(
                 f"缺少 FRED API Key：请设置环境变量 {env_name}"
@@ -479,12 +559,20 @@ class MacroCollector(BaseCollector):
                 f"数据源 {self.source.name!r} 未配置 base_url，无法构造 FRED 请求"
             )
         start, end = self._observation_range(window)
+        # FRED 服务端日界可能晚于本机 UTC；使用窗口结束日前一日可避免“未来 realtime_end” 400。
+        realtime_end = end - timedelta(days=1)
+        realtime_start = min(window.start_utc.date(), realtime_end)
         return HttpRequest(
             url=f"{base_url}{FRED_OBSERVATIONS_PATH}",
             params={
                 "series_id": spec.series_id,
                 "api_key": self._api_key or "",
                 "file_type": "json",
+                # Initial Release Only：避免把今天所见的修订终值用于历史训练。
+                # output_type=1 的 realtime 字段会被查询窗口裁剪，不能代表真实首次发布。
+                "output_type": 4,
+                "realtime_start": realtime_start.isoformat(),
+                "realtime_end": realtime_end.isoformat(),
                 "observation_start": start.isoformat(),
                 "observation_end": end.isoformat(),
             },
@@ -515,6 +603,18 @@ class MacroCollector(BaseCollector):
         response = await self._request(request)
 
         if not response.ok:
+            body = response.json_body if isinstance(response.json_body, Mapping) else {}
+            provider_message = str(body.get("error_message") or "")
+            if response.status == 400 and ALFRED_NOT_AVAILABLE_MARKER in provider_message:
+                warning = (
+                    f"{spec.series_id}：该 realtime 窗口没有 ALFRED 历史版本，"
+                    "保持为空（禁止退回 FRED 修订终值）"
+                )
+                self._extra_warnings.append(warning)
+                return FetchPage(
+                    next_cursor=self._next_cursor(series_index),
+                    raw_count=0,
+                )
             raise CollectorError(
                 f"FRED 返回 HTTP {response.status}：series={spec.series_id}",
                 details={"status": response.status, "series_id": spec.series_id},
@@ -583,7 +683,11 @@ class MacroCollector(BaseCollector):
         return RawItemPayload(
             source_record_id=point.record_id,
             item_type=RawItemType.MACRO,
-            title=f"{point.series_id} {point.event_at.date().isoformat()}",
+            # release 纳入标题/默认 content_hash，避免同观测期的新 vintage 被误判为重复。
+            title=(
+                f"{point.series_id} {point.event_at.date().isoformat()} "
+                f"vintage {point.released_at.date().isoformat()}"
+            ),
             content_text=None,
             raw_json={
                 "provider": self.provider if self._mode == "fred" else "csv",
@@ -592,12 +696,16 @@ class MacroCollector(BaseCollector):
                 "country": spec.country,
                 "unit": point.unit or spec.unit,
                 "event_at": point.event_at.isoformat(),
+                "released_at": point.released_at.isoformat(),
+                "vintage_end_at": (
+                    point.vintage_end_at.isoformat() if point.vintage_end_at is not None else None
+                ),
                 "value": str(point.value),
                 "frequency_note": "保持 provider 原始粒度（日/月/季），不重采样",
             },
             source_url=source_url,  # 已脱敏（api_key → ***）
-            # FRED observations 不提供发布时间：置空 → effective_at = collected_at（防未来泄漏）
-            published_at=None,
+            # RawItem 以保守 release 为发布时间，effective_at=max(release,collected)。
+            published_at=point.released_at,
         )
 
     # ------------------------------------------------------------------
@@ -607,6 +715,13 @@ class MacroCollector(BaseCollector):
         """``raw_items`` 落库后写入 ``macro_events``（字段严格对齐 04 §15）。"""
         meta = payload.raw_json
         event_at = parse_iso8601(str(meta["event_at"]), field_name="event_at")
+        released_at = parse_iso8601(str(meta["released_at"]), field_name="released_at")
+        vintage_end_raw = meta.get("vintage_end_at")
+        vintage_end_at = (
+            parse_iso8601(str(vintage_end_raw), field_name="vintage_end_at")
+            if vintage_end_raw
+            else None
+        )
         unit = meta.get("unit")
 
         session.add(
@@ -614,13 +729,15 @@ class MacroCollector(BaseCollector):
                 event_code=str(meta["series_id"]),
                 country=str(meta["country"]),
                 event_at=event_at,
+                released_at=released_at,
+                vintage_end_at=vintage_end_at,
                 actual_value=to_value_decimal(meta.get("value")),
                 forecast_value=None,  # FRED observations 不含预期值，不凭空推断
                 previous_value=None,  # 同上（Phase 2 可由日历源补全）
                 unit=str(unit) if unit else None,
                 source_id=self.source.id,
                 collected_at=raw_item.collected_at,
-                # = max(event_at, collected_at)：严格满足 04 §15 的 event_at <= effective_at
+                # = max(released_at, collected_at)：禁止 release 前可见。
                 effective_at=raw_item.effective_at,
             )
         )

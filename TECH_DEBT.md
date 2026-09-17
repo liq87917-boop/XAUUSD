@@ -15,7 +15,7 @@
 
 | 项 | 数量 / 状态 |
 |---|---|
-| Alembic 迁移 | 0001_phase1_schema → 0005_phase2_author_lab_tables（单一 head） |
+| Alembic 迁移 | 0001_phase1_schema → 0006_macro_event_vintages（单一 head） |
 | Phase 1 表 | 15 张（`database/models/__init__.py::PHASE1_TABLES`），全部由迁移创建 |
 | Phase 2 表 | 4 张（`PHASE2_TABLES`，migration 0005；`ALL_TABLES` = 19 张） |
 | 采集器 | 3 个已注册：`market_collector` / `news_collector` / `macro_collector` |
@@ -25,7 +25,7 @@
 | Phase 2 多模型标注对比 | `scripts/compare_model_annotations.py`（**标准库读 xlsx**，零新增依赖）：三模型一致性统计 + 待人工裁决清单 `logs/pending_review.csv` + 共识 `logs/model_consensus.csv` + 报告 `docs/experiments/annotation_model_comparison.md`；**模型输出不作为金标准**；已填写的裁决表默认拒绝覆盖（退出码 4） |
 | Phase 2 金标准（ground truth） | `scripts/build_ground_truth.py`：人工裁决 + 三模型共识 → `logs/ground_truth_200.csv`（1000 格，`source` 区分 `human-adjudicated` / `3-model-consensus`，含 `overturn` 推翻标记）+《金标准生成报告》`docs/experiments/ground_truth_report.md`；人工裁决文件先字节级归档到 `logs/archive/` |
 | Phase 2 基线评估 | `scripts/evaluate_extractor.py`：正则抽取器 vs 人工金标准，**区分该判未判 / 提取错误 / 不该判却判**，输出准确率、召回率、精确率、混淆矩阵、点位差值分布 → `logs/extractor_eval.csv`（1000 格）+《Phase 2 基线评估报告》`docs/experiments/Phase2_基线评估报告.md` |
-| 测试 | 928 项（单元 614 / 集成 269 / 数据质量 25 / 泄漏 20；含 1 项环境条件 skip），全部 Mock、零外部网络 |
+| 测试 | 2379 passed / 1 skipped（2026-09-17，含 W0 前置可信度门禁） |
 | 质量门禁 | `ruff`（E/F/I/UP/B/SIM）、`mypy`（config + database + src + scripts）、CI（Python 3.12/3.13 + PostgreSQL 16 作业） |
 | 端到端复核 | `tests/integration/test_pipeline_integrity.py` + `scripts/phase1_pipeline_report.py` |
 
@@ -38,9 +38,9 @@
 
 | 编号 | 优先级 | 事项 | 计划阶段 |
 |---|---|---|---|
-| TD-01 | P1 | 外部数据源全部未与真实 API 联调（FRED / Yahoo / RSS） | Phase 1 收尾轮（拿到 Key 后真实冒烟） |
+| TD-01 | P1（部分解除） | FRED / Yahoo / RSS 已完成真实或合规缓存链路验证；行情备用源、完整新闻历史与持续在线冒烟仍未交付 | 上线前数据源收尾 |
 | TD-02 | P0 | 采集写路径未在 PostgreSQL 上端到端运行过（CI 只验证 schema + 种子） | Phase 1 收尾轮 |
-| TD-03 | P1 | `4h` K 线聚合缺失（provider 无 4h 粒度，采集层跳过） | Processor 层（Phase 1 收尾轮） |
+| TD-03 | P1（部分解除） | `4h` 已由 1h 满桶聚合并通过幂等测试；剩余问题是派生数据尚未绑定正式 `data_versions` / processor 血缘 | W0-5 前置收尾 |
 | TD-04 | P1 | 新闻时区不明确（naive）的行不生成 `news_events` | Phase 2 决策 |
 | TD-05 | P1 | `econ_calendar_collector` 未实现（CPI/PCE/NFP/FOMC 日历与预期值） | Phase 1 收尾轮 |
 | TD-06 | P1 | `weibo_collector` 未实现（Phase 2 主体） | Phase 2 |
@@ -52,14 +52,14 @@
 | TD-12 | P2 | `processed_items` / `job_runs` / `data_versions` / `audit_logs` 表已建但无写入路径 | 随 TD-09 / TD-11 |
 | TD-13 | P2 | `raw_media` 无下载器（图片二进制未落地，`storage_uri` 写入路径未验证） | Phase 2（微博图片） |
 | TD-14 | P2 | 依赖仅声明下界，无 lock 文件（可复现构建依赖 pip 解析） | 择期 |
-| TD-15 | P2 | 仓库未初始化 Git（当前无版本历史，回滚依赖人工备份） | 立即可做（非代码） |
+| TD-15 | ✅ 已解除 | 仓库已初始化 Git；2026-09-17 已在 W0-5 前创建本地数据库快照，代码检查点待本轮全量门禁通过后建立 | 本轮收尾 |
 | TD-16 | ✅ 已解除（框架） | ~~**作者库 CRUD 与首期 50~100 作者导入未实现**~~ → 仓储 + 审计 + CSV 导入 CLI 已交付；**剩余**：首期 50~100 位**真实**作者名单（需业务方提供，非代码问题） | Phase 2（名单等到即导入） |
 | TD-17 | P2 | 传播去重为**桶内两两比较（O(n²)）** + 连通分量"链式合并"；缺"链式证据 / 星型拓扑"列（schema 已冻结） | Phase 3（大语料需 SimHash / 向量检索） |
 | TD-18 | P2 | 分词升级路径未启用：默认 `cjk-ngram-v1`，jieba 切分需显式开关（切换 = `model_version` 变更，必须整体重算相似度） | Phase 3（中文分词与实体识别） |
 | TD-19 | P2 | `processed_items` 无 `error_message` 列 → 抽取失败详情写在 `structured_json`，SQL 级失败巡检需新迁移 | 有明确巡检需求时 |
-| TD-20 | P1 | 观点管道**无 CLI / 未接入 Scheduler**；`raw_items` → `author_posts` 归属链路未实现（依赖采集器，TD-06） | Phase 2 后续步骤 |
+| TD-20 | P2（部分解除） | ~~观点管道无 CLI；`raw_items` → `author_posts` 归属链路未实现~~ → W0-4 已交付 `import_real_posts.py` 与 `run_opinion_pipeline.py`，真实 19 帖可幂等进入完整链路；**剩余仅 Scheduler 自动调度与非手工来源的作者归属** | Scheduler 阶段 |
 | TD-21 | ✅ 已解除 | ~~已批准的 Phase 2 依赖（numpy / pandas / scikit-learn / httpx / jieba）未安装~~ → 用户已 `pip install -e ".[dev]"` 完成安装；`tests/unit/test_text_similarity.py` 的"未安装 jieba"分支因此转为 skip（不是失败） | — |
-| TD-22 | **P0（安全）** | **仓库根目录存在明文密钥文件 `新建 文本文档.txt`**（内容为 `DEEPSEEK_API_KEY=sk-…` + `DATABASE_URL`）。当前目录**不是 git 仓库**（无 `.git`），因此尚未进入版本历史；但该密钥已在会话/终端中出现并被多次读取，**必须立即轮换并删除该文件**，改用只存在于本地的 `.env`（已在 `.gitignore` 中） | 立刻（用户手动） |
+| TD-22 | **P0（待用户确认）** | 2026-09-17 复核时原明文文件已不在工作区，受控路径扫描未再发现疑似密钥；但历史记录表明密钥可能曾暴露，是否已在供应商侧轮换无法由代码证明 | 用户确认旧 DeepSeek / 数据库凭据均已轮换；之后方可关闭 |
 | TD-23 | P1 | **正则抽取器在点位/信息类型字段召回率过低**：全量 1000 格中该判未判 289 格（占失败 **73%**），核心四字段漏判占失败 77.1%；点位字段精确率 100%/90.5% 但召回率仅 33.1%/31.4%。根因：①抽取器按 `docs/10 §4.1/§4.4` 对条件句/引用/复盘/双重否定**一律降级 UNKNOWN 并丢弃方向不一致价格**，而人工裁决在对抗样本上仍给出了点位；②`entry_low/entry_high` 未纳入金标准 → 无法评估；③`information_type` 词典覆盖不足（80 格漏判 + 45 格错判） | 与产品口径对齐后（`docs/10 §4.4` 明确"对抗样本是否仍标注点位"），再改 `regex_extractor` 并复跑 `scripts/evaluate_extractor.py` |
 | TD-24 | ✅ 已解除 | ~~**Prompt few-shot 与评测语料逐字重叠（数据泄漏，红线）**~~ → `opinion-prompt-v2` 起 **12 条 few-shot 全部换成语料外自造句**，实测最长公共子串 **≤ 9 字符**（无整句重合）；新增回归测试 `test_few_shot_has_no_overlap_with_evaluation_corpus` 用 LCS 机械拦截（阈值 12） | 已修（2026-09-13，v2/v4/v5 复核） |
 | TD-25 | ✅ 已解除 | ~~**`information_type` 判定偏保守（看到数字就判 TECHNICAL）**~~ → 按人工裁决口径"**操作优先，驱动决定分类**"写入 `docs/10 §4.9` 规则 9 的 L1~L6 阶梯，并由 Prompt v2→v5 迭代落实：人工子集准确率 **46.2% → 92.3%**（12/13），100 格 `wrong_value` **8 → 1**。残余 1 格见 TD-27 | 已修（2026-09-13） |
@@ -67,6 +67,16 @@
 | TD-27 | ✅ 已解除 | ~~**Prompt 残余 1 格 + `horizon` 口径冲突**~~ → 人工最终裁决：①`mock-post-0009` **修改人工金标准为 `TECHNICAL`**（"操作优先于情绪"，模型纠正人工；已同步 `docs/10 §4.9` 规则 9 L3）；②`docs/10 §4.2` **补"短线思路/短线观望 → `15m`"**，金标准保留 `15M`。复核：20 条试点 Prompt v6 **五字段全 100%**；全量 200 条 `horizon` 由 0% → **100%**、`stop_loss` 0% → **100%**、`take_profit` 25% → **100%** | 已修（2026-09-13） |
 | TD-28 | ✅ 已按「路径 B」落地 | ~~**`information_type` 残余误差：驱动型文本 + 操作价位**~~ → 阶梯补 **`L2.5` 消息→`NEWS`** + L3 细化「操作价位优先，但情绪/消息若是**交易理由**（『…因此做多/做空』）则按驱动分类；仅背景附注式才判 `TECHNICAL`」；`docs/10 §4.9` 规则 9 与 `§4.5` 已同步（旧优先级 `MACRO > NEWS > POSITIONING > …` 标注为**以 §4.9 为准**）。实测（全量 200 条人工子集）：信息类型 **87.4% → 91.9%**、**回归 0 格**、核心四字段回到 **100%（四项全 PASS）**。残余 11 格见 TD-29 | 已修（2026-09-13，v13 定版） |
 | TD-29 | P2（待真实语料复核） | **「操作块 + 驱动尾句」的 `information_type` 边界**：定版后人工子集仍有 **11 格**不一致（`SENTIMENT→TECHNICAL` 7、`MACRO→TECHNICAL` 4），全部是「完整点位 + 驱动尾句」形态；同一形态在人工金标准里既判过 `MACRO`（`0027`）又判过 `TECHNICAL`（`0009`）、`SENTIMENT`（`0079` 等）→ 属**口径边界**（继续对 Mock 模板调 Prompt 会过拟合，v7→v11 已验证「修 A 坏 B」）。解除条件：用**真实作者帖子**重新裁决该边界后定 v14；验收：真实语料信息类型 ≥ 90% 且同类模板裁决内部一致。**在复核前冻结 v13 与 `§4.9` 规则 9** | Phase 2 真实语料验收阶段 |
+| TD-30 | P1（阻塞：正文语料不足） | **源与语料现状**：可用源仅 `fred_blog`（**正文 10 条**，median 2.5k）；`fed_press`/`ecb_press` 标题级 → 均定位 `EVENT` 且 `ecb_press` 已 `enabled=false`；`yahoo_gold`/`jin10`/`fx678`/`wallstreetcn`/`investing_gold` 及**第四轮 5 个黄金垂类源（kitco 404 / mining robots 403 / bullionvault 404 / goldseek robots 取不到 / investing news_301 robots 403）全部不可用** | 要凑 ≥100 条正文语料：**(A)** 用户提供已验证"全文 RSS"（我逐个冒烟）；**(B)** 授权"入口探测"（只读首页找官方 feed 链接）；**(C)** 调低验收目标到现有量级（如 30 条）；**(D)** 另行评审合规/成本的新闻 API。**标注流程按用户裁决暂不启动** |
+| TD-31 | P2（已实测，待决策） | **RSS 语料多为摘要级正文**：实测首轮 25 行中 **15 行 `content == title`**（`ecb_press` 14+、`fed_press` 全部），`fred_blog` 10 行才有正文（median 2.5k）；另 `fred_blog` **每篇都带图**（`has_media=true`，图内观点文本不可抽取）→ 观点语料可用量≈10 条 | 决策：①只保留"全文 RSS"源作观点语料；②标题级源统一 `source_type=EVENT`（`ecb_press` 待批）；③或对符合 robots 的源单独立项抓正文 |
+| TD-32 | ✅ 已解决（2026-09-17） | ~~`scripts/collect_rss.py --to-db` 未接线~~ → 已接通 `run_collector`，逐源写入 `raw_items + news_events + collector_runs`；默认仍 dry-run，真实写入需显式 `--to-db --no-dry-run`；带 90 天窗口、幂等复跑与单源 >40% 集中度告警 | 已修；W0-3 实测首轮 30 新增、复跑 0 新增 |
+| TD-33 | ✅ 已按 (b) 钉版本 | ~~**`ruff format --check` 随 ruff 版本漂移**~~ → venv 里 ruff 为 **0.16.7** 时全仓 76 文件报 "would be reformatted"（71 个是历史文件；88 列 black 风格折行 / docstring 归一化 vs 配置 `line-length = 100`）。**处置：在 `pyproject.toml` 的 dev 依赖里钉死 `ruff==0.16.7`**（文件内注明：升级 ruff 必须独立提交 + 同次跑 `ruff format .` 与全量门禁）；`.github/workflows/ci.yml` 实际门禁为 `ruff check .` + `mypy` + `pytest -q`（**不含 `format --check`**），故 CI 稳定性已恢复。遗留（另立待办）：76 个历史文件与 0.16.7 格式化结果不一致，如需开 `format --check` 门禁，须单独一次 `ruff format .` 纯格式提交 | 已修（2026-09-14） |
+| TD-34 | ✅ 已解决（2026-09-13） | ~~**`notes_collect` 混入源配置 `notes`**~~ → 用户裁决"只保留原始发布信息，剔除配置类内容"：`scripts/collect_rss.py::_to_row` **不再拼接 `spec.notes`**，本列只保留本次采集产生的质量标记（含图片 / 无可用发布时间 / 缺时区未猜测 / 采集用途=EVENT）；新增回归测试 `test_csv_notes_exclude_config_metadata` 机械拦截 | 已修 |
+| TD-35 | ✅ 已结案（2026-09-14，按**已知边界**归档） | **开源标注基准（标题级情感）不能替代 `docs/08 §5` 验收**：改用 HF 数据集（黄金 100 + 股吧 50）做 regex vs LLM v13 对照，`stance` 命中率仅 **2/100（正则）**、**0/100（LLM）**；但该基准是**标题级情感分类**（≠ 博主帖子观点抽取），且金标准来自外部数据集而非本项目 `docs/10` 口径的人工裁决 | 结论只作**工程对照**，写进《Phase 2 真实语料验收报告》（口径见 `docs/11 §1.6`）；**真实语料验收仍需人工裁决语料**；`docs/05` 的 Phase 2 验收结论**不得**依据本报告；**2026-09-14 裁决：按已知边界归档、不修补**；真实观点提取验证移交 Phase 3 |
+| TD-36 | ✅ 已结案（2026-09-14，按**已知边界**归档） | **正则抽取器在英文/标题级语料上基本不产出观点**：黄金 100 条英文标题里无观点 **90 条**、命中 **2 条**——它是为中文博主长帖设计的（词典 + 数字点位规则） | 记为**已知工具设计边界**（报告 §0/§6.2/§8 已写明）；如未来要覆盖英文源，须单独立项做英文规则集，**不在 Phase 2 范围**；**2026-09-14 裁决：按已知边界归档、不修补** |
+| TD-37 | ✅ 已结案（2026-09-14，用户裁决：**不改 Prompt**） | **LLM v13 对"描述型新闻标题"大量判 `UNKNOWN`**：黄金 100 条中 **90 格方向拒答**，且**全部** `wrong_value` 都是 `UNKNOWN`（无一格判反方向）——模型把"金价下跌 0.9%"当作**事实描述**而非**可交易观点**（符合 `docs/10 §4.9.0` 抽象原则与"只降不猜"） | **用户裁决（2026-09-14）：维持现状、不做代码修补** —— `opinion-prompt-v13` **保持冻结**（绝不教模型把描述句标成 `SHORT`，避免污染模型定义、未来把新闻当预测）；描述句不出方向、标题级源只作事件层（与 TD-31 一致）；**标题级情感分类留 Phase 3 的 News Alpha**。备选方案（已否决）：新增"新闻事实 → 方向映射"例外口径（会触动 `docs/10 §4.1.5`） |
+| TD-38 | ✅ 已加硬门禁（2026-09-17） | W0-4 的 19 条历史帖子没有独立采集时间，旧版曾生成 12 条可计算标签；`forward-return-v2` 现将全部 31 个评价行标记为 `UNTRUSTED_COLLECTION_TIME`，只允许验证管道，禁止进入 OOS / Alpha / 作者权重 | 只有取得可核验的独立 `collected_at` 后才能解除数据限制 |
+| TD-39 | ✅ 已解决（2026-09-17） | Phase 3 规划曾把特征表迁移编号写成 `0006`，与已经落地的 `0006_macro_event_vintages` 冲突 | 后续迁移已整体顺延为 `0007`–`0010` |
 
 
 ---
@@ -82,6 +92,14 @@
   （1 个来源、1 个 series、单轮），确认：HTTP 200、`observations` 结构未变、`macro_events` 落库正确、
   密钥不出现在日志 / `source_url` / `raw_json`。
 - **验收标准**：冒烟记录（请求数、落库行数、告警数）写入本文件「变更日志」，并把异常处理分支补齐测试。
+
+- **W0-2 实测（2026-09-17）**：FRED Key 经集中配置读取且不进入 repr/日志/raw；DFF 单 series
+  冒烟成功（6 条、0 重试）；采用官方 `output_type=4`（Initial Release Only）按年度分块回填
+  CPIAUCSL/PCEPI/PAYEMS/DFF/DFII10/DGS10/DTWEXBGS/FEDFUNDS，共 **11,680** 条。
+  第二轮 `inserted=0`、`duplicate=11,680`、`failed_chunks=0`；时间违规/重复键/密钥泄漏均为 0。
+  TD-01 中 **FRED 真实联调部分已解除**；Yahoo/RSS 与 PostgreSQL 写路径仍按各自技术债管理。
+- **保留限制**：完整 ALFRED 修订链未回填。`output_type=1` 的 realtime 边界会被查询窗口裁剪，
+  不能作为真实 revision end；当前数据只代表初值，禁止使用普通 FRED 最新修订值补历史空洞。
 
 ### TD-02 PostgreSQL 采集写路径未验证（P0）
 
@@ -108,6 +126,14 @@
   `effective_at >= 最后一根子 K 线 close_time`（否则构成泄漏）。
 - **验收标准**：新增 `pytest` 用例覆盖（a）4h 行 OHLC 与子 K 线一致；（b）未收盘窗口不产出；
   （c）`effective_at` 不变式成立；（d）重跑幂等。
+
+- **进展（2026-09-17，Phase 3.0 W0-1）**：`scripts/_market_data.py::aggregate_bars_to_4h` 与
+  `scripts/backfill_market_bars.py::aggregate_and_insert_4h` 已交付；真实回填产生 XAUUSD/DXY/USDCNY
+  的派生 4h bar，半桶分别丢弃 620/239/1444 个，连续复跑的 4h 新插入均为 0。相关单元/集成测试
+  覆盖 OHLC、半桶、时区读回、`effective_at` 与幂等。
+- **剩余解除条件**：聚合尚未作为独立 Processor 写入 `processed_items` 与 `data_versions`，不满足
+  `docs/06 §13` 的完整加工血缘要求；在补齐 append-only Processor 记录和 PostgreSQL 写路径验收前，
+  TD-03 保持 **P1 / 部分解除**，不得标为完全关闭。
 
 ### TD-04 时区不明确的新闻不生成 `news_events`（P1）
 
@@ -453,8 +479,8 @@
 | 基线评估（2026-09-13） | 新增 `scripts/evaluate_extractor.py`（只读、可注入抽取器）：`logs/ground_truth_200.csv` vs `mock-regex-v1`，**严格区分该判未判 / 提取错误 / 不该判却判**，出混淆矩阵与点位差值分布 → `logs/extractor_eval.csv` + 《Phase 2 基线评估报告》。实测（人工子集口径）：方向 **100%**（PASS）、目标位 25%、止损 0%、周期 0%、信息类型 40.7%；全量 1000 格：命中 312 / 该判未判 **289** / 提取错误 103 / 不该判却判 **4**（漏判占失败 73%）。**登记 TD-23（召回率过低，P1）**；修两个工程缺陷（测试覆盖真实产物、报告 f-string 未插值）；测试 898 → **928 项**（927 passed + 1 skipped） |
 | LLM 抽取器基建（2026-09-13，团队确认 5 项设计 + 4 项强制要求） | 新增 `src/processors/llm_client.py`（同步 DeepSeek 客户端：超时重试 ≤3 / 滑动窗口 60 次每分钟 / 429 遵守 `Retry-After` / 5xx 指数退避 / 401 不重试 / `max_api_calls` 预算门禁 / `redact()` 全链路脱敏）、`prompt_opinion.py`（`opinion-prompt-v1`，中文指令 + 英文键名 + 6 few-shot，规则逐条对齐 `docs/10 §4.9`）、`llm_cache.py`（键含 `prompt_version` → 改 Prompt 自动失效；`auto/readonly/refresh/off`；原子写入；失败也缓存）、`llm_extractor.py`（缓存优先 → API → 复用 `build_drafts()` 校验；单帖失败降级诊断，401/缺 Key 抛错）；`DiagnosticCode` 新增 `llm_api_error` / `llm_parse_error`；`config/settings.py` 新增 `SecretStr` 类型的 `deepseek_*` 配置（`repr()` 掩码）。新增测试 **85 项**（MockTransport + 假时钟，零网络零 token），全套 **1012 passed / 1 skipped**；`ruff` / `mypy`（66 files）全绿；**未新增迁移、未改 schema、未加依赖**。**修复真实缺陷（安全）**：`tests/conftest.py` 的网络守卫只拦 socket 非本机地址，实测在**本机代理（127.0.0.1:7892）**环境下 httpx 仍可真实访问外网（探针真的收到了 api.deepseek.com 的 401，未消耗 token）→ 新增 **httpcore 后端层拦截**（`SyncBackend/AnyIOBackend.connect_tcp`），并用回归测试锁定 |
 | LLM 试点 20 条（2026-09-13，真实 API，团队授权）+ 评估脚本接线 | ①`scripts/evaluate_extractor.py` 接上 `--extractor llm / --limit N / --sample head\|stratified`：LLM 产物**独立落盘**（`logs/extractor_eval_llm.csv` + 《Phase2_LLM试点报告.md》 + `<eval>_usage.json`），并把 **token/费用台账**（本次真实调用 vs 缓存复用、峰/谷两档价）打进控制台与报告；`--sample stratified` 按线索桶（条件句/引用/弱化/复盘/看图/点位）轮询，保证对抗样本进得了试点。②**真实 API 探针**（`logs/_probe_deepseek.py`，耗 ~65 tokens）确认 4 条事实：`GET /models` 只有 `deepseek-flash`/`deepseek-v4-pro`（`deepseek-chat` 已被**静默路由**到 flash，响应 `model` 回显 flash）、新模型**默认开启思考模式**（故显式 `thinking={"type":"disabled"}`）、`response_format=json_object` 可用、`usage` 含 `prompt_cache_hit_tokens`/`prompt_cache_miss_tokens` → 默认模型改为 `deepseek-flash`，新增 `estimate_cost_usd()`/`is_peak_utc()` 与官方价目表（含峰谷价、旧名别名）。③**20 条试点实测**：20/20 成功、0 失败 0 解析失败；输入 **33,180 tokens**（上下文缓存命中 27,520 / 未命中 5,660）+ 输出 1,690 → 峰值价 **$0.0039**（≈¥0.028）/ 低谷价 $0.0019；`readonly` 复跑 **20/20 命中、0 次请求、$0**；核心四字段人工子集 **92.3%**（方向 100%、止损 100%、目标位 100%、周期 0%），信息类型 46.2%。④**发现 3 个真问题并登记 TD-24/25/26**：few-shot 与语料**逐字重叠**（18/200 条污染，违反数据泄漏红线，必须换语料外例句 + 升 prompt v2）、`information_type` 见数字就判 TECHNICAL（7 格全错，需人工补优先级口径）、`no_opinion` 与 §4.9 规则 4 冲突（few-shot 第 6 例自己教错了）。⑤`.gitignore` 增加显式 `logs/llm_cache/` 规则（缓存=付费 API 原始数据，严禁入库）；实测 20 个缓存文件**无 `.tmp` 残留、无 `sk-` 明文**。新增测试 **27 项**（思考模式/缓存计费/费用估算/台账分层/抽样/LLM 端到端/致命错误快速失败），全套 **1039 passed / 1 skipped**；`ruff` / `mypy`（66 files）全绿 |
+| 开源标注基准对照（2026-09-14） | 新增 `scripts/load_hf_benchmark.py`（HF 数据集加载 + 字段映射：默认 `--dry-run`；未装 `datasets` 时走 datasets-server **只读 HTTP** 接口，**零新增依赖**；原始标签逐条留档、不改写）+ `scripts/report_hf_benchmark.py`（Wilson 95% CI 报告生成器，核心结论只基于 `stance`）与 45 项单测；`scripts/evaluate_extractor.py` 新增 **`scoring=NOT_EVALUATED`** 机制（金标准留空 + 该标记时，模型给值只记「额外信息」，**不计假阳性**、不进任何分母；口径见 `docs/10 §7.1`）；实测 150 条（黄金 100 + 股吧 50）：正则 2/100、LLM 0/100（其中 90 格为 `UNKNOWN` 合规拒答，**无判反方向**），LLM 真实调用 150 次 **$0.0250**、失败 0/解析失败 0；报告见 `docs/experiments/Phase 2 真实语料验收报告.md`；登记 **TD-35/36/37**；全套 **2261 passed / 1 skipped**，`ruff` / `mypy` 全绿 |
+| **Phase 2 收官（2026-09-14）** | 用户裁决：①**不改 Prompt**（`opinion-prompt-v13` 保持冻结，TD-37 结案）；②报告新增《免责声明与适用范围》节（任务错配 / `UNKNOWN` 合规 / 能证明什么 / 验证移交 Phase 3）；③**TD-35/36/37 全部按「已知边界」归档、不做代码修补**（本质是任务定义差异，非代码缺陷）；④150 条基准产物归档至 `logs/archive/phase2_hf_benchmark/`（含 `MANIFEST.md`：语料 / 结果 / 四条裁决 / 复现命令 / sha256）；⑤`docs/05` 标记 **Phase 2 已通过**，Phase 3 **待人工审核报告后启动**；真实观点提取验证（中文快讯 19 条或真实博主帖子）与标题级情感分类（News Alpha）移交 Phase 3 |
 | Prompt 迭代 v2→v5（2026-09-13，人工裁决落地） | 按用户二次裁决完成 `opinion-prompt` 四次迭代并**用同一批 20 条真实 API 逐版验证**（合计 ≈ $0.023）：①**TD-24 修掉**：12 条 few-shot 全部换成语料外自造句，实测最长公共子串 **≤ 9 字符**，新增 LCS 回归测试机械拦截数据泄漏；②**TD-25 修掉**：`docs/10 §4.9` 新增规则 9「information_type 决策阶梯」（**操作优先，驱动决定分类**：L1 持仓→POSITIONING、L2 宏观→MACRO、L3 情绪→SENTIMENT、L4 引用/复盘→OTHER、L5 无驱动时的操作/纯图表→TECHNICAL；L1~L4 优先于 L5），人工子集信息类型准确率 **46.2% → 92.3%**、100 格 `wrong_value` **8 → 1**；③**TD-26 修掉**：`no_opinion` 语义二次裁决（宏观播报 = `UNKNOWN` + `MACRO` + `no_opinion=true`，`opinions=[]` 只留给"连信息类型线索都没有"的帖子），试点**无观点率 10% → 0%**；④v3 补「观望→FLAT、情绪≠FLAT」（`§4.1`），v5 补 L3 判别线（情绪须为主旨或**语句带方向含义**）；⑤新增对比交付文档 `docs/experiments/Phase2_LLM试点_v1-v5对比.md`（逐字段五版对比 + 条件句/引用句/多目标逐帖原文与原始 JSON）；⑥登记 **TD-27**（残余 1 格 `mock-post-0009` 判别线 + `mock-post-0028` 的 `15M` 与 `§4.2`「短线→1H」冲突，需一句话裁决）；新增测试 22 项（prompt 模块），全套 **1099 passed / 1 skipped**；`ruff` / `mypy`（66 files）全绿 |
 | 最终交付（2026-09-13，全量 200 + 基线对比 + git 初始化） | ①**全量 200 条真实 API 运行**（`llm-deepseek-v6`）：人工子集核心四字段 **27.8% → 100%**（方向 100%、周期 0%→100%、止损 0%→100%、目标位 25%→100%）、信息类型 **40.7% → 87.4%**；逐格**修复 385 / 回归 14**；成本 **$0.0346**（180 次调用、缓存命中 93.8%），API 失败 0、解析失败 0、confidence 非法 0；②新增 `scripts/compare_extractor_baselines.py` + `tests/unit/test_baseline_comparison.py`（13 项）→《Phase 2 基线对比报告.md》（1000 格对齐、0 口径问题、含修复/回归逐格清单与 `docs/08 §5` PASS/FAIL）；③按人工最终裁决改判 `mock-post-0009` 金标准为 `TECHNICAL`（`provenance/reviewer` 留痕 + 改前版本归档）并把「短线思路 → `15m`」写入 `docs/10 §4.2`（**TD-27 关闭**）；④**登记 TD-28**（信息类型残余 17 格 = 驱动型文本 + 操作价位 + 阶梯缺 `NEWS` 级；路径 A/B 待一句话裁决）；⑤`git init` + 首次提交（`.gitignore` 覆盖 `.env`/`logs/`/`*.db`，提交前用 `git status --porcelain` 核对**无密钥、无数据、无缓存**入库）；测试 1099 → **1380 passed / 1 skipped**，`ruff` / `mypy`（67 files）全绿；未新增迁移、未改 schema、未新增依赖 |
 | 全量重跑 + 最终对比报告（2026-09-13，人工二次裁决「路径 B」） | ①`opinion-prompt-v7 → v13` 共 7 次迭代（每次都**重跑并留档**，见 `docs/experiments/Phase2_LLM_Prompt迭代对比_v1-v6.md（v7~v13 的逐版结论见本行与 §3 TD-28）`）：补 **`L2.5` 消息→`NEWS`**、L3 增加「交易理由 vs 背景附注」两个例外与判别线、宏观驱动须为具体变量、horizon 规则经实测**回退**到 v6 版本；②`docs/10 §4.9` 规则 9 阶梯重写（L1 持仓 > L2 宏观 > L2.5 消息 > L4/L2.5 例外 > L3 操作价位 > L5 引用/复盘 > L6 兜底），`§4.5` 旧优先级标注**以 §4.9 为准**，`§4.2` 补「短线思路→15m」并注明**不可再细化**（实测回退经验）；③**全量 200 条定版结果**（`llm-deepseek-v13`，人工子集）：方向 100%、周期 100%、止损 100%、目标位 100%、**信息类型 91.9%**，相对正则 **+0/+100/+100/+75/+51.1 pp**，逐格**修复 380 格、回归 0 格**；成本 180 次调用 **$0.0353**（缓存命中 94.8%），失败 0；④`scripts/compare_extractor_baselines.py` 新增「**人工 ↔ 模型 对齐案例**」章节：5.1 模型纠正人工（`mock-post-0009`：`SENTIMENT→TECHNICAL`，已对齐）、5.2 人工纠正模型（11 格逐格原文）；⑤登记 **TD-29**（口径边界待真实语料复核）；测试 13 → **17 项**（对比脚本），全套 **1380 → 1891 passed / 1 skipped**，`ruff` / `mypy`（67 files）全绿 |
-
-

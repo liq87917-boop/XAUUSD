@@ -352,9 +352,9 @@ async def test_missing_minute_emits_warning(
     assert any("缺失 1 根 K 线" in warning for warning in result.warnings), result.warnings
     # 10 分钟窗口只拿到 3 根 → 同时触发"低于预期下限"告警
     assert any("低于预期下限" in warning for warning in result.warnings), result.warnings
-    assert [
-        record for record in caplog.records if record.levelno == logging.WARNING
-    ], "数据质量告警必须进入 WARNING 日志"
+    assert [record for record in caplog.records if record.levelno == logging.WARNING], (
+        "数据质量告警必须进入 WARNING 日志"
+    )
 
 
 async def test_insufficient_records_without_gap_still_warns(
@@ -463,9 +463,7 @@ async def test_missing_instrument_yields_partial_failed_with_guidance(
         base_url="https://market.invalid",
         config_json={"symbols": ["NOT_LISTED"], "timeframes": ["1m"]},
     )
-    collector = MarketCollector(
-        source, transport=mock_transport([_chart_response([_bar_row(0)])])
-    )
+    collector = MarketCollector(source, transport=mock_transport([_chart_response([_bar_row(0)])]))
 
     result = await run_collector(session, collector, window=WINDOW)
 
@@ -521,6 +519,55 @@ async def test_cursor_resume_between_symbol_pairs(
     assert len(_bars(session)) == 2
 
 
+def test_provider_symbol_mapping_is_used_only_in_request_url(
+    session: Session, make_source: Any
+) -> None:
+    """**回归测试（实测 HTTP 403，2026-09-15）**：`provider_symbols` 映射必须生效。
+
+    Yahoo 没有 `XAUUSD`/`DXY` 这些项目代码（`XAUUSD` → 403/404、裸 `DXY` → HTTP 200 但 0 根 bar），
+    采集器把项目标的直接当 ticker 用会**全量失败**。映射**只影响请求 URL**：
+    `instruments` 解析、`raw_items` 幂等键、去重仍使用项目标的。
+    """
+    from src.collectors.market import MarketCollector
+
+    seed_instruments(session)
+    start = datetime(2026, 1, 5, tzinfo=UTC)
+    window = CollectWindow(start_at=start, end_at=start + timedelta(days=1))
+
+    mapped = make_source(
+        name="market_mapped",
+        source_type=SourceType.MARKET,
+        base_url="https://market.invalid",
+        enabled=True,
+        config_json={
+            "symbols": ["XAUUSD"],
+            "timeframes": ["1d"],
+            "provider_symbols": {"XAUUSD": "GC=F"},
+        },
+    )
+    collector = MarketCollector(mapped, instrument_symbols=("XAUUSD",), timeframes=("1d",))
+
+    request = collector._build_request(symbol="XAUUSD", timeframe="1d", window=window)
+
+    assert request.url == "https://market.invalid/v8/finance/chart/GC=F"
+    assert request.params is not None
+    assert request.params["interval"] == "1d"
+
+    # 未配置映射时回落到项目标的本身（向后兼容）
+    plain = make_source(
+        name="market_plain",
+        source_type=SourceType.MARKET,
+        base_url="https://market.invalid",
+        enabled=True,
+        config_json={"symbols": ["XAUUSD"], "timeframes": ["1d"]},
+    )
+    plain_collector = MarketCollector(plain, instrument_symbols=("XAUUSD",), timeframes=("1d",))
+
+    assert plain_collector._build_request(
+        symbol="XAUUSD", timeframe="1d", window=window
+    ).url.endswith("/chart/XAUUSD")
+
+
 # ---------------------------------------------------------------------------
 # 配置 ↔ 注册表 ↔ 采集器 接线
 # ---------------------------------------------------------------------------
@@ -539,6 +586,3 @@ def test_seeded_market_source_resolves_to_market_collector(
     # 种子列出 4h，但 provider 不支持 → 构造时已过滤（运行期仍会告警）
     assert "4h" not in collector.timeframes
     assert "1m" in collector.timeframes
-
-
-

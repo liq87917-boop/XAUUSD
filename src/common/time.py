@@ -10,7 +10,7 @@
 - collected_at：系统实际采集到该数据的时间。
 - effective_at：系统允许使用该数据的最早时间，必须 >= max(published_at, collected_at)，
   否则就构成未来数据泄漏。
-- event_at：事件本身发生时间（宏观数据公布时间、新闻事件时间）。
+- event_at：事件本身发生时间；对 FRED 宏观序列是观测所属期，发布时间另用 released_at。
 """
 
 from __future__ import annotations

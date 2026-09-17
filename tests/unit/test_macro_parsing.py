@@ -27,6 +27,7 @@ from src.collectors.macro import (
     parse_fred_observations,
     parse_macro_csv,
     parse_observation_date,
+    parse_realtime_boundary,
     to_value_decimal,
 )
 from src.collectors.types import CollectWindow
@@ -43,7 +44,7 @@ SPEC = MacroSeriesSpec(series_id="CPIAUCSL", country="US", unit="index")
 def _obs(day: str, value: object, **extra: Any) -> dict[str, Any]:
     return {
         "realtime_start": "2026-09-12",
-        "realtime_end": "2026-09-12",
+        "realtime_end": "9999-12-31",
         "date": day,
         "value": value,
         **extra,
@@ -99,11 +100,20 @@ def test_parse_observation_date_returns_utc_midnight() -> None:
     assert parse_observation_date(None) is None
 
 
+def test_realtime_boundary_uses_conservative_next_day() -> None:
+    assert parse_realtime_boundary("2026-07-15") == datetime(2026, 7, 16, tzinfo=UTC)
+    assert parse_realtime_boundary("9999-12-31", open_ended=True) is None
+
+
 def test_observation_record_id_is_stable() -> None:
     observation = MacroObservation(
-        series_id="CPIAUCSL", event_at=datetime(2026, 7, 1, tzinfo=UTC), value=Decimal("319.6")
+        series_id="CPIAUCSL",
+        event_at=datetime(2026, 7, 1, tzinfo=UTC),
+        released_at=datetime(2026, 8, 13, tzinfo=UTC),
+        vintage_end_at=None,
+        value=Decimal("319.6"),
     )
-    assert observation.record_id == "CPIAUCSL:2026-07-01"
+    assert observation.record_id == "CPIAUCSL:2026-07-01:2026-08-13"
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +181,25 @@ def test_parse_fred_observations_deduplicates_dates() -> None:
 
     assert len(parsed.points) == 1
     assert parsed.skipped == 1
-    assert "duplicate_date" in parsed.skip_reasons
+    assert "duplicate_vintage" in parsed.skip_reasons
+
+
+def test_parse_fred_observations_requires_release_boundary() -> None:
+    payload = _fred_payload([_obs("2026-07-01", "1.0", realtime_start="")])
+
+    with pytest.raises(CollectorError, match="realtime_start"):
+        parse_fred_observations(payload, spec=SPEC)
+
+
+def test_initial_release_response_does_not_treat_query_end_as_vintage_end() -> None:
+    payload = _fred_payload(
+        [_obs("2026-07-01", "1.0", realtime_end="2026-09-16")], output_type=4
+    )
+
+    parsed = parse_fred_observations(payload, spec=SPEC)
+
+    assert parsed.points[0].released_at == datetime(2026, 9, 13, tzinfo=UTC)
+    assert parsed.points[0].vintage_end_at is None
 
 
 def test_parse_fred_error_message_raises() -> None:
@@ -198,30 +226,45 @@ def test_parse_fred_rejects_malformed_payload(payload: object) -> None:
 # ---------------------------------------------------------------------------
 def test_parse_macro_csv_reads_required_columns() -> None:
     csv_text = (
-        "series_id,date,value,unit\n"
-        "CPIAUCSL,2026-07-01,319.6,index\n"
-        "DFF,2026-07-02,4.33,percent\n"
+        "series_id,date,released_at,value,unit\n"
+        "CPIAUCSL,2026-06-01,2026-07-15,318.1,index\n"
+        "DFF,2026-07-01,2026-07-02,4.33,percent\n"
     )
 
     parsed = parse_macro_csv(csv_text)
 
     assert parsed.skipped == 0
     assert [(point.series_id, point.event_at.date().isoformat()) for point in parsed.points] == [
-        ("CPIAUCSL", "2026-07-01"),
-        ("DFF", "2026-07-02"),
+        ("CPIAUCSL", "2026-06-01"),
+        ("DFF", "2026-07-01"),
     ]
-    assert parsed.points[0].value == Decimal("319.6000000000")
+    assert [point.released_at.date().isoformat() for point in parsed.points] == [
+        "2026-07-15",
+        "2026-07-02",
+    ]
+    assert parsed.points[0].value == Decimal("318.1000000000")
     assert parsed.points[0].unit == "index"
 
 
 def test_parse_macro_csv_skips_incomplete_rows() -> None:
-    csv_text = "series_id,date,value\nDFF,2026-07-01,.\nDFF,2026-07-02,4.33\n"
+    csv_text = (
+        "series_id,date,released_at,value\n"
+        "DFF,2026-07-01,2026-07-02,.\n"
+        "DFF,2026-07-02,2026-07-03,4.33\n"
+    )
 
     parsed = parse_macro_csv(csv_text)
 
     assert len(parsed.points) == 1
     assert parsed.skipped == 1
     assert "incomplete_row" in parsed.skip_reasons
+
+
+def test_parse_macro_csv_rejects_missing_release_value() -> None:
+    csv_text = "series_id,date,released_at,value\nDFF,2026-07-01,,4.33\n"
+
+    with pytest.raises(CollectorError, match="released_at"):
+        parse_macro_csv(csv_text)
 
 
 @pytest.mark.parametrize(
@@ -250,8 +293,8 @@ def test_collector_rejects_unknown_provider() -> None:
         MacroCollector(_source(config_json={"provider": "trading-economics"}))
 
 
-def test_collector_requires_api_key_from_environment(monkeypatch) -> None:
-    """密钥只从环境变量读取；缺失时给出可执行指引（绝不硬编码）。"""
+def test_collector_rejects_custom_key_environment_name(monkeypatch) -> None:
+    """密钥只能通过集中配置的 FRED_API_KEY 读取，禁止业务代码散读环境变量。"""
     monkeypatch.delenv("GOLD_AI_TEST_FRED_KEY", raising=False)
 
     with pytest.raises(CollectorError) as excinfo:
@@ -259,15 +302,33 @@ def test_collector_requires_api_key_from_environment(monkeypatch) -> None:
 
     message = str(excinfo.value)
     assert "GOLD_AI_TEST_FRED_KEY" in message
-    assert "环境变量" in message
+    assert "集中配置" in message
+    assert "FRED_API_KEY" in message
 
 
 def test_collector_reads_api_key_from_environment(monkeypatch) -> None:
     monkeypatch.setenv("GOLD_AI_TEST_FRED_KEY", "secret-key-value")
 
-    collector = MacroCollector(_source())
+    with pytest.raises(CollectorError, match="集中配置"):
+        MacroCollector(_source())
+
+
+def test_collector_reads_api_key_from_central_settings(monkeypatch) -> None:
+    from config.settings import reset_settings_cache
+
+    monkeypatch.setenv("FRED_API_KEY", "secret-key-value")
+    reset_settings_cache()
+    source = _source(
+        config_json={
+            "provider": "fred",
+            "series": ["CPIAUCSL"],
+            "api_key_env": "FRED_API_KEY",
+        }
+    )
+    collector = MacroCollector(source)
 
     assert collector._api_key == "secret-key-value"  # noqa: SLF001 - 断言注入来源
+    reset_settings_cache()
 
 
 def test_collector_normalizes_series_configurations() -> None:
@@ -308,6 +369,9 @@ def test_masked_url_never_contains_api_key() -> None:
     assert "super-secret" not in masked
     assert "api_key=***" in masked
     assert request.params["observation_start"] == "2026-09-02"  # 回看 10 天
+    assert request.params["output_type"] == 4
+    assert request.params["realtime_start"] == "2026-09-11"
+    assert request.params["realtime_end"] == "2026-09-11"
 
 
 def test_observation_range_uses_lookback_window() -> None:

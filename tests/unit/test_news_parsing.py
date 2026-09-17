@@ -166,6 +166,19 @@ def test_strip_html_removes_tags_and_collapses_whitespace() -> None:
     assert strip_html(None) is None
 
 
+def test_strip_html_decodes_entities_from_real_feeds() -> None:
+    """真实源大量用数字/命名实体（`&#8217;`/`&#8220;`/`&#8230;`）：必须解码，否则污染语料。
+
+    回归背景：2026-09-13 冒烟实测 `fredblog.stlouisfed.org/feed/` 正文含 63 处实体，
+    落到 CSV `content` 里成了 `New York Fed&#8217;s`。
+    """
+    assert strip_html("New York Fed&#8217;s data") == "New York Fed’s data"
+    assert strip_html("&#8220;time saved,&#8221;") == "“time saved,”"
+    assert strip_html("more &#8230;") == "more …"
+    assert strip_html("Tom &amp; Jerry &lt;p&gt;literal&lt;/p&gt;") == "Tom & Jerry <p>literal</p>"
+    assert strip_html("<p>a&nbsp;b</p>") == "a b"
+
+
 # ---------------------------------------------------------------------------
 # RSS / Atom 解析
 # ---------------------------------------------------------------------------

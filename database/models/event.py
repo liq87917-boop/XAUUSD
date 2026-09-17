@@ -3,9 +3,11 @@
 Phase 1 只做"采集 + 结构化落库"，不做情绪建模与 Alpha（属于 Phase 2/3）。
 
 时间语义（宏观数据的因果关键）：
-- ``macro_events.event_at``：官方公布时间（事件发生时间）。
-- ``macro_events.effective_at``：系统允许使用该数据的最早时间，必须 >= event_at，
-  否则意味着在公布前就"知道"了数据 —— 严重的未来数据泄漏。
+- ``macro_events.event_at``：观测所属期（observation date），不是发布时间。
+- ``macro_events.released_at``：该 vintage 可被研究层使用的保守起点。
+- ``macro_events.vintage_end_at``：该 vintage 被修订替代的排他边界；NULL 表示仍有效。
+- ``macro_events.effective_at``：系统实际允许使用的最早时间，必须不早于
+  ``released_at`` 与 ``collected_at``。
 - 新闻：``published_at`` 必填，``effective_at`` >= max(published_at, collected_at)。
 """
 
@@ -69,18 +71,26 @@ class MacroEvent(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
             "event_code",
             "country",
             "event_at",
-            name="uq_macro_events_source_code_country_event_at",
+            "released_at",
+            name="uq_macro_events_source_code_country_event_release",
         ),
-        sa.CheckConstraint("event_at <= effective_at", name="event_at_le_effective_at"),
+        sa.CheckConstraint("released_at <= effective_at", name="released_at_le_effective_at"),
         sa.CheckConstraint("collected_at <= effective_at", name="collected_at_le_effective_at"),
+        sa.CheckConstraint(
+            "vintage_end_at IS NULL OR vintage_end_at > released_at",
+            name="vintage_end_after_release",
+        ),
         sa.Index("ix_macro_events_event_at", "event_at"),
         sa.Index("ix_macro_events_code_country", "event_code", "country"),
+        sa.Index("ix_macro_events_release_window", "released_at", "vintage_end_at"),
     )
 
     # 事件代码保持自由文本：CPI / PCE / NFP / FOMC / ECB_RATE / BOJ_RATE ...
     event_code: Mapped[str] = mapped_column(sa.String(100), nullable=False)
     country: Mapped[str] = mapped_column(sa.String(50), nullable=False)
     event_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
+    released_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
+    vintage_end_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
     actual_value: Mapped[sa.Numeric | None] = mapped_column(MACRO_VALUE, nullable=True)
     forecast_value: Mapped[sa.Numeric | None] = mapped_column(MACRO_VALUE, nullable=True)
     previous_value: Mapped[sa.Numeric | None] = mapped_column(MACRO_VALUE, nullable=True)

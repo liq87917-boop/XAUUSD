@@ -57,6 +57,16 @@
 Phase 2 的四张表已在 migration 0005 建好；Phase 3 及以后的表
 （feature_snapshots、alpha_signals、strategies…）**故意不建**，并由测试强制校验。
 
+Phase 3 W0-4 已接通 19 条已验收真实快讯的可追溯研究链（命令均默认 dry-run）：
+
+```powershell
+python scripts/import_real_posts.py --no-dry-run
+python scripts/run_opinion_pipeline.py --no-dry-run
+python scripts/build_opinion_labels.py --no-dry-run
+```
+
+标签严格使用晚于观点 `effective_at` 的下一根同 horizon K 线；未声明周期时只在 1h/4h/1d 评价网格分别计算，并显式标记为 `evaluation_grid`，不冒充作者声明。
+
 **标注演练数据（已就绪）**：`logs/posts.csv`（250 条**合成**博文，`is_mock=true`）→
 `logs/annotation_sample.csv`（200 条待人工标注，判定列全空）。合成数据只用于跑通流程与校准
 标注标准，**任何准确率结论必须用真实数据复跑**（`docs/10 §2.2`）。
@@ -216,6 +226,16 @@ class WeiboCollector(BaseCollector):
 | 断点续采 | 每个 feed 一"页"，游标 `target_index`；单个 feed 失败不影响其他 feed，下一轮从断点继续 |
 | 测试 | 单元 35 项（RSS/Atom 解析、UTC 转换、歧义标记、XML 异常/DOCTYPE/超大响应、CSV、配置与游标）+ 集成 18 项（正常落库与 `news_events` 字段、跨源去重、幂等、超时/429/500 重试、XML 异常、歧义时区、窗口过滤、多 feed 续采、CSV 模式、条数阈值告警） |
 
+Phase 3 W0-3 的白名单 RSS 回填使用 `rss_collector`。CLI 默认只预览；正式落库必须显式开启，且可用只读缓存完成零网络复跑：
+
+```powershell
+python scripts/collect_rss.py --dry-run --cache-mode readonly --source fred_blog --source fed_press
+python scripts/collect_rss.py --to-db --no-dry-run --cache-mode readonly `
+  --source fred_blog --source fed_press --lookback-days 90
+```
+
+落库路径同时写 `raw_items`、有明确发布时间的 `news_events` 与 `collector_runs`；无可靠发布时间的条目只保留原始层。重复运行按内容哈希幂等，并在任一来源占比超过 40% 时输出集中度告警。
+
 > 顺带修复的真实缺陷（有回归测试）：Alembic `env.py` 的 `logging.config.fileConfig()` 默认
 > `disable_existing_loggers=True`，会把 `gold_ai.*` logger 全部禁用 —— 凡在已配置日志的进程里
 > 跑过迁移，后续采集日志就静默消失。现已显式传 `disable_existing_loggers=False`。
@@ -242,12 +262,13 @@ class WeiboCollector(BaseCollector):
 |---|---|
 | 数据源 | **FRED（美联储经济数据）官方公开 API** `/fred/series/observations`，series 列表由 `sources.config_json["series"]` 配置（支持 `"CPIAUCSL"` 或 `{"series_id","country","unit"}`）；**离线兜底**：`config_json["csv_path"]` 指向本地 CSV（无 Key 环境/存档数据）。**严禁爬取收费站点** |
 | 密钥安全 | API Key 只从**环境变量**读取（`config_json["api_key_env"]`，默认 `FRED_API_KEY`）：**绝不硬编码 / 写库**；`source_url` 与 `raw_json` 中一律脱敏为 `api_key=***`（有专项测试） |
-| 时间对齐（防泄漏） | `event_at` = 观测所属日期（UTC 当日 00:00，**保持 provider 原始粒度，日/月/季不重采样**）；FRED 观测**不提供发布时间** → `published_at` 置空、`effective_at = collected_at`，严格满足 04 §15 的 `event_at <= effective_at`；**未来日期观测直接跳过并告警**（否则会触发 CHECK / 泄露未来信息） |
-| 落库 | 严格按 04 §15 写 `macro_events`（`event_code` / `country` / `event_at` / `actual_value` / `unit` / `source_id` / `collected_at` / `effective_at`）；`forecast_value` 与 `previous_value` 保持 NULL（FRED 观测不含预期值，**不凭空推断**）；逐条保留 `raw_items(item_type=MACRO)` |
+| 时间对齐（防泄漏） | `event_at` = 观测所属期（不是发布时间）；历史回填使用 ALFRED `output_type=4`（Initial Release Only）。API 只有日期精度，故 `released_at` 保守取 `realtime_start` 次日 00:00 UTC；查询边界不冒充修订失效日。`effective_at >= max(released_at, collected_at)`，缺 release 硬失败 |
+| 落库 | 严格按 04 §15 写 `macro_events`；同一观测期的不同修订按 `(source,event_code,country,event_at,released_at)` 追加保存，表为 append-only；`forecast_value` 与 `previous_value` 保持 NULL（不凭空推断）；逐条保留 `raw_items(item_type=MACRO)` |
 | 采集计划 | 每个 series 一"页"，游标 `series_index` 支持断点续采；单个 series 报错 → 本轮 `PARTIAL_FAILED` 并保留游标，下一轮从断点继续 |
 | 回看窗口 | `lookback_days`（默认 30，种子配置 45）：30 分钟调度窗口内通常没有新观测，故每轮**复采近期观测**（幂等去重），同时让 `min_records_per_run=1` 真正能发现 API 故障 |
-| 数据质量 | 缺失值（FRED 的 `.`）、缺失/非法日期、非数值、重复日期、未来日期 → 跳过 + 计数 + WARNING（原因写入告警） |
-| 测试 | 单元 28 项（FRED/CSV 解析、缺失与非法字段、未来日期、**密钥只从环境变量读取**、URL 脱敏、回看窗口、series 归一化）+ 集成 14 项（落库字段与时间关系、**数据库拒绝 `event_at > effective_at`**、缺失字段告警、未来日期跳过、429/超时重试与 `retry_count` 落库、幂等、多 series 续采、CSV 模式、密钥不落库） |
+| 数据质量 | 缺失值（FRED 的 `.`）、非法观测期、非数值、重复 vintage、未来观测期 → 跳过并告警；缺失/非法 `realtime_start` 或 CSV `released_at` → **硬失败** |
+| 测试 | 单元 + 集成 + leakage：解析与密钥脱敏、release 前不可见、修订边界切换、非法时间窗拒绝、append-only、迁移与 ORM 漂移均有覆盖；测试全程禁止外部网络 |
+| 历史回填 | `scripts/backfill_macro_vintages.py` 默认 dry-run；年度分块规避 2000 vintage 上限。当前 8 序列 11,680 条，幂等复跑 0 新增。完整修订链未交付，不能把当前初值数据描述为“全 vintage” |
 
 ### 端到端管道复核（`tests/integration/test_pipeline_integrity.py`）
 

@@ -34,6 +34,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from email.utils import parsedate_to_datetime
+from html import unescape
 from pathlib import Path
 from typing import Any, Final
 
@@ -110,10 +111,18 @@ class FeedItem:
 
 
 def strip_html(text: str | None) -> str | None:
-    """去掉 feed 摘要里的 HTML 标签并压缩空白（RSS description 常含 HTML）。"""
+    """去掉 feed 摘要里的 HTML 标签、**解码 HTML 实体**并压缩空白（RSS description 常含 HTML）。
+
+    为什么必须解码实体：真实源大量使用数字/命名实体
+    （`&#8217;` → ’、`&#8220;` → “、`&#8230;` → …、`&amp;` → &），
+    留在正文里会污染后续正则 / LLM 抽取与人工标注。
+    实测（2026-09-13 真实冒烟）：`fredblog.stlouisfed.org/feed/` 的正文里有 63 处实体。
+    顺序：先去标签（避免把真实标签当正文），再解码实体（`&lt;p&gt;` 这类转义文本会还原成字面量）。
+    """
     if text is None:
         return None
     plain = _TAG_RE.sub(" ", text)
+    plain = unescape(plain)
     plain = _WHITESPACE_RE.sub(" ", plain).strip()
     return plain or None
 

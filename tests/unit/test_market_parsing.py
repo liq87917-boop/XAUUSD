@@ -112,6 +112,58 @@ def test_parse_valid_chart_returns_utc_minute_bars() -> None:
     assert first.volume == Decimal("100.00000000")
 
 
+def test_parse_rejects_unclosed_bars_when_not_after_given() -> None:
+    """**回归测试（实测 2026-09-15）**：只入库**已收盘** K 线。
+
+    Yahoo 会在最后一根返回一根时间戳 = 抓取墙钟的"进行中"bar
+    （`USDCNY 1d` 连续三轮分别落在 `05:04:08` / `05:12:48` / `05:19:02`，
+    `XAUUSD 1h` 出现 `04:58:13` / `05:08:45`）——它永远不收盘、每轮都产生新主键，
+    会让 `market_bars` 无界膨胀，并可能把"未收盘数据"喂进特征（泄漏）。
+    """
+    moment = datetime(2026, 9, 12, 8, 1, 30, tzinfo=UTC)
+    parsed = parse_yahoo_chart(
+        _chart_payload([_bar(0), _bar(1), _bar(2)]),
+        symbol="XAUUSD",
+        timeframe="1m",
+        not_after=moment,
+    )
+
+    # 08:00 那根收盘于 08:01（已收盘，保留）；08:01/08:02 尚未收盘 → 拒绝
+    assert [point.open_time.minute for point in parsed.points] == [0]
+    assert parsed.unclosed == 2
+    assert parsed.total == 3  # 仍计入"provider 返回总数"（数据质量统计用）
+
+
+def test_parse_without_not_after_keeps_every_bar() -> None:
+    """缺省 `not_after=None` → 不做未收盘过滤（保持纯解析语义，向后兼容）。"""
+    parsed = parse_yahoo_chart(_chart_payload([_bar(0), _bar(1)]), symbol="XAUUSD", timeframe="1m")
+
+    assert len(parsed.points) == 2
+    assert parsed.unclosed == 0
+
+
+def test_parse_rejects_wall_clock_timestamp_bar() -> None:
+    """非整点（= 抓取瞬间）的时间戳同样被拒：它代表一根永不收盘的 bar。"""
+    moment = datetime(2026, 9, 15, 5, 19, 2, tzinfo=UTC)
+    wall_clock_bar = {
+        "ts": int(moment.timestamp()),
+        "open": 2400.0,
+        "high": 2405.0,
+        "low": 2395.0,
+        "close": 2401.0,
+        "volume": 100.0,
+    }
+    parsed = parse_yahoo_chart(
+        _chart_payload([_bar(0), wall_clock_bar]),
+        symbol="USDCNY",
+        timeframe="1h",
+        not_after=moment,
+    )
+
+    assert [point.open_time for point in parsed.points] == [datetime(2026, 9, 12, 8, 0, tzinfo=UTC)]
+    assert parsed.unclosed == 1
+
+
 def test_parse_sorts_bars_by_open_time() -> None:
     parsed = parse_yahoo_chart(
         _chart_payload([_bar(2), _bar(0), _bar(1)]), symbol="XAUUSD", timeframe="1m"
@@ -313,5 +365,3 @@ def test_cursor_walks_the_plan_and_ends_with_none() -> None:
         "timeframe": "1m",
     }
     assert collector._next_cursor(1) is None  # noqa: SLF001
-
-

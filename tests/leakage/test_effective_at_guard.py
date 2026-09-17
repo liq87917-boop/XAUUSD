@@ -62,8 +62,8 @@ def test_future_timestamp_is_detectable() -> None:
     assert is_future(utc_now() - timedelta(days=1)) is False
 
 
-def test_macro_event_effective_at_cannot_precede_event_at(session, make_source) -> None:
-    """宏观数据：绝不允许在官方公布时间之前就"知道"数据。"""
+def test_macro_event_effective_at_cannot_precede_released_at(session, make_source) -> None:
+    """宏观数据：绝不允许在 release 之前就“知道”数据。"""
     source = make_source()
     event_at = utc_now()
     session.add(
@@ -72,6 +72,8 @@ def test_macro_event_effective_at_cannot_precede_event_at(session, make_source) 
             event_code="US_CPI_YOY",
             country="US",
             event_at=event_at,
+            released_at=event_at,
+            vintage_end_at=None,
             collected_at=event_at,
             effective_at=event_at - timedelta(minutes=1),
         )
@@ -90,6 +92,8 @@ def test_macro_event_valid_timing_is_accepted(session, make_source) -> None:
             event_code="US_CPI_YOY",
             country="US",
             event_at=event_at,
+            released_at=event_at,
+            vintage_end_at=None,
             collected_at=event_at,
             effective_at=event_at + timedelta(seconds=30),
         )

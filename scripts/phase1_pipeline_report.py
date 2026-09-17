@@ -146,7 +146,7 @@ def _fred_response(request: HttpRequest) -> HttpResponse:
             "observations": [
                 {
                     "realtime_start": "2024-01-02",
-                    "realtime_end": "2024-01-02",
+                    "realtime_end": "9999-12-31",
                     "date": "2023-12-01",
                     "value": "4.33" if is_rate else "319.6",
                 }
