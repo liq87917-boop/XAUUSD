@@ -1465,3 +1465,16 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 当前库新增 3 个版本：XAUUSD 2,445 行、DXY 2,831 行、USDCNY 1,545 行；复跑未新增 K 线；
 - 收口后数据库快照：`database/backups/gold_ai_w0_preflight_closed_20260917.db`，与当前库
   SHA-256 均为 `518AD17599DEEB693FC490B00EBB31C07FEA8B3ED131F9B7E3E05A419CB18B46`。
+
+### 6. PostgreSQL 16 本地端到端验收
+
+- 安装 PostgreSQL 16.15；服务 `postgresql-x64-16` 正在运行并设为自动启动；
+- 创建项目专用数据库/角色 `gold_ai` / `gold_ai_app`，角色默认时区 UTC；随机密码只存在本地
+  `.env` 与 Windows 当前用户加密的 `.postgres-local/`，二者均被 Git 忽略；
+- `0001→0006` 迁移成功；`scripts/check_pg_schema.py` 的 15 表原生类型和种子幂等检查 PASS；
+- PostgreSQL 连续两轮三源 Mock 采集全部 SUCCESS，幂等与时间约束通过，不变式违规 0；
+- 首轮验证发现控制台打印未脱敏 URL：立即轮换项目角色密码、使旧值失效，修复为 `_mask_url`，
+  新增回归测试后复跑确认只输出 `***`；
+- TD-02 正式解除。完整报告保存在本地忽略文件 `logs/postgres_phase1_pipeline_report.md`。
+- PostgreSQL 配置生效后的最终全量门禁：`ruff` PASS、`mypy` 85 文件 PASS、
+  `pytest` **2647 passed / 1 skipped**。

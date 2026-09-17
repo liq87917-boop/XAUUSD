@@ -18,6 +18,7 @@ venv/
 .ruff_cache/
 .mypy_cache/
 .codex-tmp/
+.postgres-local/
 .coverage
 htmlcov/
 

@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from config.settings import Settings, assert_live_trading_disabled
+from scripts.phase1_pipeline_report import _mask_url
 from src.common.exceptions import ConfigSecurityError
 
 pytestmark = pytest.mark.unit
@@ -59,3 +60,12 @@ def test_database_url_accepts_postgresql_and_sqlite_drivers() -> None:
 
     sqlite = Settings(_env_file=None, database_url="sqlite+pysqlite:///./local.db")
     assert sqlite.database_url.startswith("sqlite+pysqlite:///")
+
+
+def test_pipeline_report_masks_database_password() -> None:
+    url = "postgresql+psycopg://gold_ai_app:do-not-print@127.0.0.1:5432/gold_ai"
+
+    masked = _mask_url(url)
+
+    assert masked == "postgresql+psycopg://gold_ai_app:***@127.0.0.1:5432/gold_ai"
+    assert "do-not-print" not in masked

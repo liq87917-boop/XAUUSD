@@ -25,7 +25,7 @@
 | Phase 2 多模型标注对比 | `scripts/compare_model_annotations.py`（**标准库读 xlsx**，零新增依赖）：三模型一致性统计 + 待人工裁决清单 `logs/pending_review.csv` + 共识 `logs/model_consensus.csv` + 报告 `docs/experiments/annotation_model_comparison.md`；**模型输出不作为金标准**；已填写的裁决表默认拒绝覆盖（退出码 4） |
 | Phase 2 金标准（ground truth） | `scripts/build_ground_truth.py`：人工裁决 + 三模型共识 → `logs/ground_truth_200.csv`（1000 格，`source` 区分 `human-adjudicated` / `3-model-consensus`，含 `overturn` 推翻标记）+《金标准生成报告》`docs/experiments/ground_truth_report.md`；人工裁决文件先字节级归档到 `logs/archive/` |
 | Phase 2 基线评估 | `scripts/evaluate_extractor.py`：正则抽取器 vs 人工金标准，**区分该判未判 / 提取错误 / 不该判却判**，输出准确率、召回率、精确率、混淆矩阵、点位差值分布 → `logs/extractor_eval.csv`（1000 格）+《Phase 2 基线评估报告》`docs/experiments/Phase2_基线评估报告.md` |
-| 测试 | 2513 passed / 1 skipped（2026-09-17，含 W0 前置可信度与 4h 血缘门禁） |
+| 测试 | PostgreSQL 本地环境最终全量：2647 passed / 1 skipped（2026-09-17） |
 | 质量门禁 | `ruff`（E/F/I/UP/B/SIM）、`mypy`（config + database + src + scripts）、CI（Python 3.12/3.13 + PostgreSQL 16 作业） |
 | 端到端复核 | `tests/integration/test_pipeline_integrity.py` + `scripts/phase1_pipeline_report.py` |
 
@@ -39,7 +39,7 @@
 | 编号 | 优先级 | 事项 | 计划阶段 |
 |---|---|---|---|
 | TD-01 | P1（部分解除） | FRED / Yahoo / RSS 已完成真实或合规缓存链路验证；行情备用源、完整新闻历史与持续在线冒烟仍未交付 | 上线前数据源收尾 |
-| TD-02 | P0 | 采集写路径未在 PostgreSQL 上端到端运行过（CI 只验证 schema + 种子） | Phase 1 收尾轮 |
+| TD-02 | ✅ 已解除（2026-09-17） | 本地 PostgreSQL 16.15 已完成 `0001→0006` 迁移、原生类型/种子检查、三源采集写入及二轮幂等验证；不变式违规 0 | 已修 |
 | TD-03 | ✅ 已解除（2026-09-17） | `4h` 已由 1h 满桶聚合并通过幂等测试；每个标的的完整 4h 快照已写不可覆盖 `data_versions`，记录 processor 版本、范围、行数与 SHA-256 | 已修 |
 | TD-04 | P1 | 新闻时区不明确（naive）的行不生成 `news_events` | Phase 2 决策 |
 | TD-05 | P1 | `econ_calendar_collector` 未实现（CPI/PCE/NFP/FOMC 日历与预期值） | Phase 1 收尾轮 |
@@ -101,7 +101,7 @@
 - **保留限制**：完整 ALFRED 修订链未回填。`output_type=1` 的 realtime 边界会被查询窗口裁剪，
   不能作为真实 revision end；当前数据只代表初值，禁止使用普通 FRED 最新修订值补历史空洞。
 
-### TD-02 PostgreSQL 采集写路径未验证（P0）
+### TD-02 PostgreSQL 采集写路径端到端验证（已解除）
 
 - **现状**：单元/集成测试统一跑 SQLite（`tests/conftest.py::sqlite_url`）。CI 的 `postgres` 作业
   只做 `alembic upgrade head` + `scripts/check_pg_schema.py`（原生类型 + 种子幂等）+ `downgrade base`；
@@ -110,9 +110,17 @@
   （a）`TIMESTAMPTZ` 精度/时区归一化差异；（b）`warnings_json` JSONB 写入路径；
   （c）唯一索引 `uq_market_bars_source_instrument_timeframe_open` 的 `NULLS` / 批量插入行为差异。
 - **解除条件**：对 PostgreSQL 实例执行
-  `python scripts/phase1_pipeline_report.py --db-url postgresql+psycopg://... --migrate`，全部约束探测为 PASS。
+`python scripts/phase1_pipeline_report.py --db-url postgresql+psycopg://... --migrate`，全部约束探测为 PASS。
 - **验收标准**：报告 PG 段落中「时间因果违规 = 0」「唯一约束拒绝重复插入 = PASS」，
-  且各表 `count(*)` 与 SQLite 基线一致。
+且各表 `count(*)` 与 SQLite 基线一致。
+
+- **解除记录（2026-09-17）**：安装 PostgreSQL **16.15**，服务 `postgresql-x64-16` 为
+  `Running / Automatic`；项目角色 `gold_ai_app` 默认时区为 UTC。`alembic upgrade head` 到
+  `0006_macro_event_vintages`，`scripts/check_pg_schema.py` 的 15 表原生类型与种子幂等检查 PASS。
+  `phase1_pipeline_report.py` 在 PostgreSQL 上连续运行两轮：market/news/macro 均 SUCCESS，
+  `raw_items=14`、`market_bars=10`、`news_events=2`、`macro_events=2`，不变式违规 0。
+  验证过程中发现控制台曾打印原始连接 URL；项目角色密码已立即轮换使旧值失效，控制台改为
+  `_mask_url` 并增加回归测试，复跑只显示 `***`。
 
 ### TD-03 `4h` K 线聚合缺失（P1）
 

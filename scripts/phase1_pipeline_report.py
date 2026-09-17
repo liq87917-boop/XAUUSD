@@ -779,7 +779,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     print(f"报告已生成：{output}")
-    print(f"数据库：{db_url}")
+    print(f"数据库：{_mask_url(db_url)}")
     print(f"Alembic 版本：{data.alembic_version}")
     for name, results, requests in data.rounds:
         statuses = ", ".join(f"{result.collector_name}={result.status.value}" for result in results)
