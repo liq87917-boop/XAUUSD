@@ -136,7 +136,7 @@
 
 | 工作包 | 内容 | 验收标准 |
 |---|---|---|
-| W0-1 行情回填 | XAUUSD（1d 尽量长 / 1h ≈2 年）+ DXY / US10Y_REAL / USDCNY；Processor 由 1h 聚合 **4h**（TD-03） | **PARTIAL（2026-09-17）**：①幂等复跑 0 新增；②OHLC/时间约束通过；③缺口已审计；④只 append。限制：`XAUUSD → GC=F` 为期货代理；XAUUSD/DXY 1h 有异常缺口，USDCNY 1h 会话归类退化；下游必须丢弃含缺口 horizon，不插值、不缩窗 |
+| W0-1 行情回填 | XAUUSD（1d 尽量长 / 1h ≈2 年）+ DXY / US10Y_REAL / USDCNY；Processor 由 1h 聚合 **4h**（TD-03） | **PARTIAL（2026-09-17）**：①幂等复跑 0 新增；②OHLC/时间约束通过；③缺口已审计；④只 append；⑤4h 快照已绑定不可覆盖的 `data_versions` 指纹。限制：`XAUUSD → GC=F` 为期货代理；XAUUSD/DXY 1h 有异常缺口，USDCNY 1h 会话归类退化；下游必须丢弃含缺口 horizon，不插值、不缩窗 |
 | W0-2 宏观回填 + **发布时刻** | FRED/ALFRED 初值序列落库；**新增 `released_at` / `vintage_end_at`** | **PASS（2026-09-17，Initial Release Only）**：8 序列 11,680 条；二轮 0 新增；发布前不可见、append-only、密钥脱敏通过。完整修订链未交付，普通“今天最新值”不得用于历史训练 |
 | W0-3 新闻回填 | RSS 白名单（`fred_blog`/`fed_press`；`ecb_press` 依既有裁决保持禁用）近 90 天窗口；robots fail-closed | **PASS（受限，2026-09-17）**：30 条落入 `raw_items + news_events`，幂等复跑 0 新增；robots 判定已有逐源留痕；来源分布 10/20，`fed_press=66.7%` 的 >40% 告警已自动触发。限制：RSS 当前快照不等于完整 90 天历史 |
 | W0-4 作者观点链 | 采用 `docs/11 §5` 方案 B 正式入库；Regex 作为可复现基线 | **PASS（仅工程管道，2026-09-17）**：19 帖幂等入库、11 观点、31 评价行；v2 门禁确认 31 行均缺可信独立采集时间，统一标记 `UNTRUSTED_COLLECTION_TIME`，因此正式研究可用标签为 0。入场延迟超过对应 horizon 亦拒绝评价。样本不得进入 OOS、作者权重或 Alpha 结论 |

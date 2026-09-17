@@ -17,7 +17,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from database.models import Instrument, MarketBar, Source
+from database.models import DataVersion, Instrument, MarketBar, Source
 from database.models.enums import SourceType, Timeframe
 from database.seeds import seed_instruments
 from scripts._market_data import GapAudit
@@ -114,6 +114,21 @@ def test_aggregate_and_insert_4h_is_idempotent_and_skips_partial(
     assert bar.close == Decimal("1804")  # 第四根（h=3）close = 1800+3+1
     assert bar.collected_at <= bar.effective_at  # 采集器同款防泄漏约束
     assert bar.effective_at >= bar.close_time
+
+    versions = list(session.scalars(sa.select(DataVersion)).all())
+    assert len(versions) == 1
+    assert versions[0].dataset_name == "market_bars:XAUUSD:4h"
+    assert versions[0].version.startswith("4h-v1-")
+    assert versions[0].row_count == 1
+    assert versions[0].data_hash is not None and len(versions[0].data_hash) == 64
+    assert versions[0].source_scope_json == {
+        "instrument_id": str(instrument.id),
+        "symbol": "XAUUSD",
+        "input_timeframe": "1h",
+        "output_timeframe": "4h",
+        "processor": "aggregate_bars_to_4h",
+        "processor_version": "4h-v1",
+    }
 
     with pytest.raises(ValueError, match="不存在标的"):
         aggregate_and_insert_4h(session, symbol="NOPE")

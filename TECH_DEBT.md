@@ -25,7 +25,7 @@
 | Phase 2 多模型标注对比 | `scripts/compare_model_annotations.py`（**标准库读 xlsx**，零新增依赖）：三模型一致性统计 + 待人工裁决清单 `logs/pending_review.csv` + 共识 `logs/model_consensus.csv` + 报告 `docs/experiments/annotation_model_comparison.md`；**模型输出不作为金标准**；已填写的裁决表默认拒绝覆盖（退出码 4） |
 | Phase 2 金标准（ground truth） | `scripts/build_ground_truth.py`：人工裁决 + 三模型共识 → `logs/ground_truth_200.csv`（1000 格，`source` 区分 `human-adjudicated` / `3-model-consensus`，含 `overturn` 推翻标记）+《金标准生成报告》`docs/experiments/ground_truth_report.md`；人工裁决文件先字节级归档到 `logs/archive/` |
 | Phase 2 基线评估 | `scripts/evaluate_extractor.py`：正则抽取器 vs 人工金标准，**区分该判未判 / 提取错误 / 不该判却判**，输出准确率、召回率、精确率、混淆矩阵、点位差值分布 → `logs/extractor_eval.csv`（1000 格）+《Phase 2 基线评估报告》`docs/experiments/Phase2_基线评估报告.md` |
-| 测试 | 2379 passed / 1 skipped（2026-09-17，含 W0 前置可信度门禁） |
+| 测试 | 2513 passed / 1 skipped（2026-09-17，含 W0 前置可信度与 4h 血缘门禁） |
 | 质量门禁 | `ruff`（E/F/I/UP/B/SIM）、`mypy`（config + database + src + scripts）、CI（Python 3.12/3.13 + PostgreSQL 16 作业） |
 | 端到端复核 | `tests/integration/test_pipeline_integrity.py` + `scripts/phase1_pipeline_report.py` |
 
@@ -40,7 +40,7 @@
 |---|---|---|---|
 | TD-01 | P1（部分解除） | FRED / Yahoo / RSS 已完成真实或合规缓存链路验证；行情备用源、完整新闻历史与持续在线冒烟仍未交付 | 上线前数据源收尾 |
 | TD-02 | P0 | 采集写路径未在 PostgreSQL 上端到端运行过（CI 只验证 schema + 种子） | Phase 1 收尾轮 |
-| TD-03 | P1（部分解除） | `4h` 已由 1h 满桶聚合并通过幂等测试；剩余问题是派生数据尚未绑定正式 `data_versions` / processor 血缘 | W0-5 前置收尾 |
+| TD-03 | ✅ 已解除（2026-09-17） | `4h` 已由 1h 满桶聚合并通过幂等测试；每个标的的完整 4h 快照已写不可覆盖 `data_versions`，记录 processor 版本、范围、行数与 SHA-256 | 已修 |
 | TD-04 | P1 | 新闻时区不明确（naive）的行不生成 `news_events` | Phase 2 决策 |
 | TD-05 | P1 | `econ_calendar_collector` 未实现（CPI/PCE/NFP/FOMC 日历与预期值） | Phase 1 收尾轮 |
 | TD-06 | P1 | `weibo_collector` 未实现（Phase 2 主体） | Phase 2 |

@@ -1453,5 +1453,15 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 
 - `ruff check .`：PASS；
 - `mypy config database src scripts`：PASS（85 个源文件）；
-- `pytest -q`：**2379 passed / 1 skipped**；
+- 首轮 `pytest -q`：2379 passed / 1 skipped；补齐 4h 血缘后的最终全量回归：
+  **2513 passed / 1 skipped**；
 - 待提交文件敏感信息扫描只命中测试假密钥和本地示例连接串，未发现新的真实凭据。
+
+### 5. 4h 派生血缘收口
+
+- `aggregate_and_insert_4h` 在写入后对当前完整 4h 快照计算稳定 SHA-256，并按数据哈希幂等写入
+  `data_versions`；记录 1h→4h、`processor_version=4h-v1`、UTC 满桶规则、范围与行数；
+- `data_versions` 加入 ORM 不可覆盖守卫，数据变化只能追加新版本；
+- 当前库新增 3 个版本：XAUUSD 2,445 行、DXY 2,831 行、USDCNY 1,545 行；复跑未新增 K 线；
+- 收口后数据库快照：`database/backups/gold_ai_w0_preflight_closed_20260917.db`，与当前库
+  SHA-256 均为 `518AD17599DEEB693FC490B00EBB31C07FEA8B3ED131F9B7E3E05A419CB18B46`。

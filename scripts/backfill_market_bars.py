@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import hashlib
 import json
 import sys
 from collections.abc import Sequence
@@ -40,7 +41,7 @@ if str(REPO_ROOT) not in sys.path:  # pragma: no cover - editable 安装时通�
     sys.path.insert(0, str(REPO_ROOT))
 
 # ruff: noqa: E402 —— 上面的 sys.path 引导必须先于仓库内模块的导入执行
-from database.models import Instrument, MarketBar, Source  # noqa: E402
+from database.models import DataVersion, Instrument, MarketBar, Source  # noqa: E402
 from database.models.enums import Timeframe  # noqa: E402
 from database.session import build_engine, build_session_factory  # noqa: E402
 from scripts._console import configure_stdout  # noqa: E402
@@ -312,8 +313,94 @@ def aggregate_and_insert_4h(session: Session, *, symbol: str) -> tuple[int, int,
         )
         inserted += 1
         existing.add(bar.open_time)
+    session.flush()
+    _record_4h_data_version(session, instrument=instrument, symbol=symbol, generated_at=now)
     session.commit()
     return len(aggregated), inserted, len(aggregated) - inserted, len(skipped)
+
+
+def _record_4h_data_version(
+    session: Session,
+    *,
+    instrument: Instrument,
+    symbol: str,
+    generated_at: datetime,
+) -> None:
+    """为当前 4h 派生快照写稳定指纹；相同数据复跑不产生新版本。"""
+    rows = list(
+        session.execute(
+            sa.select(
+                MarketBar.open_time,
+                MarketBar.close_time,
+                MarketBar.open,
+                MarketBar.high,
+                MarketBar.low,
+                MarketBar.close,
+                MarketBar.volume,
+                MarketBar.source_id,
+            )
+            .where(
+                MarketBar.instrument_id == instrument.id,
+                MarketBar.timeframe == Timeframe.H4,
+            )
+            .order_by(MarketBar.open_time)
+        ).all()
+    )
+    if not rows:
+        return
+    canonical_rows = [
+        [
+            ensure_utc_from_database(row.open_time, field_name="market_bars.open_time").isoformat(),
+            ensure_utc_from_database(
+                row.close_time, field_name="market_bars.close_time"
+            ).isoformat(),
+            str(row.open),
+            str(row.high),
+            str(row.low),
+            str(row.close),
+            None if row.volume is None else str(row.volume),
+            str(row.source_id),
+        ]
+        for row in rows
+    ]
+    digest = hashlib.sha256(
+        json.dumps(canonical_rows, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    dataset_name = f"market_bars:{symbol}:4h"
+    version = f"4h-v1-{digest[:12]}"
+    exists = session.scalar(
+        sa.select(DataVersion.id).where(
+            DataVersion.dataset_name == dataset_name,
+            DataVersion.version == version,
+        )
+    )
+    if exists is not None:
+        return
+    session.add(
+        DataVersion(
+            dataset_name=dataset_name,
+            version=version,
+            start_at=ensure_utc_from_database(
+                rows[0].open_time, field_name="market_bars.open_time"
+            ),
+            end_at=ensure_utc_from_database(
+                rows[-1].close_time, field_name="market_bars.close_time"
+            ),
+            data_hash=digest,
+            source_scope_json={
+                "instrument_id": str(instrument.id),
+                "symbol": symbol,
+                "input_timeframe": "1h",
+                "output_timeframe": "4h",
+                "processor": "aggregate_bars_to_4h",
+                "processor_version": "4h-v1",
+            },
+            filter_json={"full_buckets_only": True, "bucket_alignment": "UTC"},
+            row_count=len(rows),
+            generated_at=generated_at,
+            notes="由 market_bars 1h 满桶派生；同一 data_hash 幂等复用版本",
+        )
+    )
 
 
 def write_snapshots(out_dir: Path, plan: Sequence[tuple[str, str, CollectWindow]]) -> list[Path]:
@@ -799,7 +886,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "notes": list(notes),
                     "caveats": [
                         "只 append、不覆盖历史（同一自然键复跑记 duplicate）",
-                        "4h 为派生 bar（无 raw_items 留档，血缘见报告与 collector_runs）",
+                        (
+                            "4h 为派生 bar（无 raw_items 留档）；每个标的的当前完整快照写入 "
+                            "data_versions，含 processor_version、范围、行数和 SHA-256"
+                        ),
                         "US10Y_REAL 由 W0-2 的 FRED DFII10 提供（含 released_at）",
                     ],
                 },

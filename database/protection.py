@@ -33,6 +33,8 @@ ALLOWED_UPDATE_COLUMNS: Final[dict[str, frozenset[str]]] = {
     "raw_media": frozenset({"storage_uri"}),
     # 加工结果完全 append-only：任何修改都必须产生新的 processor_version 记录
     "processed_items": frozenset(),
+    # 数据版本是训练/回测的不可变快照标识；数据变化必须追加新版本。
+    "data_versions": frozenset(),
     # 宏观 vintage 是时间因果事实：修订必须追加新 released_at 行，严禁覆盖旧值。
     "macro_events": frozenset(),
     # ------------------------------------------------------------------

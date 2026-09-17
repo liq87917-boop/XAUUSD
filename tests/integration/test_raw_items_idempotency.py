@@ -30,6 +30,7 @@ def test_protected_tables_are_registered() -> None:
         "raw_items",
         "raw_media",
         "processed_items",
+        "data_versions",
         "macro_events",
         # Phase 2（Author Lab）派生事实表：一律 append-only
         "author_opinions",

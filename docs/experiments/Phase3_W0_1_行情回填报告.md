@@ -73,7 +73,7 @@
 
 ## 5. 局限与后续
 
-1. **派生 4h 没有 raw 留档**：`raw_items` 只存 provider 原始 bar；4h 是可复算的派生结果，其血缘记录在 `collector_runs`（1h）+ 本报告 + `effective_at` 语义中；
+1. **派生 4h 没有 raw 留档**：`raw_items` 只存 provider 原始 bar；4h 是可复算的派生结果。前置收口后，每个标的的当前 4h 完整快照会写入不可覆盖的 `data_versions`，保存输入/输出周期、processor 版本、范围、行数与 SHA-256；
 2. **1h 回溯上限**：provider 对 1h 只给约 730 天（2 年），更长历史需换源或改用 1d 聚合（后续再评估）；
 3. **`market_bars` 的 4h 与 1h 并存**：下游取数必须显式指定 timeframe，不得混用；
 4. **下一步**：W0-2（宏观 + `released_at`，R3）、W0-3（新闻）、W0-4（作者观点链）、W0-5（特征底座 + 迁移 0006）。

@@ -15,7 +15,13 @@
 | 迁移规划 | Phase 3 后续编号由冲突的 `0006`～`0009` 调整为 `0007`～`0010` |
 | 作者数据门禁 | 回填采集时间的 31 行全部拒绝研究评价 |
 | 休市门禁 | 入场延迟超过对应 horizon 时拒绝评价 |
-| 全量质量门禁 | `ruff` PASS；`mypy` 85 文件 PASS；`pytest` 2379 passed / 1 skipped |
+| 4h 派生血缘 | XAUUSD / DXY / USDCNY 的 4h 快照均已写不可覆盖 `data_versions` |
+| 全量质量门禁 | `ruff` PASS；`mypy` 85 文件 PASS；`pytest` 2513 passed / 1 skipped |
+
+收口后的最终数据库快照为 `database/backups/gold_ai_w0_preflight_closed_20260917.db`，
+当前库与该快照 SHA-256 均为
+`518AD17599DEEB693FC490B00EBB31C07FEA8B3ED131F9B7E3E05A419CB18B46`。此前的
+`gold_ai_pre_w0_5_20260917.db` 保留为写入 4h `data_versions` 之前的恢复点。
 
 ## 2. 当前阻塞项
 
