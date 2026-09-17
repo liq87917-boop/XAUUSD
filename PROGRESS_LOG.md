@@ -1478,3 +1478,5 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - TD-02 正式解除。完整报告保存在本地忽略文件 `logs/postgres_phase1_pipeline_report.md`。
 - PostgreSQL 配置生效后的最终全量门禁：`ruff` PASS、`mypy` 85 文件 PASS、
   `pytest` **2647 passed / 1 skipped**。
+- 边界：当前 PostgreSQL 只承载种子与 Mock 端到端验收数据；W0-1～W0-4 的真实研究事实仍在
+  冻结的 SQLite 库中。迁移/重建与逐表对账另列 TD-40，完成前不启动 W0-5。
