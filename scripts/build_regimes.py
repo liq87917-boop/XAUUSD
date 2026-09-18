@@ -8,6 +8,7 @@ import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:  # pragma: no cover
@@ -25,8 +26,17 @@ from src.alpha.regime import (  # noqa: E402
     regime_metrics,
 )
 
-DEFAULT_REVIEW = REPO_ROOT / "logs" / "phase3_1_regime_blind_review.csv"
-DEFAULT_KEY = REPO_ROOT / "logs" / "phase3_1_regime_blind_review_key.csv"
+DEFAULT_REVIEW = REPO_ROOT / "logs" / "phase3_1_regime_blind_review_v2.csv"
+DEFAULT_KEY = REPO_ROOT / "logs" / "phase3_1_regime_blind_review_key_v2.csv"
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+REVIEW_LABEL_ORDER = (
+    Regime.NEWS_DRIVEN,
+    Regime.HIGH_VOLATILITY,
+    Regime.TREND_UP,
+    Regime.TREND_DOWN,
+    Regime.RANGE,
+    Regime.LOW_VOLATILITY,
+)
 
 
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
@@ -42,10 +52,28 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 
 def _sample_points(points: tuple[RegimePoint, ...], count: int = 50) -> list[RegimePoint]:
-    eligible = [point for point in points if point.regime is not Regime.UNKNOWN]
-    if len(eligible) <= count:
-        return eligible
-    return [eligible[round(index * (len(eligible) - 1) / (count - 1))] for index in range(count)]
+    """按即时状态分层抽样；人工语义验收不再与时序平滑结果混为一谈。"""
+    groups = {
+        label: [point for point in points if point.raw_regime is label]
+        for label in REVIEW_LABEL_ORDER
+    }
+    available = [label for label in REVIEW_LABEL_ORDER if groups[label]]
+    if not available:
+        return []
+    quotas = {label: count // len(available) for label in available}
+    for label in available[: count % len(available)]:
+        quotas[label] += 1
+    selected: list[RegimePoint] = []
+    for label in available:
+        pool = groups[label]
+        quota = min(quotas[label], len(pool))
+        if quota == 1:
+            selected.append(pool[len(pool) // 2])
+        elif quota > 1:
+            selected.extend(
+                pool[round(index * (len(pool) - 1) / (quota - 1))] for index in range(quota)
+            )
+    return sorted(selected, key=lambda point: point.start_at)
 
 
 def _write_review_files(
@@ -54,27 +82,49 @@ def _write_review_files(
     selected = _sample_points(points)
     review_path.parent.mkdir(parents=True, exist_ok=True)
     key_path.parent.mkdir(parents=True, exist_ok=True)
-    common = [
+    review_columns = [
         "review_id",
-        "start_at",
+        "start_at_utc",
+        "start_at_beijing",
         "close",
+        "close_vs_ema20_pct",
         "ema_20",
         "ema_60",
+        "ema20_vs_ema60_pct",
+        "ema_20_slope_4_pct",
+        "ema_60_slope_4_pct",
         "adx_14",
-        "atr_14_pct",
-        "atr_pct_rank_60",
+        "atr_14_percent",
+        "atr_rank_percentile",
         "news_count_4h",
         "macro_count_4h",
+        "human_label",
+        "human_note",
     ]
     with review_path.open("w", encoding="utf-8-sig", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[*common, "human_label", "human_note"])
+        writer = csv.DictWriter(handle, fieldnames=review_columns)
         writer.writeheader()
         for index, point in enumerate(selected, 1):
+            close = float(point.values["close"])
+            ema20 = float(point.values["ema_20"])
+            ema60 = float(point.values["ema_60"])
             writer.writerow(
                 {
                     "review_id": f"R{index:03d}",
-                    "start_at": point.start_at.isoformat(),
-                    **{name: point.values.get(name, "") for name in common[2:]},
+                    "start_at_utc": point.start_at.isoformat(),
+                    "start_at_beijing": point.start_at.astimezone(BEIJING_TZ).isoformat(),
+                    "close": point.values["close"],
+                    "close_vs_ema20_pct": round((close / ema20 - 1) * 100, 6),
+                    "ema_20": point.values["ema_20"],
+                    "ema_60": point.values["ema_60"],
+                    "ema20_vs_ema60_pct": round((ema20 / ema60 - 1) * 100, 6),
+                    "ema_20_slope_4_pct": round(float(point.values["ema_20_slope_4"]) * 100, 6),
+                    "ema_60_slope_4_pct": round(float(point.values["ema_60_slope_4"]) * 100, 6),
+                    "adx_14": point.values["adx_14"],
+                    "atr_14_percent": round(float(point.values["atr_14_pct"]) * 100, 6),
+                    "atr_rank_percentile": round(float(point.values["atr_pct_rank_60"]) * 100, 4),
+                    "news_count_4h": point.values["news_count_4h"],
+                    "macro_count_4h": point.values["macro_count_4h"],
                     "human_label": "",
                     "human_note": "",
                 }
@@ -82,16 +132,22 @@ def _write_review_files(
     with key_path.open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.DictWriter(
             handle,
-            fieldnames=["review_id", "start_at", "engine_label", "raw_label", "confidence"],
+            fieldnames=[
+                "review_id",
+                "start_at_utc",
+                "review_target_label",
+                "final_smoothed_label",
+                "confidence",
+            ],
         )
         writer.writeheader()
         for index, point in enumerate(selected, 1):
             writer.writerow(
                 {
                     "review_id": f"R{index:03d}",
-                    "start_at": point.start_at.isoformat(),
-                    "engine_label": point.regime.value,
-                    "raw_label": point.raw_regime.value,
+                    "start_at_utc": point.start_at.isoformat(),
+                    "review_target_label": point.raw_regime.value,
+                    "final_smoothed_label": point.regime.value,
                     "confidence": point.confidence,
                 }
             )
