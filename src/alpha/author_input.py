@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
+from urllib.parse import urlsplit
 
 MIN_AUTHOR_SAMPLES: Final[int] = 30
 MIN_CONTENT_CHARS: Final[int] = 90
@@ -52,6 +53,20 @@ def _content_key(value: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def _url_key(value: str) -> str | None:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return None
+    authority = parsed.hostname.lower()
+    if port is not None:
+        authority = f"{authority}:{port}"
+    return f"{parsed.scheme.lower()}://{authority}{parsed.path}?{parsed.query}"
+
+
 def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -> AuthorInputAudit:
     """验证时间因果、身份、重复与每作者样本门槛；不修改输入。"""
     moment = now.astimezone(UTC)
@@ -61,6 +76,7 @@ def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -
     account_names: dict[tuple[str, str], str] = {}
     seen_ids: set[tuple[str, str]] = set()
     seen_content: set[str] = set()
+    seen_urls: set[str] = set()
     for number, row in enumerate(rows, start=1):
         missing = [name for name in REQUIRED_COLUMNS if not str(row.get(name, "")).strip()]
         if missing:
@@ -90,14 +106,25 @@ def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -
         if len(content) < MIN_CONTENT_CHARS:
             errors.append(f"第 {number} 行正文仅 {len(content)} 字符 < {MIN_CONTENT_CHARS}")
 
+        url = str(row["url"]).strip()
+        url_key = _url_key(url)
+        if url_key is None:
+            errors.append(f"第 {number} 行 url 必须是可复核的 http/https 地址")
+        elif url_key in seen_urls:
+            errors.append(f"第 {number} 行 url 与前文重复，不能增加独立样本")
+        else:
+            seen_urls.add(url_key)
+
         published = _time(str(row["published_at"]))
         collected = _time(str(row["collected_at"]))
         effective = _time(str(row["effective_at"]))
         if published is None or collected is None or effective is None:
             errors.append(f"第 {number} 行时间不可解析或缺少时区")
         else:
-            if collected < published:
-                errors.append(f"第 {number} 行 collected_at 早于 published_at")
+            if collected <= published:
+                errors.append(
+                    f"第 {number} 行 collected_at 必须晚于 published_at，不能复制发布时间"
+                )
             if effective != max(published, collected):
                 errors.append(f"第 {number} 行 effective_at 不等于发布时间和采集时间的较晚者")
             if published > moment + FUTURE_TOLERANCE or collected > moment + FUTURE_TOLERANCE:

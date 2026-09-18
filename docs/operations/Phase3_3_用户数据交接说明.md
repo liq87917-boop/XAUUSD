@@ -12,9 +12,9 @@
 | `external_account_id` | 是 | 平台账号 ID；没有时填可核验的主页标识，不要填昵称副本 |
 | `content` | 是 | 原文，不改写、不总结；观点语料建议至少 90 字 |
 | `published_at` | 是 | 原始发布时间，必须含时区，例如 `2026-09-18T08:30:00+08:00` |
-| `collected_at` | 是 | 实际看到/导出该帖的时间，必须独立记录，不能复制 `published_at` |
+| `collected_at` | 是 | 实际看到/导出该帖的时间，必须独立记录且晚于 `published_at`，不能复制发布时间 |
 | `effective_at` | 是 | 填 `published_at` 与 `collected_at` 中较晚者 |
-| `url` | 是 | 可复核的原始页面地址或授权档案地址 |
+| `url` | 是 | 可复核且不重复的原始页面或授权档案 `http/https` 地址 |
 | `has_media` | 是 | `true` / `false`；图片内有关键点位时填 `true` |
 | `source_type` | 是 | 作者观点固定填 `NEWS`，不要填 `EVENT` |
 | `collection_time_provenance` | 是 | 真实独立记录填 `independent_observation`；禁止填 fallback |

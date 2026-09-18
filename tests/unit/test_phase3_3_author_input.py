@@ -34,11 +34,13 @@ def test_thirty_causal_unique_rows_are_ready() -> None:
 def test_rejects_fallback_time_duplicate_and_short_sample() -> None:
     rows = [_row(0), _row(1)]
     rows[1]["content"] = rows[0]["content"]
+    rows[1]["url"] = rows[0]["url"]
     rows[1]["collection_time_provenance"] = "input_effective_at_fallback"
     rows[1]["effective_at"] = rows[1]["published_at"]
     result = validate_author_input(rows, now=datetime(2026, 2, 1, tzinfo=UTC))
     assert not result.ready
     assert any("正文与前文重复" in item for item in result.errors)
+    assert any("url 与前文重复" in item for item in result.errors)
     assert any("independent_observation" in item for item in result.errors)
     assert result.warnings
 
@@ -77,3 +79,14 @@ def test_same_account_must_have_consistent_author_name() -> None:
     result = validate_author_input(rows, now=datetime(2026, 2, 1, tzinfo=UTC))
     assert not result.ready
     assert any("作者名不一致" in item for item in result.errors)
+
+
+def test_rejects_copied_collection_time_and_unverifiable_url() -> None:
+    row = _row(0)
+    row["collected_at"] = row["published_at"]
+    row["effective_at"] = row["published_at"]
+    row["url"] = "http://[malformed"
+    result = validate_author_input([row], now=datetime(2026, 2, 1, tzinfo=UTC))
+    assert not result.ready
+    assert any("不能复制发布时间" in item for item in result.errors)
+    assert any("http/https" in item for item in result.errors)
