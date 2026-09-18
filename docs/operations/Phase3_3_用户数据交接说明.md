@@ -19,8 +19,9 @@
 | `source_type` | 是 | 作者观点固定填 `NEWS`，不要填 `EVENT` |
 | `collection_time_provenance` | 是 | 真实独立记录填 `independent_observation`；禁止填 fallback |
 
-硬门槛：每位作者至少 30 条可信且可标注观点。为了能做时间外推，建议每位作者提供至少 50 条，
-且覆盖多个自然日；同文转载不会增加独立样本数。
+硬门槛：按 `source + external_account_id` 识别的每个平台账号至少 30 条可信且可标注观点；同名的
+不同账号不能合并凑数，同一账号的 `author_name` 必须一致。为了能做时间外推，建议每个平台账号
+提供至少 50 条且覆盖多个自然日；同文转载不会增加独立样本数。
 
 禁止事项：
 

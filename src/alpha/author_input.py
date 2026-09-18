@@ -57,7 +57,8 @@ def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -
     moment = now.astimezone(UTC)
     errors: list[str] = []
     warnings: list[str] = []
-    counts: Counter[str] = Counter()
+    counts: Counter[tuple[str, str]] = Counter()
+    account_names: dict[tuple[str, str], str] = {}
     seen_ids: set[tuple[str, str]] = set()
     seen_content: set[str] = set()
     for number, row in enumerate(rows, start=1):
@@ -67,6 +68,15 @@ def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -
             continue
         source = str(row["source"]).strip()
         record_id = str(row["id"]).strip()
+        external_account_id = str(row["external_account_id"]).strip()
+        author_name = str(row["author_name"]).strip()
+        account = (source, external_account_id)
+        previous_name = account_names.setdefault(account, author_name)
+        if previous_name != author_name:
+            errors.append(
+                f"第 {number} 行账号 {source}/{external_account_id} 的作者名不一致："
+                f"{previous_name!r} != {author_name!r}"
+            )
         identity = (source, record_id)
         if identity in seen_ids:
             errors.append(f"第 {number} 行 source+id 重复：{identity}")
@@ -99,11 +109,18 @@ def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -
             errors.append(f"第 {number} 行 source_type 必须为 NEWS")
         if str(row["has_media"]).strip().lower() not in {"true", "false"}:
             errors.append(f"第 {number} 行 has_media 必须为 true/false")
-        counts[str(row["author_name"]).strip()] += 1
+        counts[account] += 1
 
     if not rows:
         errors.append("输入没有数据行")
-    for author, count in sorted(counts.items()):
+    labelled_counts = tuple(
+        (
+            f"{account_names[account]} [{account[0]}/{account[1]}]",
+            count,
+        )
+        for account, count in sorted(counts.items())
+    )
+    for author, count in labelled_counts:
         if count < MIN_AUTHOR_SAMPLES:
             warnings.append(f"作者 {author!r} 只有 {count} 条 < {MIN_AUTHOR_SAMPLES}")
     ready = (
@@ -114,7 +131,7 @@ def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -
     )
     return AuthorInputAudit(
         rows=len(rows),
-        author_counts=tuple(sorted(counts.items())),
+        author_counts=labelled_counts,
         errors=tuple(errors),
         warnings=tuple(warnings),
         ready=ready,
