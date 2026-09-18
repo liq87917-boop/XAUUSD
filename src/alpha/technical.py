@@ -15,6 +15,8 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
+from src.alpha.reproducibility import frame_digest
+
 FEATURE_NAMES: Final[tuple[str, ...]] = (
     "ret_1",
     "momentum_20",
@@ -28,6 +30,8 @@ FEATURE_NAMES: Final[tuple[str, ...]] = (
 HORIZON_BARS: Final[int] = 24
 EMBARGO_BARS: Final[int] = HORIZON_BARS
 SEED: Final[int] = 42
+TECHNICAL_MODEL_VERSION: Final[str] = "technical-lr-platt-v1"
+TECHNICAL_FEATURE_SET_VERSION: Final[str] = "technical-8-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +69,10 @@ class TechnicalGateResult:
     non_overlapping_test_rows: int
     first_signal_at: pd.Timestamp
     last_signal_at: pd.Timestamp
+    data_hash: str
+    feature_set_version: str
+    model_version: str
+    seed: int
     passed: bool
 
 
@@ -294,5 +302,9 @@ def evaluate_technical_gate(frame: pd.DataFrame, seed: int = SEED) -> TechnicalG
         non_overlapping_test_rows=len(test),
         first_signal_at=pd.Timestamp(usable.index[0]),
         last_signal_at=pd.Timestamp(usable.index[-1]),
+        data_hash=frame_digest(frame, ("close_time", "open", "high", "low", "close")),
+        feature_set_version=TECHNICAL_FEATURE_SET_VERSION,
+        model_version=TECHNICAL_MODEL_VERSION,
+        seed=seed,
         passed=passed,
     )

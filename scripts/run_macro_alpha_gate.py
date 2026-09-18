@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -46,6 +47,17 @@ def _fmt(value: float | None) -> str:
     return "—" if value is None else f"{value:.4f}"
 
 
+def _commit() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else "unavailable"
+
+
 def render(result: MacroGateResult) -> str:
     table = [
         f"| {m.name} | {_fmt(m.ic)} | {_fmt(m.icir)} | {m.hit_rate:.2%} | "
@@ -80,6 +92,9 @@ def render(result: MacroGateResult) -> str:
             f"validation {result.validation_rows:,}；test {result.test_rows:,}。",
             f"- 特征数：{len(result.feature_names)}；发布时刻晚于信号时刻违规："
             f"{result.max_release_violation_count}。",
+            f"- 数据 SHA-256：`{result.data_hash}`",
+            f"- 特征集：`{result.feature_set_version}`；模型：`{result.model_version}`；"
+            f"seed={result.seed}；代码提交：`{_commit()}`。",
             "",
             "## 3. OOS 结果",
             "",

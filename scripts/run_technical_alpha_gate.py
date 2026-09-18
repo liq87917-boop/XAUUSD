@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 from typing import Final
@@ -39,6 +40,17 @@ def load_bars(symbol: str) -> pd.DataFrame:
 
 def _fmt(value: float | None) -> str:
     return "—" if value is None else f"{value:.4f}"
+
+
+def _commit() -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else "unavailable"
 
 
 def render_report(result: TechnicalGateResult, symbol: str) -> str:
@@ -81,6 +93,9 @@ def render_report(result: TechnicalGateResult, symbol: str) -> str:
             f"- 正式非重叠 test 样本 {result.non_overlapping_test_rows:,}。",
             f"- 信号区间：{result.first_signal_at.isoformat()} "
             f"至 {result.last_signal_at.isoformat()}。",
+            f"- 数据 SHA-256：`{result.data_hash}`",
+            f"- 特征集：`{result.feature_set_version}`；模型：`{result.model_version}`；"
+            f"seed={result.seed}；代码提交：`{_commit()}`。",
             "",
             "## 3. OOS 结果",
             "",

@@ -9,7 +9,11 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
+from src.alpha.reproducibility import combined_digest, frame_digest
 from src.alpha.technical import Metric, _calibration_bins, _metric
+
+MACRO_MODEL_VERSION = "macro-lr-platt-v1"
+MACRO_FEATURE_SET_VERSION = "macro-initial-release-dxy-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +28,10 @@ class MacroGateResult:
     test_rows: int
     feature_names: tuple[str, ...]
     max_release_violation_count: int
+    data_hash: str
+    feature_set_version: str
+    model_version: str
+    seed: int
     passed: bool
 
 
@@ -143,5 +151,13 @@ def evaluate_macro_gate(
         test_rows=len(test),
         feature_names=feature_names,
         max_release_violation_count=violations,
+        data_hash=combined_digest(
+            frame_digest(gold, ("close_time", "open", "high", "low", "close")),
+            frame_digest(macro_events, ("event_code", "released_at", "actual_value")),
+            frame_digest(dxy, ("close_time", "open", "high", "low", "close")),
+        ),
+        feature_set_version=MACRO_FEATURE_SET_VERSION,
+        model_version=MACRO_MODEL_VERSION,
+        seed=seed,
         passed=passed,
     )
