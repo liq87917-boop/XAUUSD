@@ -183,6 +183,13 @@
 4. **校准**：概率类输出必须做 **Platt 或 Isotonic**，报 **Brier Score + 校准曲线**；未校准的概率不得进 `predictions`；
 5. **成本口径**：本阶段只报"信号质量"，**不报 PnL**（PnL/滑点属 Phase 4 回测，避免越界）。
 
+> **独立门禁现状（2026-09-18）**：Technical 与 Macro 均按冻结口径得到 **FAIL**，因此没有
+> 创建或写入 `alpha_models` / `alpha_signals` / `predictions`。Technical 使用独立 Dukascopy
+> 现货 1h（24 根可交易小时标签），非重叠 test N=77：校准 LR 的 IC=-0.0951、ICIR=-0.4968、
+> 命中率 38.96%。Macro 使用 8 条 initial-release-only 序列 + DXY，并以 `GC=F` 连续期货作
+> 标签代理，test N=381：IC=0.0645 但 ICIR=0.1437，命中率 50.92%（p=0.3793）。两者均未达
+> 建议门槛；结果未混合，也未进入策略/回测。详见两份 Phase 3.2 报告与 TD-42。
+
 ### Phase 3.3 Author Alpha + News Alpha
 
 **Author Alpha**（`Weight(author | regime, horizon, information_type)`）

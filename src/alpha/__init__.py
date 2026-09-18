@@ -1,4 +1,4 @@
-"""Phase 3 Alpha Lab 模块；当前仅包含 Market Regime。"""
+"""Phase 3 Alpha Lab：Regime 与独立 Alpha OOS 门禁。"""
 
 from src.alpha.regime import (
     REGIME_MODEL_VERSION,

@@ -1597,3 +1597,20 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 编码兼容专项 5 passed；最终全量 **3086 passed / 1 skipped**；`ruff check .` 与
   `mypy config database src scripts`（96 个源文件）通过；
 - Phase 3.1 状态：**最终 PASS**。下一阶段为 Phase 3.2 Technical Alpha + Macro Alpha 独立基线。
+
+## 第三十一轮（2026-09-18）：Phase 3.2 Technical / Macro 独立 OOS 门禁
+
+- 新增冻结 Technical 门禁：8 个预注册技术特征、严格下一可交易 bar 标签、60/20/20 时间切分、
+  两道 24 bar embargo、validation-only Platt 校准，以及非重叠 24h test 统计；
+- Dukascopy 现货 Technical 结果：非重叠 test N=77，校准 LR IC=-0.0951、ICIR=-0.4968、
+  命中率 38.96%（Wilson 95% [28.84%, 50.13%]），**FAIL**；
+- 新增独立 Macro 门禁：8 条 FRED/ALFRED initial-release-only 序列的水平/差分 + DXY 收益/动量，
+  全部按 `released_at <= signal_at` as-of 对齐，违规 0；标签明确使用 `GC=F` 连续期货代理；
+- Macro 结果：test N=381，校准 LR IC=0.0645、ICIR=0.1437、命中率 50.92%、单侧二项
+  p=0.3793，**FAIL**；虽 IC>0.03，但未同时达到 ICIR>=0.3，方向亦不显著；
+- 两个负面结果均未写入 Alpha 事实表，未做融合、策略、PnL、手续费、仓位或风险；
+- 报告：`docs/experiments/Phase3_2_Technical_Alpha报告.md` 与
+  `docs/experiments/Phase3_2_Macro_Alpha报告.md`；登记 TD-42，禁止使用 test 反复调参追求 PASS。
+- 专项新增门禁 8 passed；最终全量 **3227 passed / 1 skipped**；`ruff check .` 与
+  `mypy config database src scripts`（100 个源文件）通过。首次全量运行仅因系统临时目录拒绝访问
+  导致夹具创建错误，改用项目内隔离 `--basetemp` 后全量通过，不属于代码失败。
