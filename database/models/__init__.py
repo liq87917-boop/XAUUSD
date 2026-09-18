@@ -22,6 +22,7 @@ from database.models.enums import (
     AssetClass,
     AuthorStatus,
     CollectorRunStatus,
+    FeatureSetKind,
     InformationType,
     JobStatus,
     MediaType,
@@ -30,10 +31,12 @@ from database.models.enums import (
     ProcessStatus,
     PropagationRelation,
     RawItemType,
+    Regime,
     SourceType,
     Timeframe,
 )
 from database.models.event import MacroEvent, NewsEvent
+from database.models.feature import FeatureSet, FeatureSnapshot, FeatureValue, MarketRegime
 from database.models.market import Instrument, MarketBar
 from database.models.processing import AuthorPost, ProcessedItem
 from database.models.raw import RawItem, RawMedia
@@ -69,8 +72,15 @@ PHASE2_TABLES: tuple[str, ...] = (
     "author_weight_snapshots",
 )
 
+PHASE3_TABLES: tuple[str, ...] = (
+    "feature_sets",
+    "feature_snapshots",
+    "feature_values",
+    "market_regimes",
+)
+
 #: 当前阶段（Phase 1 + Phase 2）应有的全部表；测试以此断言"不多不少"
-ALL_TABLES: tuple[str, ...] = PHASE1_TABLES + PHASE2_TABLES
+ALL_TABLES: tuple[str, ...] = PHASE1_TABLES + PHASE2_TABLES + PHASE3_TABLES
 
 #: 已注册"不可覆盖"守卫的表（原始 / 加工事实数据）
 PROTECTED_TABLES: tuple[str, ...] = tuple(enable_immutability_protection(Base))
@@ -79,6 +89,7 @@ __all__ = [
     "ALL_TABLES",
     "PHASE1_TABLES",
     "PHASE2_TABLES",
+    "PHASE3_TABLES",
     "PROTECTED_TABLES",
     "TIMEFRAME_SECONDS",
     "WEIGHT_CONTEXT_ANY",
@@ -95,12 +106,17 @@ __all__ = [
     "CollectorRun",
     "CollectorRunStatus",
     "DataVersion",
+    "FeatureSet",
+    "FeatureSetKind",
+    "FeatureSnapshot",
+    "FeatureValue",
     "InformationType",
     "Instrument",
     "JobRun",
     "JobStatus",
     "MacroEvent",
     "MarketBar",
+    "MarketRegime",
     "MediaType",
     "NewsEvent",
     "OpinionHorizon",
@@ -112,6 +128,7 @@ __all__ = [
     "RawItem",
     "RawItemType",
     "RawMedia",
+    "Regime",
     "Source",
     "SourceType",
     "Timeframe",

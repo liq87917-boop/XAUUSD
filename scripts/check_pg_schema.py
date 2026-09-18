@@ -5,7 +5,7 @@
     （见 database/types.py 与 database/session.py 顶部说明）。SQLite 测试无法证明
     JSONB / 原生 UUID / TIMESTAMPTZ 真的建成了原生类型，因此本脚本在真实
     PostgreSQL 上做三项断言：
-      1. 迁移是否已执行（Phase 1 的 15 张表齐全）；
+      1. 当前阶段的全部表是否齐全；
       2. 关键列为 PG 原生类型（uuid / jsonb / timestamp with time zone）；
       3. 基础数据种子是否可重复执行（幂等）。
 
@@ -41,6 +41,11 @@ EXPECTED_PG_TYPES: dict[tuple[str, str], str] = {
     ("sources", "config_json"): "jsonb",
     ("job_runs", "input_json"): "jsonb",
     ("audit_logs", "before_json"): "jsonb",
+    ("feature_sets", "definition_json"): "jsonb",
+    ("feature_snapshots", "id"): "uuid",
+    ("feature_snapshots", "as_of"): "timestamp with time zone",
+    ("feature_snapshots", "values_json"): "jsonb",
+    ("feature_values", "value_numeric"): "numeric",
 }
 
 
@@ -83,9 +88,9 @@ def check_seed_idempotency(database_url: str) -> list[str]:
     repeated: dict[str, SeedResult] = seed_database(database_url, scope="all")
 
     problems: list[str] = [
-        f"{entity}: 首次未写入任何记录（期望 >0）"
+        f"{entity}: 既无新增也无已存在种子（期望总数 >0）"
         for entity, result in results.items()
-        if result.created_count == 0
+        if result.created_count + result.existing_count == 0
     ]
     problems.extend(
         f"{entity}: 重复执行新增了 {result.created_count} 条（必须为 0）"
@@ -97,7 +102,7 @@ def check_seed_idempotency(database_url: str) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     """执行全部 PostgreSQL 校验，返回进程退出码。"""
-    from database.models import PHASE1_TABLES
+    from database.models import ALL_TABLES
 
     database_url = _database_url()
     masked = sa.engine.make_url(database_url).render_as_string(hide_password=True)
@@ -110,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     engine = sa.create_engine(database_url, pool_pre_ping=True, future=True)
     try:
         problems = [
-            *[f"缺少表：{table}" for table in check_tables(engine, PHASE1_TABLES)],
+            *[f"缺少表：{table}" for table in check_tables(engine, ALL_TABLES)],
             *check_native_types(engine),
         ]
     finally:
@@ -123,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[pg-check] FAIL: {problem}", file=sys.stderr)
         return 1
 
-    print(f"[pg-check] PASS：{len(PHASE1_TABLES)} 张表、原生类型、种子幂等全部通过")
+    print(f"[pg-check] PASS：{len(ALL_TABLES)} 张表、原生类型、种子幂等全部通过")
     return 0
 
 

@@ -1,7 +1,7 @@
 # 14_Phase3 执行规划（Alpha Lab）· V0.2
 
-> **状态（2026-09-17）**：用户已批准 Phase 3.0 按本规划推进。W0-1 行情数据底座已完成受限验收；
-> W0-2 已按 Initial Release Only 口径验收通过；W0-3 新闻回填已受限验收通过；W0-4 作者观点链也已受限验收通过。本文件仍不授权提前实施
+> **状态（2026-09-18）**：用户已批准 Phase 3.0 按本规划推进。W0-1 行情数据底座已完成受限验收；
+> W0-2 已按 Initial Release Only 口径验收通过；W0-3 新闻回填已受限验收通过；W0-4 作者观点链已受限验收通过；W0-5 特征底座已通过验收。本文件仍不授权提前实施
 > Regime、Alpha、Prediction、Strategy 或 Risk。
 > **依据**：`docs/01 §7–§10`（Regime / Alpha / 预测 / Meta Ensemble）、`docs/03 §3.5–3.7`（表设计）、`docs/04 §16–23`（字段定义）、
 > `docs/05 Phase 3`、`docs/07 Phase 3 Prompt`、`docs/08 §6`（Phase 3 验收）、`.clinerules`（红线）。
@@ -32,12 +32,12 @@
 | 作者观点 | `author_opinions` | 🟡 **基线已产出** | `mock-regex-v1` 从 19 条真实帖子产出 11 条观点；14 帖无观点、3 帖单观点、2 帖各 4 观点均留痕。当前只是规则基线，不代表 LLM v13 或人工金标准 |
 | 作者技能/权重快照 | `author_skill_snapshots` / `author_weight_snapshots` | 🟡 | 表与约束在（migration 0005），**计算逻辑未实现**（Phase 3.3 才做） |
 | 传播边 | `propagation_edges` | 🟡 | 表在，去重/传播算法在 `src/processors/{similarity,propagation}.py`，**真实语料未入库** |
-| 特征 / Regime / Alpha / 预测表 | `feature_sets` / `feature_snapshots` / `market_regimes` / `alpha_models` / `alpha_signals` / `predictions` | 📐 | `docs/03 §3.5–3.7` + `docs/04 §16–18/21–23` 有设计（含索引建议），**无 ORM、无迁移** |
-| 相邻待建表 | `feature_values` / `calibration_models` / `ensemble_runs` / `ensemble_components` / `author_regime_skills` / `author_horizon_skills` / `author_information_type_skills` / `experiments` / `walk_forward_*` | 📐 | 仅出现在 `docs/03` 清单里，**`docs/04` 无字段级定义** → Phase 3 开工时需先补字段设计（不改既有表） |
-| Phase 3 相关枚举 | — | ❌ | `database/models/enums.py` **无** `Regime` / `AlphaType` / `CalibrationMethod` / `FeatureSetKind` 等（docs/03 已给出取值口径） |
+| 特征 / Regime 表 | `feature_sets` / `feature_snapshots` / `feature_values` / `market_regimes` | ✅ **W0-5 已落地** | migration `0007_phase3_feature_tables`；特征定义/快照/单值与 Regime 追溯结构均有 ORM、迁移、约束与 append-only 守卫；Regime 识别逻辑仍未实现 |
+| Alpha / 预测及相邻待建表 | `alpha_models` / `alpha_signals` / `predictions` / `calibration_models` / `ensemble_*` / `author_*_skills` / `experiments` / `walk_forward_*` | 📐 | 仍只有设计，未提前建表 |
+| Phase 3 相关枚举 | — | 🟡 | `Regime` / `FeatureSetKind` 已落地；`AlphaType` / `CalibrationMethod` 等仍待对应工作包 |
 | 建模依赖 | `pyproject.toml` | ✅ 部分 | 已批准：**numpy / pandas / scikit-learn**（+ httpx / jieba / feedparser）；**未引入**：lightgbm / xgboost / hmmlearn / statsmodels（**需你批准**，见 §4.3） |
 | 泄漏门禁与测试基建 | `tests/`（2264 passed / 1 skipped）+ `database/` CHECK 约束 | ✅ | 已有 `leakage` marker 与时间因果守卫（`collected_at <= effective_at`、`ensure_utc_from_database`），Phase 3 可直接复用 |
-| 数据库 | PostgreSQL（迁移 0001–0005）+ SQLite（测试） | ✅ | 19 张表；`market_bars`/`news_events`/`macro_events`/`author_opinions` 均为 append-only 研究事实表 |
+| 数据库 | PostgreSQL（迁移 0001–0007）+ SQLite（测试） | ✅ | 23 张表；W0-5 四表已加入 append-only 保护，真实研究库有 1 个特征集、1 份快照、6 个规范化值 |
 
 **一句话结论**：Phase 1–2 交付的是**管道与契约**，不是**数据量**。Phase 3 的第一个卡点不是模型，而是
 **「行情/宏观/新闻历史几乎没有」+「作者观点不在库里」**——必须先解决数据底座，否则任何 Alpha 都无法做 OOS 验证（`docs/08 §6`）。
@@ -49,18 +49,18 @@
 | 输入 | 用途 | 承载 | 现状 | 动作 |
 |---|---|---|---|---|
 | XAUUSD 多周期 K 线 | 趋势/波动率判定 | `market_bars`（1d/1h/**4h 需聚合**） | 🟡 10 行、无 4h | **回填历史** + Processor 聚合 4h（关 TD-03） |
-| 波动率特征（ATR/realized vol 分位） | HIGH/LOW_VOLATILITY | `feature_values` | 📐 | 随 3.1 建表并计算 |
+| 波动率特征（ATR/realized vol 分位） | HIGH/LOW_VOLATILITY | `feature_values` | 🟡 表已建 | 3.1 增加正式 Regime 特征；W0-5 的 `realized_vol_4` 只用于验证底座 |
 | 新闻到达密度（近 N 小时 NEWS 条数） | NEWS_DRIVEN | `news_events`/`raw_items` | 🟡 2 行 | 回填 + 定义密度口径（N=?） |
 | 宏观发布日历（近 24h 是否有重要发布） | NEWS_DRIVEN 辅助 | `macro_events` | 🟡 2 行 | 回填（含**发布时刻**） |
 | 标的字典/时区 | 对齐与展示 | `instruments` | ✅ | 直接用 |
-| **输出** | `market_regimes` | `regime_type/confidence/start_at/end_at/detected_at/model_version/feature_snapshot_id` | 📐 | 随 3.1 建表（字段定义见 `docs/04 §18`） |
+| **输出** | `market_regimes` | `regime_type/confidence/start_at/end_at/detected_at/model_version/feature_snapshot_id` | 🟡 表已建、0 行 | 3.1 实现识别器后才允许写入 |
 
 **1.2.2 Technical Alpha**（`docs/05`：首期 8 特征 = return / momentum / MA / RSI / MACD / ATR / realized volatility / breakout）
 
 | 输入 | 用途 | 承载 | 现状 | 动作 |
 |---|---|---|---|---|
 | XAUUSD 历史 K 线（1h/4h/1d） | 全部技术特征 | `market_bars` | 🟡 10 行 | **回填（关键路径）** |
-| 特征快照（as_of 严格 ≤ 预测时刻） | 可追溯 | `feature_snapshots`/`feature_values` | 📐 | 建表 + 逐时点生成器 |
+| 特征快照（as_of 严格 ≤ 预测时刻） | 可追溯 | `feature_snapshots`/`feature_values` | ✅ W0-5 底座 | 已有严格 as-of 生成、冻结输入哈希、幂等写入与回放；正式全量技术特征留待 3.2 |
 | 前瞻收益标签（未来 1h/4h/1d 收益） | 训练/评估目标 | 由 `market_bars` 派生（**不入原表**） | ❌ | 定义对齐口径（§3.4） |
 | 基准对照 | 门槛比较 | 代码内实现 | ❌ | random / always long / momentum / MA（`docs/08 §6`） |
 
@@ -117,7 +117,7 @@
 
 | 迁移 | 覆盖子阶段 | 内容 |
 |---|---|---|
-| `0007_phase3_regime_feature_tables` | 3.1 | 枚举 `Regime` / `FeatureSetKind`；表 `feature_sets` / `feature_snapshots` / `feature_values` / `market_regimes`（`0006` 已由宏观 vintage 使用；字段依 `docs/04 §16–18`，缺的 `feature_values` 先补 `docs/04`） |
+| `0007_phase3_feature_tables` | 3.1 | 枚举 `Regime` / `FeatureSetKind`；表 `feature_sets` / `feature_snapshots` / `feature_values` / `market_regimes`（`0006` 已由宏观 vintage 使用；字段依 `docs/04 §16–18`，缺的 `feature_values` 先补 `docs/04`） |
 | `0008_phase3_alpha_tables` | 3.2 / 3.3 | 枚举 `AlphaType`；表 `alpha_models` / `alpha_signals` / `calibration_models`（`docs/04 §21–22` + 补 `calibration_models` 字段） |
 | `0009_phase3_author_conditional_skills` | 3.3 | 表 `author_regime_skills` / `author_horizon_skills` / `author_information_type_skills`（**先补 `docs/04` 设计**） |
 | `0010_phase3_ensemble_experiment_tables` | 3.4 | 表 `ensemble_runs` / `ensemble_components` / `experiments` / `experiment_artifacts` / `walk_forward_runs` / `walk_forward_windows` |
@@ -140,7 +140,7 @@
 | W0-2 宏观回填 + **发布时刻** | FRED/ALFRED 初值序列落库；**新增 `released_at` / `vintage_end_at`** | **PASS（2026-09-17，Initial Release Only）**：8 序列 11,680 条；二轮 0 新增；发布前不可见、append-only、密钥脱敏通过。完整修订链未交付，普通“今天最新值”不得用于历史训练 |
 | W0-3 新闻回填 | RSS 白名单（`fred_blog`/`fed_press`；`ecb_press` 依既有裁决保持禁用）近 90 天窗口；robots fail-closed | **PASS（受限，2026-09-17）**：30 条落入 `raw_items + news_events`，幂等复跑 0 新增；robots 判定已有逐源留痕；来源分布 10/20，`fed_press=66.7%` 的 >40% 告警已自动触发。限制：RSS 当前快照不等于完整 90 天历史 |
 | W0-4 作者观点链 | 采用 `docs/11 §5` 方案 B 正式入库；Regex 作为可复现基线 | **PASS（仅工程管道，2026-09-17）**：19 帖幂等入库、11 观点、31 评价行；v2 门禁确认 31 行均缺可信独立采集时间，统一标记 `UNTRUSTED_COLLECTION_TIME`，因此正式研究可用标签为 0。入场延迟超过对应 horizon 亦拒绝评价。样本不得进入 OOS、作者权重或 Alpha 结论 |
-| W0-5 特征底座 | `feature_sets` / `feature_snapshots` / `feature_values` + 生成器 | ① **`max_effective_at <= as_of` 恒成立**（有 leakage 测试）；② 快照可重放（同日同时点重算结果一致） |
+| W0-5 特征底座 | `feature_sets` / `feature_snapshots` / `feature_values` + 生成器 | **PASS（2026-09-18）**：`max_effective_at <= as_of` 由查询、代码与 DB CHECK 三层保证；未来生效行注入与缺口拒绝 leakage 测试通过；同一 `as_of` 二次写入 `inserted=false`，冻结行 ID 回放逐值一致。当前只含 W0-5 最小 `market-core 1.0.0`，不等于 3.2 完整特征工程 |
 
 ### Phase 3.1 Market Regime 引擎（规则 + 统计，**不引入 DL/RL**）
 
@@ -148,7 +148,7 @@
 
 | 交付 | 内容 |
 |---|---|
-| 迁移 | `0007_phase3_regime_feature_tables`（枚举 + 4 张表；`0006` 已用于宏观 vintage） |
+| 迁移 | `0007_phase3_feature_tables`（枚举 + 4 张表；W0-5 已完成） |
 | 代码 | `src/alpha/regime.py`（判定器）+ `scripts/build_regimes.py`（回填 CLI，默认 `--dry-run`） |
 | 报告 | `docs/experiments/Phase3_1_Regime报告.md`（状态占比、平均持续时长、切换频次、与波动率/事件对照、`UNKNOWN` 比例） |
 

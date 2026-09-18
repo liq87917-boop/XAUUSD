@@ -34,12 +34,9 @@ def test_later_phase_tables_are_not_created(engine: sa.Engine) -> None:
     """阶段锁定（05_分阶段开发路线图）：后续阶段（Phase 3+）的表不得提前出现。
 
     Phase 2（Author Lab）的四张表已由 migration 0005 正式建立，因此从本清单移除；
-    Phase 3 及以后的表（特征 / Regime / Alpha / 策略 / 回测 / 风险 / 进化）继续禁止。
+    Phase 3 W0-5 的四张表已经建立；Alpha / 策略 / 回测 / 风险 / 进化继续禁止。
     """
     forbidden = {
-        "feature_sets",
-        "feature_snapshots",
-        "market_regimes",
         "alpha_models",
         "alpha_signals",
         "predictions",
@@ -81,6 +78,11 @@ def test_phase2_has_exactly_four_tables() -> None:
     """07 Phase 2 Prompt 明确要求建立 4 张表（migration 0005）。"""
     assert len(models.PHASE2_TABLES) == 4
     assert set(models.PHASE2_TABLES) <= set(models.ALL_TABLES)
+
+
+def test_phase3_w05_has_exactly_four_tables() -> None:
+    assert len(models.PHASE3_TABLES) == 4
+    assert set(models.PHASE3_TABLES) <= set(models.ALL_TABLES)
 
 
 def test_source_name_is_unique(session: sa.orm.Session, make_source) -> None:

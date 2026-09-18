@@ -1519,3 +1519,24 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - `docs/experiments/Phase3_W0_前置收口报告.md` 状态改为 **PASS**；
 - 本轮仅记录放行，不启动 W0-5 开发。作者时间来源、`GC=F` 代理、新闻/作者样本量仍是后续
   Alpha 验收限制，不能被描述为已解决。
+
+## 第二十六轮（2026-09-18）：W0-5 特征底座落地与真实库回放验收
+
+- 新增 migration `0007_phase3_feature_tables` 与四张 append-only 表：`feature_sets`、
+  `feature_snapshots`、`feature_values`、`market_regimes`；补齐字段文档、枚举、唯一键、外键、
+  值域和时间因果 CHECK；`market_regimes` 本轮保持 0 行，不提前进入 3.1；
+- 新增 `market-core 1.0.0` 最小生成器：行情必须同时满足 `close_time/effective_at <= as_of`，
+  只取最新连续 5 根 4h K 线，遇缺口拒绝且不插值；快照绑定保存输入行 ID 的 DataVersion 和
+  SHA-256；相同身份幂等复用；
+- 新增 leakage 测试覆盖未来生效行排除、缺口拒绝、DB 层 `max_effective_at <= as_of`、
+  append-only 与冻结输入逐值回放；
+- 真实 PostgreSQL 首次迁移发现 revision 名超过 Alembic `VARCHAR(32)` 上限，事务自动回滚、
+  库仍完整停在 0006；缩短为 `0007_phase3_feature_tables` 并加入 revision 长度回归测试后成功；
+- 真实库写入 1 份 XAUUSD 4h 快照（6 个值）；相同 `as_of` 复跑 `inserted=false`，回放 PASS，
+  时间违规 0；PG 23 表原生类型检查 PASS；
+- 为避免 W0 冻结 SQLite 快照被新增 Phase 3 表反向破坏，迁移工具明确固定迁移 Phase 1+2 的
+  19 张历史表，新表继续由 Alembic 在 PostgreSQL 创建为空表；
+- 专项 71 passed、leakage/不可变性 48 passed；全量 **2530 passed / 1 skipped**；
+  `ruff check .` 与 `mypy`（90 files）通过；W0-5 新文件格式检查通过，全仓 `format --check`
+  仍是 TD-33 已登记的历史格式债（81 个旧文件），本工作包未混入全仓纯格式改写；
+- W0-5 **PASS（底座范围）**。详细报告：`docs/experiments/Phase3_W0_5_特征底座报告.md`。

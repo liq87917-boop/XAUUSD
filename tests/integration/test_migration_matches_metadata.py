@@ -104,6 +104,15 @@ def test_alembic_head_is_single_revision(
     assert list(versions) == list(heads)
 
 
+def test_alembic_revision_ids_fit_default_version_column(alembic_config_factory) -> None:
+    """PostgreSQL/SQLite 默认 alembic_version.version_num 都是 VARCHAR(32)。"""
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory.from_config(alembic_config_factory("sqlite+pysqlite:///:memory:"))
+    revisions = list(script.walk_revisions())
+    assert all(len(item.revision) <= 32 for item in revisions)
+
+
 def test_downgrade_removes_all_phase1_tables(
     tmp_path: Path, alembic_config_factory
 ) -> None:

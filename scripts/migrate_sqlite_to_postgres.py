@@ -28,7 +28,7 @@ if str(REPO_ROOT) not in sys.path:  # pragma: no cover
     sys.path.insert(0, str(REPO_ROOT))
 
 from config.settings import get_settings  # noqa: E402
-from database.models import ALL_TABLES, Base  # noqa: E402
+from database.models import PHASE1_TABLES, PHASE2_TABLES, Base  # noqa: E402
 from database.session import build_engine  # noqa: E402
 
 DEFAULT_SOURCE = REPO_ROOT / "database" / "backups" / "gold_ai_w0_preflight_closed_20260917.db"
@@ -98,17 +98,12 @@ def _read_rows(connection: sa.Connection, table: Table) -> list[dict[str, Any]]:
     statement = sa.select(table)
     if primary_key:
         statement = statement.order_by(*primary_key)
-    return [
-        _prepare_row(table, dict(row)) for row in connection.execute(statement).mappings()
-    ]
+    return [_prepare_row(table, dict(row)) for row in connection.execute(statement).mappings()]
 
 
 def _rows_hash(table: Table, rows: Iterable[Mapping[str, Any]]) -> str:
     column_names = [column.name for column in table.columns]
-    canonical = [
-        {name: _normalise_value(row.get(name)) for name in column_names}
-        for row in rows
-    ]
+    canonical = [{name: _normalise_value(row.get(name)) for name in column_names} for row in rows]
     payload = json.dumps(
         canonical,
         ensure_ascii=False,
@@ -124,7 +119,9 @@ def _chunks(rows: Sequence[dict[str, Any]]) -> Iterable[Sequence[dict[str, Any]]
 
 
 def _tables() -> list[Table]:
-    return [Base.metadata.tables[name] for name in ALL_TABLES]
+    # W0 冻结源库停留在 Phase 2；W0-5 新表应由 Alembic 在目标库创建为空表，
+    # 不能反向要求历史 SQLite 快照包含尚未存在的 Phase 3 结构。
+    return [Base.metadata.tables[name] for name in PHASE1_TABLES + PHASE2_TABLES]
 
 
 def audit_database(engine: Engine) -> dict[str, tuple[int, str]]:

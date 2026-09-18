@@ -47,6 +47,11 @@ ALLOWED_UPDATE_COLUMNS: Final[dict[str, frozenset[str]]] = {
     "propagation_edges": frozenset(),
     "author_skill_snapshots": frozenset(),
     "author_weight_snapshots": frozenset(),
+    # Phase 3 特征/状态事实：定义、快照及识别结果均按版本追加。
+    "feature_sets": frozenset(),
+    "feature_snapshots": frozenset(),
+    "feature_values": frozenset(),
+    "market_regimes": frozenset(),
 }
 
 

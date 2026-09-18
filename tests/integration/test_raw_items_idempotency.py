@@ -37,6 +37,11 @@ def test_protected_tables_are_registered() -> None:
         "propagation_edges",
         "author_skill_snapshots",
         "author_weight_snapshots",
+        # Phase 3 W0-5 特征与状态事实表
+        "feature_sets",
+        "feature_snapshots",
+        "feature_values",
+        "market_regimes",
     }
 
 

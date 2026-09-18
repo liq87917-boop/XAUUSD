@@ -17,6 +17,7 @@ __all__ = [
     "AssetClass",
     "AuthorStatus",
     "CollectorRunStatus",
+    "FeatureSetKind",
     "InformationType",
     "JobStatus",
     "MediaType",
@@ -25,6 +26,7 @@ __all__ = [
     "ProcessStatus",
     "PropagationRelation",
     "RawItemType",
+    "Regime",
     "SourceType",
     "Timeframe",
     "WEIGHT_CONTEXT_ANY",
@@ -121,6 +123,28 @@ class Timeframe(StrEnum):
     H1 = "1h"
     H4 = "4h"
     D1 = "1d"
+
+
+class FeatureSetKind(StrEnum):
+    """特征集的数据域（Phase 3.0 W0-5）。"""
+
+    TECHNICAL = "TECHNICAL"
+    MACRO = "MACRO"
+    NEWS = "NEWS"
+    AUTHOR = "AUTHOR"
+    MIXED = "MIXED"
+
+
+class Regime(StrEnum):
+    """市场状态字典；W0-5 只建表，不执行状态识别。"""
+
+    TREND_UP = "TREND_UP"
+    TREND_DOWN = "TREND_DOWN"
+    RANGE = "RANGE"
+    HIGH_VOLATILITY = "HIGH_VOLATILITY"
+    LOW_VOLATILITY = "LOW_VOLATILITY"
+    NEWS_DRIVEN = "NEWS_DRIVEN"
+    UNKNOWN = "UNKNOWN"
 
 
 #: 周期长度（秒），用于数据质量检查（K 线缺口、close_time - open_time 校验）
