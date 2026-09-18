@@ -25,7 +25,7 @@
 | Phase 2 多模型标注对比 | `scripts/compare_model_annotations.py`（**标准库读 xlsx**，零新增依赖）：三模型一致性统计 + 待人工裁决清单 `logs/pending_review.csv` + 共识 `logs/model_consensus.csv` + 报告 `docs/experiments/annotation_model_comparison.md`；**模型输出不作为金标准**；已填写的裁决表默认拒绝覆盖（退出码 4） |
 | Phase 2 金标准（ground truth） | `scripts/build_ground_truth.py`：人工裁决 + 三模型共识 → `logs/ground_truth_200.csv`（1000 格，`source` 区分 `human-adjudicated` / `3-model-consensus`，含 `overturn` 推翻标记）+《金标准生成报告》`docs/experiments/ground_truth_report.md`；人工裁决文件先字节级归档到 `logs/archive/` |
 | Phase 2 基线评估 | `scripts/evaluate_extractor.py`：正则抽取器 vs 人工金标准，**区分该判未判 / 提取错误 / 不该判却判**，输出准确率、召回率、精确率、混淆矩阵、点位差值分布 → `logs/extractor_eval.csv`（1000 格）+《Phase 2 基线评估报告》`docs/experiments/Phase2_基线评估报告.md` |
-| 测试 | PostgreSQL 本地环境最终全量：2647 passed / 1 skipped（2026-09-17） |
+| 测试 | PostgreSQL 研究库环境最终全量：2649 passed / 1 skipped（2026-09-18） |
 | 质量门禁 | `ruff`（E/F/I/UP/B/SIM）、`mypy`（config + database + src + scripts）、CI（Python 3.12/3.13 + PostgreSQL 16 作业） |
 | 端到端复核 | `tests/integration/test_pipeline_integrity.py` + `scripts/phase1_pipeline_report.py` |
 
@@ -77,7 +77,7 @@
 | TD-37 | ✅ 已结案（2026-09-14，用户裁决：**不改 Prompt**） | **LLM v13 对"描述型新闻标题"大量判 `UNKNOWN`**：黄金 100 条中 **90 格方向拒答**，且**全部** `wrong_value` 都是 `UNKNOWN`（无一格判反方向）——模型把"金价下跌 0.9%"当作**事实描述**而非**可交易观点**（符合 `docs/10 §4.9.0` 抽象原则与"只降不猜"） | **用户裁决（2026-09-14）：维持现状、不做代码修补** —— `opinion-prompt-v13` **保持冻结**（绝不教模型把描述句标成 `SHORT`，避免污染模型定义、未来把新闻当预测）；描述句不出方向、标题级源只作事件层（与 TD-31 一致）；**标题级情感分类留 Phase 3 的 News Alpha**。备选方案（已否决）：新增"新闻事实 → 方向映射"例外口径（会触动 `docs/10 §4.1.5`） |
 | TD-38 | ✅ 已加硬门禁（2026-09-17） | W0-4 的 19 条历史帖子没有独立采集时间，旧版曾生成 12 条可计算标签；`forward-return-v2` 现将全部 31 个评价行标记为 `UNTRUSTED_COLLECTION_TIME`，只允许验证管道，禁止进入 OOS / Alpha / 作者权重 | 只有取得可核验的独立 `collected_at` 后才能解除数据限制 |
 | TD-39 | ✅ 已解决（2026-09-17） | Phase 3 规划曾把特征表迁移编号写成 `0006`，与已经落地的 `0006_macro_event_vintages` 冲突 | 后续迁移已整体顺延为 `0007`–`0010` |
-| TD-40 | P0 | PostgreSQL 端到端环境已通过，但当前只含种子和 Mock 验证数据；W0-1～W0-4 的真实研究事实仍在冻结的 SQLite 库中 | W0-5 前迁移或按原始来源重建，并核对逐表数量、自然键、时间语义与数据指纹 |
+| TD-40 | ✅ 已解除（2026-09-18） | 冻结 SQLite 快照已事务性迁入独立 `gold_ai_research`：19 表、110,992 行逐表数量与 SHA-256 全部一致；本地 `.env` 已切换，原验收库保留 | 已修；报告见 `docs/experiments/Phase3_W0_PostgreSQL迁移报告.md` |
 
 
 ---

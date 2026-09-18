@@ -1480,3 +1480,33 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   `pytest` **2647 passed / 1 skipped**。
 - 边界：当前 PostgreSQL 只承载种子与 Mock 端到端验收数据；W0-1～W0-4 的真实研究事实仍在
   冻结的 SQLite 库中。迁移/重建与逐表对账另列 TD-40，完成前不启动 W0-5。
+
+## 第二十四轮（2026-09-18）：W0 真实研究数据迁入 PostgreSQL
+
+### 1. 安全迁移工具
+
+- 新增 `scripts/migrate_sqlite_to_postgres.py`：默认 dry-run，只允许
+  `postgresql+psycopg://` 目标；目标 19 张业务表必须全部为空；
+- 整体写入置于单一事务，任何外键、行数或内容指纹不一致都会全量回滚；
+- SQLite naive datetime 按项目既有契约恢复为 UTC；`raw_items.superseded_by_id` 用两阶段写入
+  保持自引用外键；批量写入后逐表计算规范化 SHA-256；
+- 新增集成测试覆盖逐表哈希、自引用恢复和非空目标拒绝。
+
+### 2. 独立研究库与迁移结果
+
+- 保留原 `gold_ai` 验收库不动，新建 `gold_ai_research`；执行迁移 `0001→0006`；
+- 源：`database/backups/gold_ai_w0_preflight_closed_20260917.db`，SHA-256
+  `518AD17599DEEB693FC490B00EBB31C07FEA8B3ED131F9B7E3E05A419CB18B46`；
+- 迁移 **19 表 / 110,992 行**，逐表源/目标行数和内容 SHA-256 全部一致；
+- PostgreSQL 原生备份：`.postgres-local/gold_ai_research_pre_w0_5.dump`，SHA-256
+  `37A98A0299AE45E78117F35B343C3CFB14A88D5DE4FD0A9E708D71166E3A4EBF`；
+- 本地 `.env` 已切换到 `gold_ai_research`；Alembic current 为 `0006_macro_event_vintages`；
+- 切换后只读复核：`raw_items=51,941`、`market_bars=47,019`、`macro_events=11,680`、
+  `news_events=30`、`author_opinions=11`、`data_versions=3`；31 条观点仍全部被
+  `UNTRUSTED_COLLECTION_TIME` 门禁隔离。
+
+### 3. 状态
+
+- TD-40 已解除；完整逐表指纹见 `docs/experiments/Phase3_W0_PostgreSQL迁移报告.md`；
+- 迁移后最终门禁：`ruff` PASS、`mypy` 86 文件 PASS、`pytest` **2649 passed / 1 skipped**；
+- W0-5 仍保持暂停，等待用户确认历史 DeepSeek / 数据库凭据已轮换。
