@@ -92,7 +92,7 @@ def render(snapshot: HandoffSnapshot) -> str:
             "",
             "## 3. 质量门禁",
             "",
-            "- 全量测试：3234 passed / 1 skipped。",
+            "- 全量测试：3379 passed / 1 skipped。",
             "- `ruff check .`：PASS。",
             "- `mypy config database src scripts`：PASS。",
             "- Phase 3 范围边界：PASS。",

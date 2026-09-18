@@ -1716,3 +1716,13 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   畸形 URL 安全返回逐行错误，不会令整次体检崩溃；
 - 用户交接说明同步强调严格时间关系和唯一可复核地址；新增复制时间、重复 URL、畸形 URL 回归；
 - 作者输入专项 **6 passed**，lint 与类型检查通过；没有修改数据库或放宽任何研究门禁。
+
+## 第四十二轮（2026-09-19）：08:00 前最终质量复核
+
+- 使用项目内隔离临时目录完成最终全量回归：**3379 passed / 1 skipped**，唯一 skip 为可选
+  `jieba` 未安装；`ruff check .` 与 `mypy config database src scripts`（109 个源文件）通过；
+- PostgreSQL Phase 3 范围边界复核 PASS：revision 仍为 `0007_phase3_feature_tables`，不存在
+  Alpha/Prediction/Strategy/Trading 下游事实表，作者技能/权重仍为 0，实盘与外部下单开关均关闭；
+- Phase 3.2 真实库双跑复现再次 PASS：Technical/Macro 数据哈希和结果逐字段一致，事实表行数
+  前后不变；该复核不改变两个 Alpha 的 FAIL 结论；
+- README 与早间交接生成器同步最终测试计数；未新增迁移、未写研究事实、未使用 test 调参。

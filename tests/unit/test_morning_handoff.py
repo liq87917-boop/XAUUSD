@@ -12,7 +12,7 @@ def test_handoff_contains_results_boundaries_and_user_actions() -> None:
     assert "Technical：FAIL" in report
     assert "Macro：FAIL" in report
     assert "Author / News：BLOCKED" in report
-    assert "3234 passed / 1 skipped" in report
+    assert "3379 passed / 1 skipped" in report
     assert "author_posts_template.csv" in report
     assert "每个 source + account 账号至少 30 条" in report
     assert "唯一可解析 URL" in report

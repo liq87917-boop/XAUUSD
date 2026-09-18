@@ -20,7 +20,7 @@ Strategy 事实，不进入实盘。
 | Alembic 迁移 0001（含完整 downgrade） | `database/migrations/versions/0001_phase1_core_tables.py` |
 | 事实表「不可覆盖」守卫（flush 期拦截） | `database/protection.py` |
 | 时间因果 / 数据质量约束（CHECK / FK / UNIQUE） | 各模型 `__table_args__` + 同结构迁移 |
-| unit / integration / data_quality / leakage 测试 | `tests/`（夜间全量：**3234 passed + 1 skipped**；另有 `ruff` / `mypy` / PostgreSQL 范围边界门禁） |
+| unit / integration / data_quality / leakage 测试 | `tests/`（最终全量：**3379 passed + 1 skipped**；另有 `ruff` / `mypy` / PostgreSQL 范围边界门禁） |
 | 基础数据种子（instruments / sources，幂等 + CLI） | `database/seeds/`（`python -m database.seeds`） |
 | raw_items 修正路径①仓储（先插新记录再回填指针） | `database/repositories/raw_items.py` |
 | mypy 静态类型检查 + CI（含 PostgreSQL 作业） | `pyproject.toml`、`.github/workflows/ci.yml`、`scripts/check_pg_schema.py` |
