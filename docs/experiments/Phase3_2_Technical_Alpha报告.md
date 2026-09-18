@@ -18,6 +18,8 @@
 - train 5,605；validation 1,845；test 1,845。
 - 正式非重叠 test 样本 77。
 - 信号区间：2024-09-16T18:00:00+00:00 至 2026-09-16T20:00:00+00:00。
+- 数据 SHA-256：`d0e0b39e1220b24428aa1cf39d7f68b9b5dc16ef8d25762d319eda77f7234d0d`
+- 特征集：`technical-8-v1`；模型：`technical-lr-platt-v1`；seed=42；代码提交：`c20208714d5140c9a1f4e3d436fc6410f0c57af8`。
 
 ## 3. OOS 结果
 

@@ -14,6 +14,8 @@
 
 - 可用 1,909；train 1,145；validation 381；test 381。
 - 特征数：18；发布时刻晚于信号时刻违规：0。
+- 数据 SHA-256：`aa6d1026c9aec1161b897c1569867fa6a1f22b0220a7ceba879c3ec1dc7c5bc6`
+- 特征集：`macro-initial-release-dxy-v1`；模型：`macro-lr-platt-v1`；seed=42；代码提交：`c20208714d5140c9a1f4e3d436fc6410f0c57af8`。
 
 ## 3. OOS 结果
 
