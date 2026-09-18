@@ -1647,3 +1647,5 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - Technical 数据哈希 `d0e0b39e...f7234d0d`，Macro 组合哈希
   `aa6d1026...dc7c5bc6`；两份报告均绑定代码提交 `c202087`；
 - 新增指纹稳定性/内容敏感性/组合顺序测试；原 OOS 指标和 FAIL 判定未改变，未重新调参。
+- 夜间全量回归使用项目内隔离临时目录完成：**3234 passed / 1 skipped**；`ruff check .`、
+  `mypy config database src scripts`（105 个源文件）及 PostgreSQL Phase 3 范围边界复核均 PASS。
