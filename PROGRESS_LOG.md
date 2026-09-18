@@ -1687,3 +1687,14 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   Macro=`aa6d1026...dc7c5bc6`；
 - 运行前后事实表行数完全一致：`feature_snapshots=11873`、`market_regimes=11872`、作者技能/权重均 0；
 - 新增“极小数值差异也必须失败”的精确复现测试；审计 PASS，但不改变两个 Alpha 的 FAIL 结论。
+
+## 第三十九轮（2026-09-19）：可审计早间交接
+
+- 新增 `build_morning_handoff.py`，只读 Git 与本地 PostgreSQL，自动汇总阶段结论、质量门禁、
+  数据库 revision/关键表行数、夜间提交和仅需用户处理的事项；默认 dry-run，显式参数才写报告；
+- 生成前工作区干净，数据库仍为 `0007_phase3_feature_tables`；`market_bars=58891`、
+  `feature_snapshots=11873`、`market_regimes=11872`，作者技能/权重表仍为 0；
+- 交接明确保留三条红线：Phase 3.2 不能在当前 test 上继续调参，Phase 3.3 新闻不能普通历史回填，
+  所有失败/阻塞结果不得进入融合、策略、回测或实盘；
+- 专项格式、lint、类型检查和单测均通过；报告写入
+  `docs/operations/2026-09-19_早间交接.md`。
