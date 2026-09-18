@@ -1,6 +1,12 @@
 import pandas as pd
+import pytest
 
-from src.alpha.reproducibility import combined_digest, frame_digest
+from src.alpha.reproducibility import (
+    ReproducibilityError,
+    combined_digest,
+    frame_digest,
+    require_identical,
+)
 
 
 def test_frame_digest_is_stable_and_content_sensitive() -> None:
@@ -18,3 +24,9 @@ def test_frame_digest_is_stable_and_content_sensitive() -> None:
 def test_combined_digest_is_ordered() -> None:
     assert combined_digest("a", "b") == combined_digest("a", "b")
     assert combined_digest("a", "b") != combined_digest("b", "a")
+
+
+def test_require_identical_rejects_any_difference() -> None:
+    require_identical({"metric": 1.0}, {"metric": 1.0}, label="test")
+    with pytest.raises(ReproducibilityError, match="test"):
+        require_identical({"metric": 1.0}, {"metric": 1.0000001}, label="test")

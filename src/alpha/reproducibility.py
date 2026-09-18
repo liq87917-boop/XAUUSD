@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
+from typing import Any
 
 import pandas as pd
 
@@ -26,3 +27,13 @@ def frame_digest(frame: pd.DataFrame, columns: Sequence[str]) -> str:
 def combined_digest(*digests: str) -> str:
     """按调用顺序合并多个已计算指纹。"""
     return hashlib.sha256("\n".join(digests).encode("ascii")).hexdigest()
+
+
+class ReproducibilityError(RuntimeError):
+    """同一冻结输入重复运行得到不同结果。"""
+
+
+def require_identical(first: Any, second: Any, *, label: str) -> None:
+    """结果必须逐字段相等；不允许用容差掩盖非确定性。"""
+    if first != second:
+        raise ReproducibilityError(f"{label} 重复运行结果不一致")
