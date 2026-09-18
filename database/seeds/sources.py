@@ -225,4 +225,23 @@ SOURCE_SEEDS: Final[tuple[SourceSeed, ...]] = (
             "note": "备用行情源：主源不可用时由运维显式启用（enabled=False 不代表功能缺失）",
         },
     ),
+    SourceSeed(
+        name="market_dukascopy_xauusd",
+        source_type=SourceType.MARKET,
+        base_url="https://datafeed.dukascopy.com/datafeed",
+        timezone="UTC",
+        enabled=False,
+        config_json={
+            "collector": "dukascopy_xauusd_backfill",
+            "role": "historical_backfill",
+            "provider": "dukascopy_bi5",
+            "provider_symbol": "XAUUSD",
+            "instrument_symbol": "XAUUSD_DUKASCOPY",
+            "raw_timeframe": "1m_bid",
+            "output_timeframe": "1h",
+            "price_scale": 1000,
+            "min_records_per_run": 0,
+            "note": "独立现货研究序列；不得与 Yahoo GC=F 期货代理逐根拼接",
+        },
+    ),
 )

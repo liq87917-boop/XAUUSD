@@ -44,6 +44,13 @@ INSTRUMENT_SEEDS: Final[tuple[InstrumentSeed, ...]] = (
         timezone="UTC",
     ),
     InstrumentSeed(
+        symbol="XAUUSD_DUKASCOPY",
+        name="黄金/美元现货（Dukascopy 独立研究序列）",
+        asset_class=AssetClass.METAL,
+        quote_currency="USD",
+        timezone="UTC",
+    ),
+    InstrumentSeed(
         symbol="XAGUSD",
         name="白银/美元 现货",
         asset_class=AssetClass.METAL,

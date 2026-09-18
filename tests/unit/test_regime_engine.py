@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 
 from database.models import AssetClass, Instrument, MarketBar, Regime, Timeframe
-from src.alpha.regime import EventMark, build_regime_run
+from src.alpha.regime import EventMark, _gap_is_expected, build_regime_run
 
 pytestmark = [pytest.mark.unit, pytest.mark.leakage]
 
@@ -108,6 +108,28 @@ def test_unscheduled_gap_resets_indicator_warmup() -> None:
     assert run.points[99].regime is not Regime.UNKNOWN
     assert all(point.regime is Regime.UNKNOWN for point in run.points[100:])
     assert run.points[100].values["segment_id"] == 1
+
+
+@pytest.mark.parametrize(
+    ("previous_close", "current_open"),
+    [
+        (datetime(2025, 11, 27, 20, tzinfo=UTC), datetime(2025, 11, 27, 23, tzinfo=UTC)),
+        (datetime(2025, 12, 24, 19, tzinfo=UTC), datetime(2025, 12, 25, 23, tzinfo=UTC)),
+        (datetime(2026, 4, 2, 21, tzinfo=UTC), datetime(2026, 4, 5, 22, tzinfo=UTC)),
+        (datetime(2026, 6, 19, 17, tzinfo=UTC), datetime(2026, 6, 21, 22, tzinfo=UTC)),
+    ],
+)
+def test_known_gold_market_holiday_gaps_are_expected(
+    previous_close: datetime, current_open: datetime
+) -> None:
+    assert _gap_is_expected(previous_close, current_open)
+
+
+def test_nonholiday_multi_hour_gap_remains_unexpected() -> None:
+    assert not _gap_is_expected(
+        datetime(2026, 3, 10, 20, tzinfo=UTC),
+        datetime(2026, 3, 10, 23, tzinfo=UTC),
+    )
 
 
 def test_news_override_uses_only_events_effective_by_as_of() -> None:

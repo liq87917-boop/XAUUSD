@@ -8,7 +8,7 @@ import math
 import uuid
 from bisect import bisect_right
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Final
 from zoneinfo import ZoneInfo
@@ -196,6 +196,8 @@ def _scheduled_closed(moment: datetime) -> bool:
     """CME 贵金属常规休市：周末 + 每日 17:00–18:00 美东结算间隙。"""
     local = _utc(moment).astimezone(SESSION_TZ)
     weekday, hour = local.weekday(), local.hour
+    if _holiday_closed(local):
+        return True
     if weekday == 5:
         return True
     if weekday == 4 and hour >= 17:
@@ -203,6 +205,78 @@ def _scheduled_closed(moment: datetime) -> bool:
     if weekday == 6 and hour < 18:
         return True
     return weekday <= 3 and hour == 17
+
+
+def _nth_weekday(year: int, month: int, weekday: int, occurrence: int) -> date:
+    first = date(year, month, 1)
+    shift = (weekday - first.weekday()) % 7
+    return first + timedelta(days=shift + 7 * (occurrence - 1))
+
+
+def _last_weekday(year: int, month: int, weekday: int) -> date:
+    last = date(year, month + 1, 1) - timedelta(days=1) if month < 12 else date(year, 12, 31)
+    return last - timedelta(days=(last.weekday() - weekday) % 7)
+
+
+def _observed(day: date) -> date:
+    if day.weekday() == 5:
+        return day - timedelta(days=1)
+    if day.weekday() == 6:
+        return day + timedelta(days=1)
+    return day
+
+
+def _easter_sunday(year: int) -> date:
+    """Meeus/Jones/Butcher Gregorian Easter algorithm (stdlib-only)."""
+    a = year % 19
+    b, c = divmod(year, 100)
+    d, e = divmod(b, 4)
+    f = (b + 8) // 25
+    g = (b - f + 1) // 3
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = divmod(c, 4)
+    ell = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 22 * ell) // 451
+    month = (h + ell - 7 * m + 114) // 31
+    day = (h + ell - 7 * m + 114) % 31 + 1
+    return date(year, month, day)
+
+
+def _holiday_closed(local: datetime) -> bool:
+    """黄金现货/COMEX 共同的已知美国节假日休市窗口（美东时间）。"""
+    current, hour, year = local.date(), local.hour, local.year
+    good_friday = _easter_sunday(year) - timedelta(days=2)
+    if current == good_friday - timedelta(days=1) and hour >= 17:
+        return True
+    if current == good_friday:
+        return True
+
+    if (current == date(year, 12, 24) and hour >= 14) or (
+        current == date(year, 12, 25) and hour < 18
+    ):
+        return True
+    if (current == date(year, 12, 31) and hour >= 17) or (
+        current == date(year, 1, 1) and hour < 18
+    ):
+        return True
+
+    monday_holidays = {
+        _nth_weekday(year, 1, 0, 3),
+        _nth_weekday(year, 2, 0, 3),
+        _last_weekday(year, 5, 0),
+        _nth_weekday(year, 9, 0, 1),
+    }
+    if current in monday_holidays and 15 <= hour < 18:
+        return True
+
+    special = {_observed(date(year, 6, 19)), _observed(date(year, 7, 4))}
+    if current in special and (hour >= 13 if current.weekday() == 4 else 15 <= hour < 18):
+        return True
+
+    thanksgiving = _nth_weekday(year, 11, 3, 4)
+    if current == thanksgiving and 15 <= hour < 18:
+        return True
+    return current == thanksgiving + timedelta(days=1) and hour >= 15
 
 
 def _gap_is_expected(previous_close: datetime, current_open: datetime) -> bool:

@@ -47,6 +47,7 @@ PARSER_VERSION_MAX_LENGTH = 50
 KNOWN_INSTRUMENTS: frozenset[str] = frozenset(
     {
         "XAUUSD",
+        "XAUUSD_DUKASCOPY",
         "XAGUSD",
         "COMEX_GC",
         "SGE_AU9999",

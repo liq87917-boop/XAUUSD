@@ -65,6 +65,7 @@ def test_disabled_sources_are_documented() -> None:
         "econ_calendar_investing",
         "manual-华尔街见闻",
         "manual-汇通网",
+        "market_dukascopy_xauusd",
         "market_stooq_backup",
     ]
 
