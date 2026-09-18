@@ -1540,3 +1540,21 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   `ruff check .` 与 `mypy`（90 files）通过；W0-5 新文件格式检查通过，全仓 `format --check`
   仍是 TD-33 已登记的历史格式债（81 个旧文件），本工作包未混入全仓纯格式改写；
 - W0-5 **PASS（底座范围）**。详细报告：`docs/experiments/Phase3_W0_5_特征底座报告.md`。
+
+## 第二十七轮（2026-09-18）：Phase 3.1 Regime 机器版与覆盖率硬门禁
+
+- 实现 `regime-rules-stat-v1`：XAUUSD 1h 的 EMA20/60、ADX14、ATR14/close 因果滚动
+  分位、事件密度、规则/统计双层标签，以及 12 根最短持有 + 3 根确认防抖；
+- CME 周末/每日结算休市视为预期会话间隔；其他缺口重置指标成熟窗口，禁止插值、缩窗或
+  跨异常缺口计算；未来 K 线/未来生效事件注入测试均不改变历史结果；
+- 新增默认 dry-run 的 `scripts/build_regimes.py`，机器门禁失败时 `--no-dry-run` 硬拒绝写库；
+  同时生成 50 点盲评表与隔离答案键；
+- 真实库 11,317 根 XAUUSD 1h dry-run：平均持续 19.69 根、日最大切换 2、规则/统计一致率
+  92.46%、时间违规 0，四项通过；但 37 个连续段造成 UNKNOWN 1,768 根（15.62%），高于
+  已批准的 ≤1% 门槛；NEWS_DRIVEN=0，原因是事件回填的可用时间晚于行情评估时点；
+- 对照 W0-1 provider 审计，根因是 242 个异常槽（105 data_gap + 137 missing_timestamp）；
+  登记 TD-41。当前 `market_regimes=0`，没有用放宽标准或写失败结果伪装完成；
+- 门禁：专项 Regime/W0-5 测试 10 passed；全量 **2536 passed / 1 skipped**；
+  `ruff check .` 与 `mypy config database src scripts`（93 个源文件）通过；
+- Phase 3.1 状态：**BLOCKED（数据覆盖率）**。优先补齐异常槽并重做数据对账；之后仍需用户
+  完成 50 点人工盲评。报告：`docs/experiments/Phase3_1_Regime报告.md`。

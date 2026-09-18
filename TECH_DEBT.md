@@ -15,9 +15,9 @@
 
 | 项 | 数量 / 状态 |
 |---|---|
-| Alembic 迁移 | 0001_phase1_schema → 0006_macro_event_vintages（单一 head） |
+| Alembic 迁移 | 0001_phase1_schema → 0007_phase3_feature_tables（单一 head） |
 | Phase 1 表 | 15 张（`database/models/__init__.py::PHASE1_TABLES`），全部由迁移创建 |
-| Phase 2 表 | 4 张（`PHASE2_TABLES`，migration 0005；`ALL_TABLES` = 19 张） |
+| Phase 2 / W0-5 表 | Phase 2 4 张 + W0-5 4 张（`ALL_TABLES` = 23 张） |
 | 采集器 | 3 个已注册：`market_collector` / `news_collector` / `macro_collector` |
 | 种子 | `instruments` 11 条（含 XAUUSD/DXY/US10Y/USDCNY）+ `sources` 9 条（其中 `econ_calendar_investing` / `market_stooq_backup` 为 `enabled=false`）+ `authors` 3 条（Phase 2 内置 Mock，含 3 个平台账号；全部挂 NEWS 来源，**不碰微博**） |
 | Phase 2 基建 | 作者库仓储 + 审计留痕、作者 CSV 导入 CLI（`--scope authors` / `--authors-csv`）、Post → Opinion 管道骨架（纯 Mock）、传播去重（1+99 → 独立观点数 1） |
@@ -78,6 +78,7 @@
 | TD-38 | ✅ 已加硬门禁（2026-09-17） | W0-4 的 19 条历史帖子没有独立采集时间，旧版曾生成 12 条可计算标签；`forward-return-v2` 现将全部 31 个评价行标记为 `UNTRUSTED_COLLECTION_TIME`，只允许验证管道，禁止进入 OOS / Alpha / 作者权重 | 只有取得可核验的独立 `collected_at` 后才能解除数据限制 |
 | TD-39 | ✅ 已解决（2026-09-17） | Phase 3 规划曾把特征表迁移编号写成 `0006`，与已经落地的 `0006_macro_event_vintages` 冲突 | 后续迁移已整体顺延为 `0007`–`0010` |
 | TD-40 | ✅ 已解除（2026-09-18） | 冻结 SQLite 快照已事务性迁入独立 `gold_ai_research`：19 表、110,992 行逐表数量与 SHA-256 全部一致；本地 `.env` 已切换，原验收库保留 | 已修；报告见 `docs/experiments/Phase3_W0_PostgreSQL迁移报告.md` |
+| TD-41 | P0（阻塞 Phase 3.1 验收） | XAUUSD 1h 的 11,317 根落库 K 线被严格缺口策略切成 37 段；每个异常缺口后必须重新成熟 60 期 EMA + 60 期 ATR 分位，导致 `UNKNOWN=1,768/11,317=15.62%`，高于已批准的 ≤1% 门槛。W0-1 provider 审计已确认 242 个异常槽（105 data_gap + 137 missing_timestamp），禁止插值或跨缺口假装连续 | 优先用可追溯的第二行情源补齐并重新做 W0-1 对账；若无法补齐，需用户明确裁决是否修改 Regime 覆盖率门槛或评估总体。修复/裁决前 `build_regimes.py --no-dry-run` 硬拒绝写库 |
 
 
 ---

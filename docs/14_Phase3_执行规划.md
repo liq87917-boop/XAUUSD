@@ -1,7 +1,7 @@
 # 14_Phase3 执行规划（Alpha Lab）· V0.2
 
 > **状态（2026-09-18）**：用户已批准 Phase 3.0 按本规划推进。W0-1 行情数据底座已完成受限验收；
-> W0-2 已按 Initial Release Only 口径验收通过；W0-3 新闻回填已受限验收通过；W0-4 作者观点链已受限验收通过；W0-5 特征底座已通过验收。本文件仍不授权提前实施
+> W0-2 已按 Initial Release Only 口径验收通过；W0-3 新闻回填已受限验收通过；W0-4 作者观点链也已受限验收通过；W0-5 特征底座已通过验收。本文件仍不授权提前实施
 > Regime、Alpha、Prediction、Strategy 或 Risk。
 > **依据**：`docs/01 §7–§10`（Regime / Alpha / 预测 / Meta Ensemble）、`docs/03 §3.5–3.7`（表设计）、`docs/04 §16–23`（字段定义）、
 > `docs/05 Phase 3`、`docs/07 Phase 3 Prompt`、`docs/08 §6`（Phase 3 验收）、`.clinerules`（红线）。
@@ -159,6 +159,12 @@
 3. **泄漏门禁（P0）**：`feature_snapshot.as_of <= detected_at` 且 `feature.max_effective_at <= as_of`；**未来注入测试**（人为加入 `detected_at + 1min` 的信息）必须**失败**（`docs/08 §6`）；
 4. **可复现**：同一输入重复运行结果逐行一致（幂等自然键 `(instrument_id, start_at)`）；
 5. **人工抽检**：你抽 50 个时点盲评，与引擎标签一致率 ≥ **80%**（低于则调整阈值口径并重跑）。
+
+> **机器验收现状（2026-09-18）**：`regime-rules-stat-v1` 已实现并对 XAUUSD 1h 的
+> 11,317 根 K 线完成 dry-run。平均持续 19.69 根、日最大切换 2 次、规则/统计一致率
+> 92.46%、时间因果违规 0，均通过；但 37 个严格连续段造成 `UNKNOWN=15.62%`，未达到
+> ≤1% 门槛。CLI 已硬拒绝正式写库，`market_regimes` 仍为 0 行。详见 TD-41 与
+> `docs/experiments/Phase3_1_Regime报告.md`；数据缺口解决且 50 点人工盲评完成前，3.1 不得标 PASS。
 
 ### Phase 3.2 Technical Alpha + Macro Alpha 基线（**先各自独立验证，不混合**）
 
