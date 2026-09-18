@@ -1629,3 +1629,12 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 补充真实 ORM 集成门禁：在一次性数据库中构造不可信作者观点与新闻事件，验证读取器确实把
   观点判为 `UNTRUSTED_COLLECTION_TIME`、正确计算新闻跨度/集中度，且运行前后技能表和权重表
   行数完全不变；Phase 3.3 资格门禁专项 3 passed。
+
+## 第三十三轮（2026-09-18）：Phase 3 失败门禁范围审计
+
+- 新增只读 `check_phase3_boundaries.py`，把“负面结果不能落 Alpha、数据阻塞不能落作者权重、
+  Phase 3 不得进入 Strategy/Trading”变成机械检查；
+- PostgreSQL 实测：revision=`0007_phase3_feature_tables`，不存在 Alpha/Prediction/Strategy/Trading
+  下游事实表，`author_skill_snapshots=0`、`author_weight_snapshots=0`；
+- `LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`，范围边界审计 **PASS**；
+- 新增单测覆盖任一越权表、提前写技能事实或打开实盘开关都会令门禁失败。
