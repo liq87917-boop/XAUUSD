@@ -2,7 +2,7 @@
 
 日期：2026-09-18
 
-状态：**机器验收 PASS；等待 50 点人工盲评后最终验收**
+状态：**最终 PASS（机器门禁 + 第二轮人工盲评）**
 
 ## 1. 实现口径
 
@@ -69,5 +69,9 @@ TREND_UP 1,635、TREND_DOWN 1,058、LOW_VOLATILITY 798、UNKNOWN 72。
 第二轮改为分层抽取 50 个成熟即时状态，补齐均线斜率、北京时间和直观百分比字段；人工语义
 一致率对比即时标签，时序平滑继续由持续时长、切换次数和专项测试独立验收。新表为
 `logs/phase3_1_dukascopy_regime_blind_review_v2.csv`，填写说明见
-`docs/experiments/Phase3_1_Regime盲评V2填写说明.md`。一致率达到 ≥80% 后才完成最终验收。
-V2 生成器与评分器专项 13 passed；全量 2952 passed / 1 skipped，静态与类型检查通过。
+`docs/experiments/Phase3_1_Regime盲评V2填写说明.md`。
+
+第二轮 50/50 行填写完整且标签合法，46/50 与即时目标一致，**一致率 92%**，超过 ≥80%
+门槛；4 个分歧均为人工 `TREND_UP`、目标 `LOW_VOLATILITY`，保留为后续阈值观察样本，不影响
+本轮验收。编码兼容专项 5 passed，最终全量 3086 passed / 1 skipped，静态与类型检查通过。
+至此 Phase 3.1 最终 PASS，可以进入 Phase 3.2。

@@ -164,7 +164,8 @@
 > 随后建立不与期货代理拼接的独立 `XAUUSD_DUKASCOPY` 现货序列。733 个原始日文件聚合出
 > 11,872 根严格 1h，`UNKNOWN=0.606%`、平均持续 17.25 根、日最大切换 2 次、规则/统计
 > 一致率 94.42%、时间因果违规 0，机器门禁全通过并幂等写入 11,872 个 Regime/快照。
-> 详见 TD-41 与 `docs/experiments/Phase3_1_Regime报告.md`；50 点人工盲评完成前，3.1 不得标最终 PASS。
+> 第二轮 50 点人工盲评 46/50 一致（92% ≥80%）；Phase 3.1 已最终 PASS。详见 TD-41 与
+> `docs/experiments/Phase3_1_Regime报告.md`。
 
 ### Phase 3.2 Technical Alpha + Macro Alpha 基线（**先各自独立验证，不混合**）
 

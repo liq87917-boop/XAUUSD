@@ -27,11 +27,20 @@ def _args(argv: Sequence[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    payload = path.read_bytes()
+    for encoding in ("utf-8-sig", "gb18030"):
+        try:
+            text = payload.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        return list(csv.DictReader(text.splitlines()))
+    raise ValueError(f"CSV 编码不受支持：{path}（只接受 UTF-8 或 GB18030）")
+
+
 def evaluate(review_path: Path, key_path: Path, *, threshold: float = 0.8) -> dict[str, object]:
-    with review_path.open(encoding="utf-8-sig", newline="") as handle:
-        review = list(csv.DictReader(handle))
-    with key_path.open(encoding="utf-8-sig", newline="") as handle:
-        key = {row["review_id"]: row for row in csv.DictReader(handle)}
+    review = _read_csv(review_path)
+    key = {row["review_id"]: row for row in _read_csv(key_path)}
     errors: list[str] = []
     ids = [row.get("review_id", "") for row in review]
     if len(review) != 50:

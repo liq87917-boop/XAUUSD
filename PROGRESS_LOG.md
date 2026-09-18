@@ -1586,3 +1586,14 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 门禁：专项 13 passed；全量 **2952 passed / 1 skipped**；`ruff check .` 与
   `mypy config database src scripts`（96 个源文件）通过；
 - 当前状态：**等待用户填写 V2 盲评表**。
+
+## 第三十轮（2026-09-18）：Phase 3.1 人工盲评最终通过
+
+- 用户完成 V2 50 点盲评；表格软件将文件保存为 GB18030，首轮评分因仅支持 UTF-8 安全失败，
+  未修改用户内容；评分器新增 UTF-8/GB18030 自动读取并加入中文备注回归测试；
+- 完整性：50/50 已填、标签全部合法、ID/答案键全部对齐；即时状态一致 46/50=**92%**，
+  超过 ≥80% 门槛；
+- 4 个分歧均为人工 `TREND_UP`、目标 `LOW_VOLATILITY`，保留为后续阈值观察样本；
+- 编码兼容专项 5 passed；最终全量 **3086 passed / 1 skipped**；`ruff check .` 与
+  `mypy config database src scripts`（96 个源文件）通过；
+- Phase 3.1 状态：**最终 PASS**。下一阶段为 Phase 3.2 Technical Alpha + Macro Alpha 独立基线。

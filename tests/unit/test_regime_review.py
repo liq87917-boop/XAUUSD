@@ -105,3 +105,32 @@ def test_evaluator_scores_target_labels_and_rejects_incomplete(tmp_path) -> None
     invalid = evaluate(review, key)
     assert invalid["passed"] is False
     assert invalid["errors"]
+
+
+def test_evaluator_accepts_excel_gb18030_review(tmp_path) -> None:
+    points = tuple(
+        _point(index * len(REVIEW_LABEL_ORDER) + offset, label)
+        for index in range(10)
+        for offset, label in enumerate(REVIEW_LABEL_ORDER)
+    )
+    review = tmp_path / "review.csv"
+    key = tmp_path / "key.csv"
+    _write_review_files(points, review_path=review, key_path=key)
+    with review.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+        columns = list(rows[0])
+    with key.open(encoding="utf-8-sig", newline="") as handle:
+        answers = {row["review_id"]: row for row in csv.DictReader(handle)}
+    for row in rows:
+        row["human_label"] = answers[row["review_id"]]["review_target_label"]
+        row["human_note"] = "中文备注"
+    text = tmp_path / "utf8.csv"
+    with text.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
+    review.write_bytes(text.read_text(encoding="utf-8").encode("gb18030"))
+
+    result = evaluate(review, key)
+    assert result["passed"] is True
+    assert result["matched"] == 50
