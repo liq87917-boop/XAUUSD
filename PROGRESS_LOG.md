@@ -1668,3 +1668,13 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 发现并登记 TD-44：现有 `effective_at >= collected_at` 契约下，今天下载的旧新闻只能从今天起
   使用，普通历史 CSV 不能倒填为历史可见；因此暂不发新闻填写模板，先等可审计历史可用时刻的数据源；
 - 新增模板结构与防新闻回填泄漏测试；交接专项 4 passed。
+
+## 第三十七轮（2026-09-19）：真实作者输入机械体检
+
+- 新增只读 `check_phase3_3_author_input.py`，支持既有 CSV/XLSX 读取链，不修改输入、不写数据库；
+- 硬校验 12 个必填字段、带时区时间、`collected_at >= published_at`、
+  `effective_at=max(published_at,collected_at)`、非未来时间、独立采集时间 provenance、NEWS 类型、
+  true/false 媒体标记、source+id 唯一、正文去重与最少 90 字；
+- 按作者统计独立行数，少于 30 条保持 BLOCKED；模板空表实测明确返回“输入没有数据行”，
+  不会把空模板误判为通过；
+- 新增 30 条通过、fallback/重复/样本不足、naive/未来时间三类测试，专项 3 passed。

@@ -29,6 +29,17 @@
 - 不得删除失败观点或只挑命中的帖子；
 - 不得把截图中的时间凭印象换算，无法确认时保留原截图并标记待核验。
 
+填写后先运行只读体检（不会写数据库）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/check_phase3_3_author_input.py `
+  --input <填写后的CSV或XLSX> `
+  --report logs/phase3_3_author_input_check.md
+```
+
+只有报告结论为 `PASS` 才进入后续人工抽检与追加导入；`BLOCKED` 时按逐行错误修正原始来源，
+不能让程序自动猜值。
+
 ## 2. 新闻历史：暂时不要填写普通 CSV
 
 当前 `raw_items` 契约令 `effective_at >= collected_at`。今天下载的历史新闻即使有旧

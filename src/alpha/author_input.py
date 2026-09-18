@@ -1,0 +1,121 @@
+"""Phase 3.3 真实作者帖子输入的只读资格校验。"""
+
+from __future__ import annotations
+
+import hashlib
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from typing import Final
+
+MIN_AUTHOR_SAMPLES: Final[int] = 30
+MIN_CONTENT_CHARS: Final[int] = 90
+FUTURE_TOLERANCE: Final[timedelta] = timedelta(hours=1)
+REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
+    "id",
+    "source",
+    "author_name",
+    "external_account_id",
+    "content",
+    "published_at",
+    "collected_at",
+    "effective_at",
+    "url",
+    "has_media",
+    "source_type",
+    "collection_time_provenance",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorInputAudit:
+    rows: int
+    author_counts: tuple[tuple[str, int], ...]
+    errors: tuple[str, ...]
+    warnings: tuple[str, ...]
+    ready: bool
+
+
+def _time(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _content_key(value: str) -> str:
+    normalized = " ".join(value.split()).lower()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -> AuthorInputAudit:
+    """验证时间因果、身份、重复与每作者样本门槛；不修改输入。"""
+    moment = now.astimezone(UTC)
+    errors: list[str] = []
+    warnings: list[str] = []
+    counts: Counter[str] = Counter()
+    seen_ids: set[tuple[str, str]] = set()
+    seen_content: set[str] = set()
+    for number, row in enumerate(rows, start=1):
+        missing = [name for name in REQUIRED_COLUMNS if not str(row.get(name, "")).strip()]
+        if missing:
+            errors.append(f"第 {number} 行缺少必填值：{missing}")
+            continue
+        source = str(row["source"]).strip()
+        record_id = str(row["id"]).strip()
+        identity = (source, record_id)
+        if identity in seen_ids:
+            errors.append(f"第 {number} 行 source+id 重复：{identity}")
+        seen_ids.add(identity)
+
+        content = str(row["content"]).strip()
+        content_key = _content_key(content)
+        if content_key in seen_content:
+            errors.append(f"第 {number} 行正文与前文重复，不能增加独立样本")
+        seen_content.add(content_key)
+        if len(content) < MIN_CONTENT_CHARS:
+            errors.append(f"第 {number} 行正文仅 {len(content)} 字符 < {MIN_CONTENT_CHARS}")
+
+        published = _time(str(row["published_at"]))
+        collected = _time(str(row["collected_at"]))
+        effective = _time(str(row["effective_at"]))
+        if published is None or collected is None or effective is None:
+            errors.append(f"第 {number} 行时间不可解析或缺少时区")
+        else:
+            if collected < published:
+                errors.append(f"第 {number} 行 collected_at 早于 published_at")
+            if effective != max(published, collected):
+                errors.append(f"第 {number} 行 effective_at 不等于发布时间和采集时间的较晚者")
+            if published > moment + FUTURE_TOLERANCE or collected > moment + FUTURE_TOLERANCE:
+                errors.append(f"第 {number} 行包含未来时间")
+
+        if str(row["collection_time_provenance"]).strip() != "independent_observation":
+            errors.append(f"第 {number} 行采集时间来源不是 independent_observation")
+        if str(row["source_type"]).strip().upper() != "NEWS":
+            errors.append(f"第 {number} 行 source_type 必须为 NEWS")
+        if str(row["has_media"]).strip().lower() not in {"true", "false"}:
+            errors.append(f"第 {number} 行 has_media 必须为 true/false")
+        counts[str(row["author_name"]).strip()] += 1
+
+    if not rows:
+        errors.append("输入没有数据行")
+    for author, count in sorted(counts.items()):
+        if count < MIN_AUTHOR_SAMPLES:
+            warnings.append(f"作者 {author!r} 只有 {count} 条 < {MIN_AUTHOR_SAMPLES}")
+    ready = (
+        bool(rows)
+        and not errors
+        and bool(counts)
+        and all(count >= MIN_AUTHOR_SAMPLES for count in counts.values())
+    )
+    return AuthorInputAudit(
+        rows=len(rows),
+        author_counts=tuple(sorted(counts.items())),
+        errors=tuple(errors),
+        warnings=tuple(warnings),
+        ready=ready,
+    )
