@@ -1,7 +1,10 @@
-# GOLD-AI · Phase 1 Gold Intelligence Database
+# GOLD-AI · Phase 3 Alpha Lab
 
 黄金智能交易研究与策略进化系统（研究型 / 回测型 / 模拟盘型）。
-当前阶段：**Phase 1（Gold Intelligence Database）第 1 步：数据库地基**。
+当前阶段：**Phase 3.3 数据资格阻塞**。Phase 3.0 数据底座与 Phase 3.1 Regime 已通过；
+Phase 3.2 Technical / Macro 独立 OOS 基线均未达到预注册门槛；Phase 3.3 Author / News
+尚未满足可信样本要求。当前正确状态是保留负面证据与门禁，不创建 Alpha / Prediction /
+Strategy 事实，不进入实盘。
 
 > 开发规则以 `.clinerules` 与 `docs/01~08` 为准；本文件只说明「如何运行」与「本步已落地 / 未落地」。
 
@@ -17,7 +20,7 @@
 | Alembic 迁移 0001（含完整 downgrade） | `database/migrations/versions/0001_phase1_core_tables.py` |
 | 事实表「不可覆盖」守卫（flush 期拦截） | `database/protection.py` |
 | 时间因果 / 数据质量约束（CHECK / FK / UNIQUE） | 各模型 `__table_args__` + 同结构迁移 |
-| unit / integration / data_quality / leakage 测试 | `tests/`（797 项：单元 483 / 集成 269 / 数据质量 25 / 泄漏 20；其中 23 项兼作 `regression`，当前 796 passed + 1 skipped） |
+| unit / integration / data_quality / leakage 测试 | `tests/`（夜间全量：**3234 passed + 1 skipped**；另有 `ruff` / `mypy` / PostgreSQL 范围边界门禁） |
 | 基础数据种子（instruments / sources，幂等 + CLI） | `database/seeds/`（`python -m database.seeds`） |
 | raw_items 修正路径①仓储（先插新记录再回填指针） | `database/repositories/raw_items.py` |
 | mypy 静态类型检查 + CI（含 PostgreSQL 作业） | `pyproject.toml`、`.github/workflows/ci.yml`、`scripts/check_pg_schema.py` |
@@ -50,12 +53,15 @@
 | 抽样**输入缺失自动补数据** + 输入**来源体检**（`input_is_mock` 写入元数据）+ 控制台醒目警告 | `scripts/sample_annotation_set.py`、`logs/annotation_sample.meta.json` |
 | CLI 脚本**双通道**（`python scripts/x.py` 与 `python -m scripts.x` 都可运行）+ **真实进程**冒烟测试 + CSV 编码 `utf-8-sig`（Excel 中文不乱码） | `scripts/__init__.py`、`tests/integration/test_cli_scripts.py` |
 
-**未落地（后续步骤）**：首期 50~100 位真实作者名单导入（框架已就绪，等业务方名单：TD-16）、
-真实 LLM 抽取器（当前仅 Mock 实现，配置 `DEEPSEEK_API_KEY` 后接入）、微博采集器（TD-06，合规前提）、
-`raw_items` → `author_posts` 归属链路与观点管道 CLI / Scheduler（TD-20）、
-作者技能与权重快照计算、标注比对脚本（等周一人工标注完成）。
-Phase 2 的四张表已在 migration 0005 建好；Phase 3 及以后的表
-（feature_snapshots、alpha_signals、strategies…）**故意不建**，并由测试强制校验。
+**当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
+采集时间不可信而隔离；新闻侧只有 30 条 / 56 天，最大单源占比 66.67%。详见
+`docs/experiments/Phase3_3_数据资格门禁报告.md` 与 TD-43。微博采集器仍须合规前提，Scheduler
+也尚未实现。
+
+Phase 2 四张表由 migration 0005 建立，宏观 vintage 由 0006 建立，Phase 3 特征与 Regime
+四张表由 0007 建立。由于 Phase 3.2 / 3.3 门禁未通过，`alpha_models`、`alpha_signals`、
+`predictions`、Strategy 与 Trading 表仍**故意不建**；`scripts/check_phase3_boundaries.py`
+会机械验证这个边界。
 
 Phase 3 W0-4 已接通 19 条已验收真实快讯的可追溯研究链（命令均默认 dry-run）：
 

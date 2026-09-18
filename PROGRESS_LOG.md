@@ -1649,3 +1649,12 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 新增指纹稳定性/内容敏感性/组合顺序测试；原 OOS 指标和 FAIL 判定未改变，未重新调参。
 - 夜间全量回归使用项目内隔离临时目录完成：**3234 passed / 1 skipped**；`ruff check .`、
   `mypy config database src scripts`（105 个源文件）及 PostgreSQL Phase 3 范围边界复核均 PASS。
+
+## 第三十五轮（2026-09-19）：入口文档状态去陈旧化
+
+- README 从“Phase 1 第一步”更新为当前真实检查点：Phase 3.1 PASS、Phase 3.2 双基线负面、
+  Phase 3.3 数据资格阻塞；同步当前 3234 passed / 1 skipped 全量门禁；
+- 删除 README 中“真实 LLM 当前仅 Mock”“Phase 3 及以后表故意不建”等已过期描述，改为
+  migration 0005/0006/0007 的真实边界及未建 Alpha/Strategy 表的原因；
+- `docs/05` 同步 Phase 3.2/3.3 结论，明确不得进入融合、策略或回测；
+- 新增文档状态回归测试，防止入口文档再次宣称错误阶段或把负面 Alpha 写成通过；专项 4 passed。
