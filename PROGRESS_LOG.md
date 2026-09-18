@@ -1614,3 +1614,15 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 专项新增门禁 8 passed；最终全量 **3227 passed / 1 skipped**；`ruff check .` 与
   `mypy config database src scripts`（100 个源文件）通过。首次全量运行仅因系统临时目录拒绝访问
   导致夹具创建错误，改用项目内隔离 `--basetemp` 后全量通过，不属于代码失败。
+
+## 第三十二轮（2026-09-18）：Phase 3.3 Author / News 数据资格门禁
+
+- 新增只读 `check_phase3_3_readiness.py` 与纯函数门禁，默认 dry-run，不创建迁移、不写数据库；
+- Author 审计：华尔街见闻 9 条、汇通网 2 条观点；31 个 horizon 评价行全部为
+  `UNTRUSTED_COLLECTION_TIME`，可信标签为 0，低于每作者 30 条硬门槛；
+- News 审计：30 条事件、56 天跨度，`fed_press_releases` 占 66.67%；未达到预注册的
+  >=200 条、>=90 天、单源 <=40% 三项要求；
+- HF 标题弱监督共 150 条，但无本项目可审计的事件发布时间链，只保留特征/弱标签用途；
+- 修正规划冲突：`author_weight_snapshots.weight` 现为 NOT NULL，样本不足时改为“不写权重行，
+  在资格报告留痕”，禁止写 NULL 或 0 冒充权重；
+- Phase 3.3 当前为 **BLOCKED（数据资格）**，没有创建条件权重迁移，也没有写技能、权重或信号事实。
