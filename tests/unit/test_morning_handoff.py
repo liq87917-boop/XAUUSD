@@ -14,6 +14,7 @@ def test_handoff_contains_results_boundaries_and_user_actions() -> None:
     assert "Author / News：BLOCKED" in report
     assert "3234 passed / 1 skipped" in report
     assert "author_posts_template.csv" in report
+    assert "每个 source + account 账号至少 30 条" in report
     assert "暂时不要自行填写普通历史新闻 CSV" in report
     assert "不能在当前 test 上继续调参" in report
     assert "`abc1234` test commit" in report
