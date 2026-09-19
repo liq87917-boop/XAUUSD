@@ -13,7 +13,7 @@ def test_quantitative_pass_does_not_claim_alpha_clearance_without_license() -> N
     )
     assert news.ready
     result = Phase33Readiness(
-        authors=(AuthorReadiness("author-1", "测试作者", 30, 30, True),),
+        authors=(AuthorReadiness("author-1", "测试作者", 30, 30, True, (("source/account", 30),)),),
         label_status_counts=(("LABELED", 30),),
         news=news,
         hf_weak_supervision_rows=0,

@@ -4,6 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
 import sqlalchemy as sa
 from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
@@ -227,4 +228,84 @@ def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
     assert result.label_status_counts == (("LABELED", 30),)
     assert result.authors[0].opinions == 10
     assert result.authors[0].trusted_posts == 1
+    assert result.authors[0].account_counts[0][1] == 1
     assert not result.author_ready
+
+
+@pytest.mark.parametrize(
+    ("first_count", "second_count", "expected_ready"),
+    [(15, 15, False), (30, 0, True)],
+)
+def test_author_sample_gate_is_per_account(
+    session: Session,
+    make_author_account: Callable[..., AuthorAccount],
+    make_raw_item: Callable[..., RawItem],
+    make_source: Callable[..., Source],
+    monkeypatch: MonkeyPatch,
+    first_count: int,
+    second_count: int,
+    expected_ready: bool,
+) -> None:
+    first_source = make_source(name="account-source-a", source_type=SourceType.NEWS)
+    second_source = make_source(name="account-source-b", source_type=SourceType.NEWS)
+    first = make_author_account(source=first_source, external_account_id="account-a")
+    second = make_author_account(
+        source=second_source, author=first.author, external_account_id="account-b"
+    )
+    published = datetime(2025, 1, 1, tzinfo=UTC)
+    opinions: list[AuthorOpinion] = []
+    for account, source, count in (
+        (first, first_source, first_count),
+        (second, second_source, second_count),
+    ):
+        for index in range(count):
+            collected = published + timedelta(minutes=index + 2)
+            raw = make_raw_item(source=source, published_at=published, collected_at=collected)
+            post = AuthorPost(
+                author_id=first.author_id,
+                author_account_id=account.id,
+                raw_item_id=raw.id,
+                published_at=published,
+                collected_at=collected,
+                effective_at=collected,
+                text_content=f"第 {index} 条研究测试帖子",
+                has_media=False,
+            )
+            session.add(post)
+            session.flush()
+            opinion = AuthorOpinion(
+                author_id=first.author_id,
+                author_post_id=post.id,
+                stance=OpinionStance.LONG,
+                instrument_id=None,
+                horizon=OpinionHorizon.H1,
+                confidence=Decimal("0.7"),
+                information_type=InformationType.TECHNICAL,
+                rationale="测试账号分组",
+                parser_version="test-v1",
+                effective_at=collected,
+            )
+            session.add(opinion)
+            opinions.append(opinion)
+    session.flush()
+    labels = [
+        OpinionLabel(
+            opinion_id=str(opinion.id),
+            effective_at=opinion.effective_at.isoformat(),
+            stance="LONG",
+            horizon="H1",
+            horizon_source="explicit",
+            status="LABELED",
+        )
+        for opinion in opinions
+    ]
+    monkeypatch.setattr("src.alpha.evidence_gate.build_opinion_labels", lambda _session: labels)
+
+    result = load_phase33_readiness(session)
+    assert result.authors[0].trusted_posts == 30
+    expected_counts = (("account-source-a/account-a", first_count),)
+    if second_count:
+        expected_counts += (("account-source-b/account-b", second_count),)
+    assert result.authors[0].account_counts == expected_counts
+    assert result.authors[0].ready is expected_ready
+    assert result.author_ready is expected_ready

@@ -13,7 +13,15 @@ from typing import Final
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from database.models import Author, AuthorOpinion, NewsEvent, RawItem, Source
+from database.models import (
+    Author,
+    AuthorAccount,
+    AuthorOpinion,
+    AuthorPost,
+    NewsEvent,
+    RawItem,
+    Source,
+)
 from src.processors.opinion_labels import build_opinion_labels
 
 MIN_AUTHOR_SAMPLES: Final[int] = 30
@@ -29,6 +37,8 @@ class AuthorReadiness:
     opinions: int
     trusted_posts: int
     ready: bool
+    account_counts: tuple[tuple[str, int], ...] = ()
+    identity_consistent: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,27 +88,71 @@ def load_phase33_readiness(
     """从研究库读取资格证据；本函数严格只读。"""
     authors = list(session.scalars(sa.select(Author).order_by(Author.id)).all())
     opinions = list(session.scalars(sa.select(AuthorOpinion).order_by(AuthorOpinion.id)).all())
-    author_by_opinion = {str(item.id): str(item.author_id) for item in opinions}
+    posts = {str(item.id): item for item in session.scalars(sa.select(AuthorPost)).all()}
+    accounts = {str(item.id): item for item in session.scalars(sa.select(AuthorAccount)).all()}
+    sources = {str(item.id): item.name for item in session.scalars(sa.select(Source)).all()}
     post_by_opinion = {str(item.id): str(item.author_post_id) for item in opinions}
     opinion_counts = Counter(str(item.author_id) for item in opinions)
+    account_ids_by_author: dict[str, set[str]] = {}
+    account_by_opinion: dict[str, tuple[str, str]] = {}
+    invalid_identity: set[str] = set()
+    for opinion in opinions:
+        author_id = str(opinion.author_id)
+        post = posts.get(str(opinion.author_post_id))
+        account = accounts.get(str(post.author_account_id)) if post is not None else None
+        if (
+            post is None
+            or account is None
+            or str(post.author_id) != author_id
+            or str(account.author_id) != author_id
+        ):
+            invalid_identity.add(author_id)
+            continue
+        account_id = str(account.id)
+        account_ids_by_author.setdefault(author_id, set()).add(account_id)
+        account_by_opinion[str(opinion.id)] = (author_id, account_id)
     labels = build_opinion_labels(session)
     status_counts = Counter(item.status for item in labels)
-    trusted_posts: dict[str, set[str]] = {}
+    trusted_posts_by_account: dict[tuple[str, str], set[str]] = {}
     for item in labels:
-        if item.status == "LABELED" and item.opinion_id in author_by_opinion:
-            author_id = author_by_opinion[item.opinion_id]
-            trusted_posts.setdefault(author_id, set()).add(post_by_opinion[item.opinion_id])
-    author_rows = tuple(
-        AuthorReadiness(
-            author_id=str(author.id),
-            display_name=author.display_name,
-            opinions=opinion_counts[str(author.id)],
-            trusted_posts=len(trusted_posts.get(str(author.id), set())),
-            ready=len(trusted_posts.get(str(author.id), set())) >= MIN_AUTHOR_SAMPLES,
+        key = account_by_opinion.get(item.opinion_id)
+        if item.status == "LABELED" and key is not None:
+            trusted_posts_by_account.setdefault(key, set()).add(post_by_opinion[item.opinion_id])
+    author_rows: list[AuthorReadiness] = []
+    for author in authors:
+        author_id = str(author.id)
+        if not opinion_counts[author_id]:
+            continue
+        keys = sorted(
+            account_ids_by_author.get(author_id, set()),
+            key=lambda account_id: (
+                sources[str(accounts[account_id].source_id)],
+                accounts[account_id].external_account_id,
+            ),
         )
-        for author in authors
-        if opinion_counts[str(author.id)] > 0
-    )
+        account_counts = tuple(
+            (
+                f"{sources[str(accounts[account_id].source_id)]}/"
+                f"{accounts[account_id].external_account_id}",
+                len(trusted_posts_by_account.get((author_id, account_id), set())),
+            )
+            for account_id in keys
+        )
+        author_rows.append(
+            AuthorReadiness(
+                author_id=author_id,
+                display_name=author.display_name,
+                opinions=opinion_counts[author_id],
+                trusted_posts=sum(count for _account, count in account_counts),
+                ready=(
+                    bool(account_counts)
+                    and author_id not in invalid_identity
+                    and all(count >= MIN_AUTHOR_SAMPLES for _account, count in account_counts)
+                ),
+                account_counts=account_counts,
+                identity_consistent=author_id not in invalid_identity,
+            )
+        )
 
     news_rows = session.execute(
         sa.select(RawItem.id, Source.name, NewsEvent.effective_at, RawItem.effective_at)
@@ -107,11 +161,11 @@ def load_phase33_readiness(
     ).all()
     distinct_news: dict[str, tuple[str, datetime]] = {}
     for raw_id, code, event_at, raw_at in news_rows:
-        key = str(raw_id)
+        news_key = str(raw_id)
         available = max(event_at, raw_at)
-        prior = distinct_news.get(key)
+        prior = distinct_news.get(news_key)
         # 同一原始新闻的不同解析版本不增加独立样本；取较晚可用时刻，保守防前视。
-        distinct_news[key] = (str(code), max(prior[1], available) if prior else available)
+        distinct_news[news_key] = (str(code), max(prior[1], available) if prior else available)
     source_counts = Counter(code for code, _available in distinct_news.values())
     # 历史覆盖以研究时实际可用时间为准；不能用今天采集的旧标题回填历史。
     available_at = [available for _code, available in distinct_news.values()]
@@ -119,7 +173,7 @@ def load_phase33_readiness(
     last_at = max(available_at) if available_at else None
     news = assess_news_counts(dict(source_counts), first_at, last_at)
     return Phase33Readiness(
-        authors=author_rows,
+        authors=tuple(author_rows),
         label_status_counts=tuple(sorted(status_counts.items())),
         news=news,
         hf_weak_supervision_rows=hf_weak_supervision_rows,

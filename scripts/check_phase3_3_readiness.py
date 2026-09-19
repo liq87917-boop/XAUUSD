@@ -39,6 +39,13 @@ def render(result: Phase33Readiness) -> str:
         f"{'PASS' if item.ready else 'BLOCKED'} |"
         for item in result.authors
     ] or ["| — | 0 | 0 | BLOCKED |"]
+    account_rows = [
+        f"| {item.display_name} | {account} | {count} | "
+        f"{'PASS' if count >= MIN_AUTHOR_SAMPLES and item.identity_consistent else 'BLOCKED'} |"
+        for item in result.authors
+        for account, count in item.account_counts
+    ] or ["| — | — | 0 | BLOCKED |"]
+    invalid_authors = [item.display_name for item in result.authors if not item.identity_consistent]
     news_rows = [
         f"| {source} | {count} | {count / result.news.events:.2%} |"
         for source, count in result.news.source_counts
@@ -63,11 +70,20 @@ def render(result: Phase33Readiness) -> str:
             "",
             "## 2. Author 资格",
             "",
-            f"硬门槛：每位作者至少 {MIN_AUTHOR_SAMPLES} 条有可信标签的独立帖子。",
+            f"硬门槛：每个稳定来源账号至少 {MIN_AUTHOR_SAMPLES} 条有可信标签的独立帖子；"
+            "同一作者跨账号不能合并凑数。",
             "",
             "| 作者 | 观点数 | 有可信标签的独立帖子数 | 状态 |",
             "|---|---:|---:|---|",
             *author_rows,
+            "",
+            "| 作者 | 来源/账号 | 有可信标签的独立帖子数 | 状态 |",
+            "|---|---|---:|---|",
+            *account_rows,
+            "",
+            "账号与作者归属不一致："
+            + ("、".join(invalid_authors) if invalid_authors else "无")
+            + "。",
             "",
             f"标签状态：{status_text}。",
             "",
