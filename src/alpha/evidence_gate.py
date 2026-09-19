@@ -42,6 +42,8 @@ class NewsReadiness:
 
 @dataclass(frozen=True, slots=True)
 class Phase33Readiness:
+    """仅表示库内数量/标签/时序门槛；不证明来源授权已通过。"""
+
     authors: tuple[AuthorReadiness, ...]
     label_status_counts: tuple[tuple[str, int], ...]
     news: NewsReadiness

@@ -50,12 +50,15 @@ def render(result: Phase33Readiness) -> str:
         [
             "# Phase 3.3 Author / News Alpha 数据资格门禁报告",
             "",
-            "> 本报告只判断数据能否进入 OOS Alpha；资格不足时不写技能、权重或信号事实。",
+            "> 本报告只读审计库内数量、标签和时间门槛；不核验来源许可或法律授权。",
             "",
             "## 1. 结论",
             "",
-            f"- Author Alpha：{'PASS' if result.author_ready else 'BLOCKED'}。",
-            f"- News Alpha：{'PASS' if result.news_ready else 'BLOCKED'}。",
+            "- Author Alpha：BLOCKED（本报告未核验来源授权）。",
+            "- News Alpha：BLOCKED（本报告未核验来源授权及历史可用证据）。",
+            f"- Author 库内门槛：{'PASS' if result.author_ready else 'BLOCKED'}；"
+            f"News 库内门槛：{'PASS' if result.news_ready else 'BLOCKED'}。",
+            "- 库内门槛 PASS 不等于 Alpha 放行；还需独立授权审查与合格数据交接。",
             "- 因 Phase 3.2 两个基线均为负面结果，本轮不做任何跨 Alpha 融合。",
             "",
             "## 2. Author 资格",
@@ -68,7 +71,7 @@ def render(result: Phase33Readiness) -> str:
             "",
             f"标签状态：{status_text}。",
             "",
-            "资格不足时不写 `author_skill_snapshots` 或 `author_weight_snapshots`。"
+            "整体资格不足时不写 `author_skill_snapshots` 或 `author_weight_snapshots`。"
             "现有 `weight` 为 NOT NULL，因此旧规划中的“写 NULL 权重”不可执行，已修正文档。",
             "",
             "## 3. News 资格",
