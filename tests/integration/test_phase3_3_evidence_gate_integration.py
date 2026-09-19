@@ -102,3 +102,34 @@ def test_loader_uses_trust_gate_and_never_writes_facts(
     assert not result.author_ready
     assert not result.news_ready
     assert (after_skills, after_weights) == (before_skills, before_weights)
+
+
+def test_historical_headlines_collected_together_do_not_create_history(
+    session: Session,
+    make_raw_item: Callable[..., RawItem],
+    make_source: Callable[..., Source],
+) -> None:
+    source = make_source(name="archive-source", source_type=SourceType.NEWS)
+    collected = datetime(2026, 1, 1, tzinfo=UTC)
+    for published in (collected - timedelta(days=120), collected - timedelta(days=1)):
+        raw = make_raw_item(
+            source=source,
+            item_type=RawItemType.NEWS,
+            published_at=published,
+            collected_at=collected,
+        )
+        session.add(
+            NewsEvent(
+                raw_item_id=raw.id,
+                headline="archived headline",
+                published_at=published,
+                effective_at=published,
+                parser_version="test-v1",
+            )
+        )
+    session.flush()
+
+    result = load_phase33_readiness(session)
+    assert result.news.events == 2
+    assert result.news.history_days == 0
+    assert not result.news_ready

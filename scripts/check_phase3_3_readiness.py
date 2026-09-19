@@ -73,11 +73,13 @@ def render(result: Phase33Readiness) -> str:
             "",
             "## 3. News 资格",
             "",
-            f"预注册工程下限：事件数 >= {MIN_NEWS_EVENTS}、历史 >= {MIN_NEWS_HISTORY_DAYS} 天、"
+            f"预注册工程下限：事件数 >= {MIN_NEWS_EVENTS}、"
+            f"可用时间跨度 >= {MIN_NEWS_HISTORY_DAYS} 天、"
             f"单一来源占比 <= {MAX_NEWS_SOURCE_SHARE:.0%}。",
             "",
             f"- 事件数：{result.news.events}",
-            f"- 历史跨度：{result.news.history_days} 天",
+            f"- 可用时间跨度：{result.news.history_days} 天"
+            "（逐条取 news_events 与 raw_items 的较晚 effective_at）",
             f"- 最大来源占比：{result.news.largest_source_share:.2%}",
             "",
             "| 来源 | 事件数 | 占比 |",
@@ -91,8 +93,11 @@ def render(result: Phase33Readiness) -> str:
             "",
             "1. 保留只读门禁和负面证据，不创建 Phase 3.3 条件权重迁移。",
             "2. 等待真实作者帖子具备独立 `published_at` 与 `collected_at` 后重新跑标签。",
-            "3. 新闻需补充合规的带时间戳历史；未达到门槛前不训练 News Alpha。",
+            "3. 新闻不能靠今天下载旧标题直接补历史：现有契约要求 `effective_at >= collected_at`。",
+            "   须取得能证明历史可用时间的合规数据源；未达到门槛前不训练 News Alpha。",
             "4. 可继续开发与数据无关的泄漏测试、报告和门禁，但不得产出效果结论。",
+            "",
+            "用户交接字段与禁止事项见 `docs/operations/Phase3_3_用户数据交接说明.md`。",
             "",
         ]
     )

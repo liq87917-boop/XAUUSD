@@ -98,14 +98,15 @@ def load_phase33_readiness(
     )
 
     news_rows = session.execute(
-        sa.select(Source.name, NewsEvent.published_at)
+        sa.select(Source.name, NewsEvent.effective_at, RawItem.effective_at)
         .join(RawItem, RawItem.source_id == Source.id)
         .join(NewsEvent, NewsEvent.raw_item_id == RawItem.id)
-        .order_by(NewsEvent.published_at)
     ).all()
-    source_counts = Counter(str(code) for code, _published_at in news_rows)
-    first_at = news_rows[0][1] if news_rows else None
-    last_at = news_rows[-1][1] if news_rows else None
+    source_counts = Counter(str(code) for code, _event_at, _raw_at in news_rows)
+    # 历史覆盖以研究时实际可用时间为准；不能用今天采集的旧标题回填历史。
+    available_at = [max(event_at, raw_at) for _code, event_at, raw_at in news_rows]
+    first_at = min(available_at) if available_at else None
+    last_at = max(available_at) if available_at else None
     news = assess_news_counts(dict(source_counts), first_at, last_at)
     return Phase33Readiness(
         authors=author_rows,

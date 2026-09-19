@@ -1782,3 +1782,15 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - Phase 3.3 专项 **21 passed**，全量 **3528 passed / 1 skipped**；`ruff check .`、
   `mypy config database src scripts` 通过。未修改 PostgreSQL、原始作者数据或 Phase 3.2 FAIL 结论；
   Phase 3.3 仍因缺少经人工核验的合法授权和合格数据保持 BLOCKED。
+
+## 第四十九轮（2026-09-19）：新闻历史覆盖改按可用时间计算
+
+- 修复 Phase 3.3 News 资格报告用 `news_events.published_at` 估计 90 天历史的前视漏洞：
+  今天才采集的旧标题不能算作当时已可用的新闻。每条事件的可用起点现在取
+  `max(news_events.effective_at, raw_items.effective_at)`，再计算整体跨度；原始表的采集时间约束
+  因此也能兜底防止加工层较早的时间戳误放行；
+- 增加历史标题同日采集的数据库集成回归，证明跨 120 天发布时间不再形成可用历史；专项
+  **7 passed**，全量 **3662 passed / 1 skipped**，ruff/mypy 通过；
+- 只读重算现有研究库并更新资格报告：30 条新闻的原“历史跨度 56 天”按真正可用时间变为
+  **0 天**，单源占比仍为 66.67%，News 继续 BLOCKED。没有改写数据库、原始数据、技能或权重，
+  Phase 3.2 Technical/Macro 的 FAIL 结论仍冻结；历史合规来源仍需用户提供并核验。
