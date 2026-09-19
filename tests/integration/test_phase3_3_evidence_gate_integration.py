@@ -133,3 +133,34 @@ def test_historical_headlines_collected_together_do_not_create_history(
     assert result.news.events == 2
     assert result.news.history_days == 0
     assert not result.news_ready
+
+
+def test_news_parser_versions_do_not_inflate_independent_event_count(
+    session: Session,
+    make_raw_item: Callable[..., RawItem],
+    make_source: Callable[..., Source],
+) -> None:
+    source = make_source(name="versioned-source", source_type=SourceType.NEWS)
+    published = datetime(2026, 1, 1, tzinfo=UTC)
+    raw = make_raw_item(
+        source=source,
+        item_type=RawItemType.NEWS,
+        published_at=published,
+        collected_at=published + timedelta(minutes=1),
+    )
+    for version, offset in (("test-v1", 1), ("test-v2", 2)):
+        session.add(
+            NewsEvent(
+                raw_item_id=raw.id,
+                headline="same underlying event",
+                published_at=published,
+                effective_at=published + timedelta(minutes=offset),
+                parser_version=version,
+            )
+        )
+    session.flush()
+
+    result = load_phase33_readiness(session)
+    assert result.news.events == 1
+    assert result.news.source_counts == (("versioned-source", 1),)
+    assert result.news.history_days == 0
