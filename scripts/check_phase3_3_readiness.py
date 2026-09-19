@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +62,7 @@ def render(result: Phase33Readiness) -> str:
             "",
             "## 1. 结论",
             "",
+            f"- 可用性审计时点：{result.as_of.isoformat() if result.as_of else '未提供'}。",
             "- Author Alpha：BLOCKED（本报告未核验来源授权）。",
             "- News Alpha：BLOCKED（本报告未核验来源授权及历史可用证据）。",
             f"- Author 库内门槛：{'PASS' if result.author_ready else 'BLOCKED'}；"
@@ -70,7 +72,8 @@ def render(result: Phase33Readiness) -> str:
             "",
             "## 2. Author 资格",
             "",
-            f"硬门槛：每个稳定来源账号至少 {MIN_AUTHOR_SAMPLES} 条有可信标签的独立帖子；"
+            f"硬门槛：每个稳定来源账号至少 {MIN_AUTHOR_SAMPLES} 条在审计时点前已完成"
+            "可信标签的独立帖子；"
             "同一作者跨账号不能合并凑数。",
             "",
             "| 作者 | 观点数 | 有可信标签的独立帖子数 | 状态 |",
@@ -97,6 +100,7 @@ def render(result: Phase33Readiness) -> str:
             f"单一来源占比 <= {MAX_NEWS_SOURCE_SHARE:.0%}。",
             "",
             f"- 事件数：{result.news.events}",
+            f"- 未来可用解析行排除数：{result.news.future_rows_excluded}",
             f"- 可用时间跨度：{result.news.history_days} 天"
             "（逐条取 news_events 与 raw_items 的较晚 effective_at）",
             f"- 最大来源占比：{result.news.largest_source_share:.2%}",
@@ -130,7 +134,11 @@ def main() -> int:
     configure_stdout()
     factory = build_session_factory(build_engine())
     with factory() as session:
-        result = load_phase33_readiness(session, hf_weak_supervision_rows=_hf_rows(HF_GOLD))
+        result = load_phase33_readiness(
+            session,
+            hf_weak_supervision_rows=_hf_rows(HF_GOLD),
+            as_of=datetime.now(UTC),
+        )
     report = render(result)
     safe_print(report)
     if args.no_dry_run:

@@ -198,6 +198,43 @@ def test_news_event_linked_to_post_raw_item_is_not_qualified_news(
     assert not result.news_ready
 
 
+def test_future_news_is_excluded_at_audited_time(
+    session: Session,
+    make_raw_item: Callable[..., RawItem],
+    make_source: Callable[..., Source],
+) -> None:
+    source = make_source(name="asof-news", source_type=SourceType.NEWS)
+    as_of = datetime(2026, 1, 2, tzinfo=UTC)
+    for published in (as_of - timedelta(days=1), as_of + timedelta(days=1)):
+        raw = make_raw_item(
+            source=source,
+            item_type=RawItemType.NEWS,
+            published_at=published,
+            collected_at=published,
+        )
+        session.add(
+            NewsEvent(
+                raw_item_id=raw.id,
+                headline="time-gated news",
+                published_at=published,
+                effective_at=published,
+                parser_version="test-v1",
+            )
+        )
+    session.flush()
+
+    result = load_phase33_readiness(session, as_of=as_of)
+    assert result.news.events == 1
+    assert result.news.future_rows_excluded == 1
+    assert result.news.history_days == 0
+    assert result.as_of == as_of
+
+
+def test_readiness_requires_timezone_aware_as_of(session: Session) -> None:
+    with pytest.raises(ValueError, match="as_of 必须包含时区"):
+        load_phase33_readiness(session, as_of=datetime(2026, 1, 2))
+
+
 def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
     session: Session,
     make_author_account: Callable[..., AuthorAccount],
@@ -247,6 +284,7 @@ def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
             horizon=horizon,
             horizon_source="evaluation_grid",
             status="LABELED",
+            exit_at=(collected + timedelta(hours=1)).isoformat(),
         )
         for opinion in opinions
         for horizon in ("H1", "H4", "D1")
@@ -262,8 +300,14 @@ def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
 
 
 @pytest.mark.parametrize(
-    ("first_count", "second_count", "mismatched_identity", "expected_ready"),
-    [(15, 15, False, False), (30, 0, False, True), (30, 0, True, False)],
+    ("first_count", "second_count", "mismatched_identity", "as_of", "expected_ready"),
+    [
+        (15, 15, False, None, False),
+        (30, 0, False, None, True),
+        (30, 0, True, None, False),
+        (30, 0, False, datetime(2024, 1, 1, tzinfo=UTC), False),
+        (30, 0, False, datetime(2025, 1, 1, 1, tzinfo=UTC), False),
+    ],
 )
 def test_author_sample_gate_is_per_account(
     session: Session,
@@ -274,6 +318,7 @@ def test_author_sample_gate_is_per_account(
     first_count: int,
     second_count: int,
     mismatched_identity: bool,
+    as_of: datetime | None,
     expected_ready: bool,
 ) -> None:
     first_source = make_source(name="account-source-a", source_type=SourceType.NEWS)
@@ -358,16 +403,20 @@ def test_author_sample_gate_is_per_account(
             horizon="H1",
             horizon_source="explicit",
             status="LABELED",
+            exit_at=(opinion.effective_at + timedelta(hours=1)).isoformat(),
         )
         for opinion in opinions
     ]
     monkeypatch.setattr("src.alpha.evidence_gate.build_opinion_labels", lambda _session: labels)
 
-    result = load_phase33_readiness(session)
-    assert result.authors[0].trusted_posts == 30
-    expected_counts = (("account-source-a/account-a", first_count),)
+    result = load_phase33_readiness(session, as_of=as_of)
+    expected_trusted = 0 if as_of is not None else 30
+    assert result.authors[0].trusted_posts == expected_trusted
+    expected_counts = (("account-source-a/account-a", 0 if as_of is not None else first_count),)
     if second_count:
-        expected_counts += (("account-source-b/account-b", second_count),)
+        expected_counts += (
+            ("account-source-b/account-b", 0 if as_of is not None else second_count),
+        )
     assert result.authors[0].account_counts == expected_counts
     assert result.authors[0].identity_consistent is not mismatched_identity
     assert result.authors[0].ready is expected_ready

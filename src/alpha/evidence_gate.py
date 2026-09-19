@@ -6,8 +6,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Final
 
 import sqlalchemy as sa
@@ -24,6 +24,7 @@ from database.models import (
     Source,
 )
 from src.processors.opinion_labels import build_opinion_labels
+from src.processors.timeline import ensure_utc_from_database
 
 MIN_AUTHOR_SAMPLES: Final[int] = 30
 MIN_NEWS_EVENTS: Final[int] = 200
@@ -49,6 +50,7 @@ class NewsReadiness:
     largest_source_share: float
     source_counts: tuple[tuple[str, int], ...]
     ready: bool
+    future_rows_excluded: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +63,7 @@ class Phase33Readiness:
     hf_weak_supervision_rows: int
     author_ready: bool
     news_ready: bool
+    as_of: datetime | None = None
 
 
 def assess_news_counts(
@@ -84,11 +87,16 @@ def assess_news_counts(
 
 
 def load_phase33_readiness(
-    session: Session, *, hf_weak_supervision_rows: int = 0
+    session: Session, *, hf_weak_supervision_rows: int = 0, as_of: datetime | None = None
 ) -> Phase33Readiness:
     """从研究库读取资格证据；本函数严格只读。"""
+    audit_clock = as_of if as_of is not None else datetime.now(UTC)
+    if audit_clock.tzinfo is None or audit_clock.utcoffset() is None:
+        raise ValueError("as_of 必须包含时区")
+    moment = audit_clock.astimezone(UTC)
     authors = list(session.scalars(sa.select(Author).order_by(Author.id)).all())
     opinions = list(session.scalars(sa.select(AuthorOpinion).order_by(AuthorOpinion.id)).all())
+    opinions_by_id = {str(item.id): item for item in opinions}
     posts = {str(item.id): item for item in session.scalars(sa.select(AuthorPost)).all()}
     accounts = {str(item.id): item for item in session.scalars(sa.select(AuthorAccount)).all()}
     sources = {str(item.id): item.name for item in session.scalars(sa.select(Source)).all()}
@@ -118,7 +126,20 @@ def load_phase33_readiness(
     for item in labels:
         key = account_by_opinion.get(item.opinion_id)
         if item.status == "LABELED" and key is not None:
-            trusted_posts_by_account.setdefault(key, set()).add(post_by_opinion[item.opinion_id])
+            if item.exit_at is None:
+                continue
+            try:
+                label_exit = datetime.fromisoformat(item.exit_at.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if label_exit.tzinfo is None or label_exit.utcoffset() is None:
+                continue
+            opinion = opinions_by_id[item.opinion_id]
+            post = posts[post_by_opinion[item.opinion_id]]
+            opinion_at = ensure_utc_from_database(opinion.effective_at, field_name="opinion_at")
+            post_at = ensure_utc_from_database(post.effective_at, field_name="post_at")
+            if max(opinion_at, post_at, label_exit.astimezone(UTC)) <= moment:
+                trusted_posts_by_account.setdefault(key, set()).add(str(post.id))
     author_rows: list[AuthorReadiness] = []
     for author in authors:
         author_id = str(author.id)
@@ -162,9 +183,16 @@ def load_phase33_readiness(
         .where(RawItem.item_type == RawItemType.NEWS)
     ).all()
     distinct_news: dict[str, tuple[str, datetime]] = {}
+    future_rows_excluded = 0
     for raw_id, code, event_at, raw_at in news_rows:
         news_key = str(raw_id)
-        available = max(event_at, raw_at)
+        available = max(
+            ensure_utc_from_database(event_at, field_name="news_event_at"),
+            ensure_utc_from_database(raw_at, field_name="raw_item_at"),
+        )
+        if available > moment:
+            future_rows_excluded += 1
+            continue
         prior = distinct_news.get(news_key)
         # 同一原始新闻的不同解析版本不增加独立样本；取较晚可用时刻，保守防前视。
         distinct_news[news_key] = (str(code), max(prior[1], available) if prior else available)
@@ -173,7 +201,10 @@ def load_phase33_readiness(
     available_at = [available for _code, available in distinct_news.values()]
     first_at = min(available_at) if available_at else None
     last_at = max(available_at) if available_at else None
-    news = assess_news_counts(dict(source_counts), first_at, last_at)
+    news = replace(
+        assess_news_counts(dict(source_counts), first_at, last_at),
+        future_rows_excluded=future_rows_excluded,
+    )
     return Phase33Readiness(
         authors=tuple(author_rows),
         label_status_counts=tuple(sorted(status_counts.items())),
@@ -181,4 +212,5 @@ def load_phase33_readiness(
         hf_weak_supervision_rows=hf_weak_supervision_rows,
         author_ready=bool(author_rows) and all(item.ready for item in author_rows),
         news_ready=news.ready,
+        as_of=moment,
     )
