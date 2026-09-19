@@ -28,6 +28,7 @@ def render(
     authorization_path: Path,
     authorization_sha256: str,
 ) -> str:
+    ready = audit.ready and authorization_audit.ready
     author_lines = [f"| {name} | {count} |" for name, count in audit.author_counts]
     if not author_lines:
         author_lines.append("| — | 0 |")
@@ -39,14 +40,14 @@ def render(
         [
             "# Phase 3.3 作者输入体检报告",
             "",
-            f"> **结论：{'PASS' if audit.ready else 'BLOCKED'}**。体检不会修改输入或数据库。",
+            f"> **结论：{'PASS' if ready else 'BLOCKED'}**。体检不会修改输入或数据库。",
             "",
             f"- 输入：`{input_path}`",
             f"- SHA-256：`{sha256}`",
             f"- 数据行：{audit.rows}",
             f"- 授权表：`{authorization_path}`",
             f"- 授权表 SHA-256：`{authorization_sha256}`",
-            f"- 当前获批账号：{len(authorization_audit.approved_accounts)}",
+            f"- 逐行授权检查通过账号：{len(authorization_audit.approved_accounts)}",
             "",
             "| 作者 | 行数 |",
             "|---|---:|",
