@@ -20,11 +20,31 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 CONFIG_PATTERNS = ("*.ini", "*.toml", "*.cfg", "*.yaml", "*.yml", "*.json", "*.mako")
-SKIP_DIRS = {".venv", ".git", "__pycache__", ".pytest_cache", ".ruff_cache", "node_modules"}
+SKIP_DIRS = {
+    ".venv",
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".codex-tmp",
+    ".postgres-local",
+    "node_modules",
+    "gold_ai.egg-info",
+    "data",
+    "logs",
+}
+SKIP_PREFIXES = (".pytest-temp-", ".pytest-cache-")
 
 
 def _is_skipped(path: Path) -> bool:
-    return any(part in SKIP_DIRS for part in path.parts)
+    return any(part in SKIP_DIRS or part.startswith(SKIP_PREFIXES) for part in path.parts)
+
+
+def test_generated_pytest_artifacts_are_not_configuration_inputs() -> None:
+    for directory in (".pytest-temp-example", ".pytest-cache-example", "logs", "data"):
+        assert _is_skipped(REPO_ROOT / directory / "alembic.ini")
+    assert not _is_skipped(REPO_ROOT / "config" / "logging.yaml")
 
 
 def _config_files() -> list[Path]:

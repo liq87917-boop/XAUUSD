@@ -17,7 +17,18 @@ from config.logging import configure_logging, get_logger, load_logging_config
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SKIP_DIRS = {".venv", ".git", "__pycache__", ".pytest_cache", ".ruff_cache"}
+SKIP_DIRS = {
+    ".venv",
+    ".git",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    ".codex-tmp",
+    ".postgres-local",
+    "data",
+    "logs",
+}
 
 
 def test_load_logging_config_returns_mapping() -> None:
@@ -87,7 +98,10 @@ def test_all_repo_yaml_assets_are_parseable() -> None:
     yaml_files = [
         path
         for path in REPO_ROOT.rglob("*.y*ml")
-        if not any(part in SKIP_DIRS for part in path.parts)
+        if not any(
+            part in SKIP_DIRS or part.startswith((".pytest-temp-", ".pytest-cache-"))
+            for part in path.parts
+        )
     ]
     names = {path.name for path in yaml_files}
     assert "logging.yaml" in names
