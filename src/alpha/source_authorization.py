@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Final
 from urllib.parse import urlsplit
@@ -13,7 +13,6 @@ APPROVED: Final[str] = "APPROVED"
 ALLOWED_BASES: Final[frozenset[str]] = frozenset(
     {"official_api", "license_agreement", "written_permission", "user_owned"}
 )
-FUTURE_TOLERANCE: Final[timedelta] = timedelta(hours=1)
 REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
     "source",
     "external_account_id",
@@ -86,6 +85,8 @@ def validate_source_authorizations(
     rows: Sequence[Mapping[str, str]], *, now: datetime, evidence_root: Path
 ) -> SourceAuthorizationAudit:
     """仅批准有证据、三项用途均许可且当前有效的稳定账号键。"""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now 必须包含时区")
     moment = now.astimezone(UTC)
     errors: list[str] = []
     warnings: list[str] = []
@@ -131,7 +132,7 @@ def validate_source_authorizations(
         if reviewed is None or valid_from is None or (expires_raw and expires is None):
             errors.append(f"第 {number} 行授权时间不可解析或缺少时区")
         else:
-            if reviewed > moment + FUTURE_TOLERANCE:
+            if reviewed > moment:
                 errors.append(f"第 {number} 行 reviewed_at 是未来时间")
             if valid_from > moment:
                 errors.append(f"第 {number} 行授权尚未生效")

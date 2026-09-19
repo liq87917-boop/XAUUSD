@@ -1,5 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from src.alpha.author_input import validate_author_input
 
 AUTHORIZED = {("manual-source", "account-a")}
@@ -106,6 +108,22 @@ def test_rejects_copied_collection_time_and_unverifiable_url() -> None:
     assert not result.ready
     assert any("不能复制发布时间" in item for item in result.errors)
     assert any("http/https" in item for item in result.errors)
+
+
+def test_rejects_near_future_collection_time() -> None:
+    row = _row(0)
+    row["published_at"] = "2026-01-01T00:00:00Z"
+    row["collected_at"] = "2026-01-01T00:01:00Z"
+    row["effective_at"] = row["collected_at"]
+    result = validate_author_input(
+        [row], now=datetime(2026, 1, 1, tzinfo=UTC), authorized_accounts=AUTHORIZED
+    )
+    assert any("未来时间" in error for error in result.errors)
+
+
+def test_requires_timezone_aware_audit_clock() -> None:
+    with pytest.raises(ValueError, match="now 必须包含时区"):
+        validate_author_input([_row(0)], now=datetime(2026, 1, 1), authorized_accounts=AUTHORIZED)
 
 
 def test_rejects_structurally_valid_rows_without_account_authorization() -> None:

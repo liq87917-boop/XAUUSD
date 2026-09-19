@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from src.alpha.source_authorization import validate_source_authorizations
 
 
@@ -98,3 +100,14 @@ def test_pending_and_empty_authorizations_remain_blocked() -> None:
     assert pending.warnings
     assert not empty.ready
     assert empty.errors == ("授权表没有数据行",)
+
+
+def test_rejects_near_future_review_and_naive_audit_clock() -> None:
+    row = _row()
+    row["reviewed_at"] = "2026-02-01T00:01:00Z"
+    result = validate_source_authorizations(
+        [row], now=datetime(2026, 2, 1, tzinfo=UTC), evidence_root=Path(".")
+    )
+    assert any("reviewed_at 是未来时间" in error for error in result.errors)
+    with pytest.raises(ValueError, match="now 必须包含时区"):
+        validate_source_authorizations([row], now=datetime(2026, 2, 1), evidence_root=Path("."))

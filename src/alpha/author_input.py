@@ -6,13 +6,12 @@ import hashlib
 from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Final
 from urllib.parse import urlsplit
 
 MIN_AUTHOR_SAMPLES: Final[int] = 30
 MIN_CONTENT_CHARS: Final[int] = 90
-FUTURE_TOLERANCE: Final[timedelta] = timedelta(hours=1)
 REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
     "id",
     "source",
@@ -74,6 +73,8 @@ def validate_author_input(
     authorized_accounts: Collection[tuple[str, str]],
 ) -> AuthorInputAudit:
     """验证时间因果、身份、重复与每作者样本门槛；不修改输入。"""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now 必须包含时区")
     moment = now.astimezone(UTC)
     errors: list[str] = []
     warnings: list[str] = []
@@ -132,7 +133,7 @@ def validate_author_input(
                 )
             if effective != max(published, collected):
                 errors.append(f"第 {number} 行 effective_at 不等于发布时间和采集时间的较晚者")
-            if published > moment + FUTURE_TOLERANCE or collected > moment + FUTURE_TOLERANCE:
+            if published > moment or collected > moment:
                 errors.append(f"第 {number} 行包含未来时间")
 
         if str(row["collection_time_provenance"]).strip() != "independent_observation":
