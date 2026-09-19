@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -70,7 +70,7 @@ def validate_author_input(
     rows: Sequence[Mapping[str, str]],
     *,
     now: datetime,
-    authorized_accounts: Collection[tuple[str, str]],
+    authorization_windows: Mapping[tuple[str, str], tuple[datetime, datetime | None]],
 ) -> AuthorInputAudit:
     """验证时间因果、身份、重复与每作者样本门槛；不修改输入。"""
     if now.tzinfo is None or now.utcoffset() is None:
@@ -135,6 +135,13 @@ def validate_author_input(
                 errors.append(f"第 {number} 行 effective_at 不等于发布时间和采集时间的较晚者")
             if published > moment or collected > moment:
                 errors.append(f"第 {number} 行包含未来时间")
+            window = authorization_windows.get(account)
+            if window is not None:
+                valid_from, expires_at = window
+                if collected < valid_from or (expires_at is not None and collected >= expires_at):
+                    errors.append(
+                        f"第 {number} 行 collected_at 不在账号 {account!r} 的授权有效期内"
+                    )
 
         if str(row["collection_time_provenance"]).strip() != "independent_observation":
             errors.append(f"第 {number} 行采集时间来源不是 independent_observation")
@@ -157,7 +164,7 @@ def validate_author_input(
         if count < MIN_AUTHOR_SAMPLES:
             warnings.append(f"作者 {author!r} 只有 {count} 条 < {MIN_AUTHOR_SAMPLES}")
     for account in sorted(counts):
-        if account not in authorized_accounts:
+        if account not in authorization_windows:
             errors.append(f"账号 {account!r} 没有当前有效的采集、存储与研究授权")
     ready = (
         bool(rows)

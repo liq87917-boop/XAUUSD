@@ -36,6 +36,7 @@ REQUIRED_VALUES: Final[tuple[str, ...]] = tuple(
 class SourceAuthorizationAudit:
     rows: int
     approved_accounts: frozenset[tuple[str, str]]
+    approved_windows: tuple[tuple[tuple[str, str], datetime, datetime | None], ...]
     errors: tuple[str, ...]
     warnings: tuple[str, ...]
     ready: bool
@@ -91,6 +92,7 @@ def validate_source_authorizations(
     errors: list[str] = []
     warnings: list[str] = []
     approved: set[tuple[str, str]] = set()
+    windows: list[tuple[tuple[str, str], datetime, datetime | None]] = []
     seen: set[tuple[str, str]] = set()
     for number, row in enumerate(rows, start=1):
         missing = [name for name in REQUIRED_VALUES if not str(row.get(name, "")).strip()]
@@ -144,6 +146,8 @@ def validate_source_authorizations(
         row_has_error = any(item.startswith(f"第 {number} 行") for item in errors)
         if not row_has_error:
             approved.add(account)
+            assert valid_from is not None
+            windows.append((account, valid_from, expires))
 
     if not rows:
         errors.append("授权表没有数据行")
@@ -151,6 +155,7 @@ def validate_source_authorizations(
     return SourceAuthorizationAudit(
         rows=len(rows),
         approved_accounts=frozenset(approved),
+        approved_windows=tuple(windows),
         errors=tuple(errors),
         warnings=tuple(warnings),
         ready=ready,

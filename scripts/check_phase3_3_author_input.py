@@ -89,7 +89,10 @@ def main() -> int:
     audit = validate_author_input(
         normalize_rows(raw_rows),
         now=now,
-        authorized_accounts=authorization_audit.approved_accounts,
+        authorization_windows={
+            account: (valid_from, expires_at)
+            for account, valid_from, expires_at in authorization_audit.approved_windows
+        },
     )
     report = render(
         audit,

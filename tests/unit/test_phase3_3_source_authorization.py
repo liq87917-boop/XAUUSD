@@ -29,6 +29,13 @@ def test_approves_current_three_permission_authorization() -> None:
     )
     assert result.ready
     assert result.approved_accounts == frozenset({("licensed-source", "analyst-1")})
+    assert result.approved_windows == (
+        (
+            ("licensed-source", "analyst-1"),
+            datetime(2026, 1, 1, tzinfo=UTC),
+            datetime(2027, 1, 1, tzinfo=UTC),
+        ),
+    )
     assert not result.errors
 
 

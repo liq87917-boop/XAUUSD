@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scripts.check_phase3_3_author_input import render
@@ -16,6 +17,7 @@ def _render(*, author_ready: bool, authorization_ready: bool) -> str:
     authorization = SourceAuthorizationAudit(
         rows=2,
         approved_accounts=frozenset({("source", "account")}),
+        approved_windows=((("source", "account"), datetime(2026, 1, 1, tzinfo=UTC), None),),
         errors=() if authorization_ready else ("第 2 行授权已过期",),
         warnings=(),
         ready=authorization_ready,
