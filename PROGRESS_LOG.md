@@ -1872,3 +1872,13 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   `identity_consistent` 为 false，不能因错误行未计入样本就忽略身份污染；
 - 账号分组专项 **8 passed**，全量 **1420 passed / 1 skipped**、ruff/mypy 通过；
   本轮只补测试与日志，不改生产逻辑、数据库、原始数据或既有 FAIL/BLOCKED 结论。
+
+## 第五十八轮（2026-09-19）：新闻事件与原始类型一致性
+
+- 修复 Phase 3.3 News 库内计数可能包含错误挂到 `RawItemType.POST` 等非新闻原始记录的
+  `news_events` 行；资格查询现在只接受原始类型为 `NEWS` 的独立事件，避免跨表类型错配
+  推高事件数与历史跨度；
+- 新增“新闻事件指向帖子原始记录”数据库集成回归，专项 **10 passed**、全量
+  **1421 passed / 1 skipped**、ruff/mypy 通过；本地资格报告重算无变化，30 条新闻与
+  0 天可用跨度、Author/News 双 BLOCKED 保持不变；
+- 未改写 PostgreSQL、真实数据、技能/权重事实或 Phase 3.2 FAIL 结论。

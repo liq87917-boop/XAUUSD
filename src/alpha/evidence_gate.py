@@ -20,6 +20,7 @@ from database.models import (
     AuthorPost,
     NewsEvent,
     RawItem,
+    RawItemType,
     Source,
 )
 from src.processors.opinion_labels import build_opinion_labels
@@ -158,6 +159,7 @@ def load_phase33_readiness(
         sa.select(RawItem.id, Source.name, NewsEvent.effective_at, RawItem.effective_at)
         .join(RawItem, RawItem.source_id == Source.id)
         .join(NewsEvent, NewsEvent.raw_item_id == RawItem.id)
+        .where(RawItem.item_type == RawItemType.NEWS)
     ).all()
     distinct_news: dict[str, tuple[str, datetime]] = {}
     for raw_id, code, event_at, raw_at in news_rows:

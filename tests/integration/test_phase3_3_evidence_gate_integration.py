@@ -169,6 +169,35 @@ def test_news_parser_versions_do_not_inflate_independent_event_count(
     assert result.news.history_days == 0
 
 
+def test_news_event_linked_to_post_raw_item_is_not_qualified_news(
+    session: Session,
+    make_raw_item: Callable[..., RawItem],
+    make_source: Callable[..., Source],
+) -> None:
+    source = make_source(name="wrong-raw-type", source_type=SourceType.NEWS)
+    published = datetime(2026, 1, 1, tzinfo=UTC)
+    raw = make_raw_item(
+        source=source,
+        item_type=RawItemType.POST,
+        published_at=published,
+        collected_at=published,
+    )
+    session.add(
+        NewsEvent(
+            raw_item_id=raw.id,
+            headline="not a news raw item",
+            published_at=published,
+            effective_at=published,
+            parser_version="test-v1",
+        )
+    )
+    session.flush()
+
+    result = load_phase33_readiness(session)
+    assert result.news.events == 0
+    assert not result.news_ready
+
+
 def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
     session: Session,
     make_author_account: Callable[..., AuthorAccount],
