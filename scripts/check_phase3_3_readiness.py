@@ -35,7 +35,7 @@ def _hf_rows(path: Path) -> int:
 
 def render(result: Phase33Readiness) -> str:
     author_rows = [
-        f"| {item.display_name} | {item.opinions} | {item.trusted_labels} | "
+        f"| {item.display_name} | {item.opinions} | {item.trusted_posts} | "
         f"{'PASS' if item.ready else 'BLOCKED'} |"
         for item in result.authors
     ] or ["| — | 0 | 0 | BLOCKED |"]
@@ -63,9 +63,9 @@ def render(result: Phase33Readiness) -> str:
             "",
             "## 2. Author 资格",
             "",
-            f"硬门槛：每位作者至少 {MIN_AUTHOR_SAMPLES} 条可信、可标注观点。",
+            f"硬门槛：每位作者至少 {MIN_AUTHOR_SAMPLES} 条有可信标签的独立帖子。",
             "",
-            "| 作者 | 观点数 | 可信标签数 | 状态 |",
+            "| 作者 | 观点数 | 有可信标签的独立帖子数 | 状态 |",
             "|---|---:|---:|---|",
             *author_rows,
             "",

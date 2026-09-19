@@ -27,7 +27,7 @@ class AuthorReadiness:
     author_id: str
     display_name: str
     opinions: int
-    trusted_labels: int
+    trusted_posts: int
     ready: bool
 
 
@@ -79,21 +79,22 @@ def load_phase33_readiness(
     authors = list(session.scalars(sa.select(Author).order_by(Author.id)).all())
     opinions = list(session.scalars(sa.select(AuthorOpinion).order_by(AuthorOpinion.id)).all())
     author_by_opinion = {str(item.id): str(item.author_id) for item in opinions}
+    post_by_opinion = {str(item.id): str(item.author_post_id) for item in opinions}
     opinion_counts = Counter(str(item.author_id) for item in opinions)
     labels = build_opinion_labels(session)
     status_counts = Counter(item.status for item in labels)
-    trusted_counts = Counter(
-        author_by_opinion[item.opinion_id]
-        for item in labels
-        if item.status == "LABELED" and item.opinion_id in author_by_opinion
-    )
+    trusted_posts: dict[str, set[str]] = {}
+    for item in labels:
+        if item.status == "LABELED" and item.opinion_id in author_by_opinion:
+            author_id = author_by_opinion[item.opinion_id]
+            trusted_posts.setdefault(author_id, set()).add(post_by_opinion[item.opinion_id])
     author_rows = tuple(
         AuthorReadiness(
             author_id=str(author.id),
             display_name=author.display_name,
             opinions=opinion_counts[str(author.id)],
-            trusted_labels=trusted_counts[str(author.id)],
-            ready=trusted_counts[str(author.id)] >= MIN_AUTHOR_SAMPLES,
+            trusted_posts=len(trusted_posts.get(str(author.id), set())),
+            ready=len(trusted_posts.get(str(author.id), set())) >= MIN_AUTHOR_SAMPLES,
         )
         for author in authors
         if opinion_counts[str(author.id)] > 0

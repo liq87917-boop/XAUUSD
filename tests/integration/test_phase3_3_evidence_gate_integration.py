@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import sqlalchemy as sa
+from pytest import MonkeyPatch
 from sqlalchemy.orm import Session
 
 from database.models import (
@@ -23,6 +24,7 @@ from database.models import (
     SourceType,
 )
 from src.alpha.evidence_gate import load_phase33_readiness
+from src.processors.opinion_labels import OpinionLabel
 
 
 def test_loader_uses_trust_gate_and_never_writes_facts(
@@ -94,7 +96,7 @@ def test_loader_uses_trust_gate_and_never_writes_facts(
     after_weights = session.scalar(sa.select(sa.func.count()).select_from(AuthorWeightSnapshot))
 
     assert result.authors[0].opinions == 1
-    assert result.authors[0].trusted_labels == 0
+    assert result.authors[0].trusted_posts == 0
     assert result.label_status_counts == (("UNTRUSTED_COLLECTION_TIME", 1),)
     assert result.news.events == 2
     assert result.news.history_days == 10
@@ -164,3 +166,65 @@ def test_news_parser_versions_do_not_inflate_independent_event_count(
     assert result.news.events == 1
     assert result.news.source_counts == (("versioned-source", 1),)
     assert result.news.history_days == 0
+
+
+def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
+    session: Session,
+    make_author_account: Callable[..., AuthorAccount],
+    make_raw_item: Callable[..., RawItem],
+    make_source: Callable[..., Source],
+    monkeypatch: MonkeyPatch,
+) -> None:
+    published = datetime(2025, 1, 1, tzinfo=UTC)
+    collected = published + timedelta(minutes=2)
+    source = make_source(name="multi-label-author", source_type=SourceType.NEWS)
+    account = make_author_account(source=source)
+    raw = make_raw_item(source=source, published_at=published, collected_at=collected)
+    post = AuthorPost(
+        author_id=account.author_id,
+        author_account_id=account.id,
+        raw_item_id=raw.id,
+        published_at=published,
+        collected_at=collected,
+        effective_at=collected,
+        text_content="黄金观点的同一原始帖子",
+        has_media=False,
+    )
+    session.add(post)
+    session.flush()
+    opinions = [
+        AuthorOpinion(
+            author_id=account.author_id,
+            author_post_id=post.id,
+            stance=OpinionStance.LONG,
+            instrument_id=None,
+            horizon=None,
+            confidence=Decimal("0.7"),
+            information_type=InformationType.TECHNICAL,
+            rationale="同一帖子多次解析",
+            parser_version=f"test-v{index}",
+            effective_at=collected,
+        )
+        for index in range(10)
+    ]
+    session.add_all(opinions)
+    session.flush()
+    labels = [
+        OpinionLabel(
+            opinion_id=str(opinion.id),
+            effective_at=collected.isoformat(),
+            stance="LONG",
+            horizon=horizon,
+            horizon_source="evaluation_grid",
+            status="LABELED",
+        )
+        for opinion in opinions
+        for horizon in ("H1", "H4", "D1")
+    ]
+    monkeypatch.setattr("src.alpha.evidence_gate.build_opinion_labels", lambda _session: labels)
+
+    result = load_phase33_readiness(session)
+    assert result.label_status_counts == (("LABELED", 30),)
+    assert result.authors[0].opinions == 10
+    assert result.authors[0].trusted_posts == 1
+    assert not result.author_ready
