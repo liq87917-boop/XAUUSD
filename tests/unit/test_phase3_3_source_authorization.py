@@ -109,6 +109,18 @@ def test_pending_and_empty_authorizations_remain_blocked() -> None:
     assert empty.errors == ("授权表没有数据行",)
 
 
+def test_approved_account_does_not_mask_another_pending_account() -> None:
+    pending_row = _row()
+    pending_row["external_account_id"] = "analyst-2"
+    pending_row["authorization_status"] = "PENDING"
+    result = validate_source_authorizations(
+        [_row(), pending_row], now=datetime(2026, 2, 1, tzinfo=UTC), evidence_root=Path(".")
+    )
+    assert not result.ready
+    assert result.approved_accounts == frozenset({("licensed-source", "analyst-1")})
+    assert any("第 2 行授权状态" in item for item in result.errors)
+
+
 def test_rejects_near_future_review_and_naive_audit_clock() -> None:
     row = _row()
     row["reviewed_at"] = "2026-02-01T00:01:00Z"

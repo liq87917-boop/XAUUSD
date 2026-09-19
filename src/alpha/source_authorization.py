@@ -109,6 +109,7 @@ def validate_source_authorizations(
 
         status = str(row["authorization_status"]).strip().upper()
         if status != APPROVED:
+            errors.append(f"第 {number} 行授权状态为 {status!r}，不是 APPROVED")
             warnings.append(f"账号 {account!r} 状态为 {status!r}，不予放行")
             continue
         basis = str(row["authorization_basis"]).strip().lower()
