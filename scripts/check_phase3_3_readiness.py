@@ -75,6 +75,9 @@ def render(result: Phase33Readiness) -> str:
             f"硬门槛：每个稳定来源账号至少 {MIN_AUTHOR_SAMPLES} 条在审计时点前已完成"
             "可信标签的独立帖子；"
             "同一作者跨账号不能合并凑数。",
+            "可信帖子还必须在原始记录中标明独立采集时间来源 "
+            "`collected_at_provenance=independent_observation`；"
+            "缺失标记或仅有输入/回填时间不计入。",
             "",
             "| 作者 | 观点数 | 有可信标签的独立帖子数 | 状态 |",
             "|---|---:|---:|---|",

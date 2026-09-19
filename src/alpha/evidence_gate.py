@@ -98,6 +98,7 @@ def load_phase33_readiness(
     opinions = list(session.scalars(sa.select(AuthorOpinion).order_by(AuthorOpinion.id)).all())
     opinions_by_id = {str(item.id): item for item in opinions}
     posts = {str(item.id): item for item in session.scalars(sa.select(AuthorPost)).all()}
+    raw_items = {str(item.id): item for item in session.scalars(sa.select(RawItem)).all()}
     accounts = {str(item.id): item for item in session.scalars(sa.select(AuthorAccount)).all()}
     sources = {str(item.id): item.name for item in session.scalars(sa.select(Source)).all()}
     post_by_opinion = {str(item.id): str(item.author_post_id) for item in opinions}
@@ -136,6 +137,11 @@ def load_phase33_readiness(
                 continue
             opinion = opinions_by_id[item.opinion_id]
             post = posts[post_by_opinion[item.opinion_id]]
+            raw = raw_items.get(str(post.raw_item_id))
+            if raw is None or not isinstance(raw.raw_json, dict):
+                continue
+            if raw.raw_json.get("collected_at_provenance") != "independent_observation":
+                continue
             opinion_at = ensure_utc_from_database(opinion.effective_at, field_name="opinion_at")
             post_at = ensure_utc_from_database(post.effective_at, field_name="post_at")
             if max(opinion_at, post_at, label_exit.astimezone(UTC)) <= moment:

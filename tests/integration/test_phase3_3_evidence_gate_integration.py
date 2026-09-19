@@ -246,7 +246,12 @@ def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
     collected = published + timedelta(minutes=2)
     source = make_source(name="multi-label-author", source_type=SourceType.NEWS)
     account = make_author_account(source=source)
-    raw = make_raw_item(source=source, published_at=published, collected_at=collected)
+    raw = make_raw_item(
+        source=source,
+        published_at=published,
+        collected_at=collected,
+        raw_json={"collected_at_provenance": "independent_observation"},
+    )
     post = AuthorPost(
         author_id=account.author_id,
         author_account_id=account.id,
@@ -299,6 +304,71 @@ def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
     assert not result.author_ready
 
 
+@pytest.mark.parametrize("provenance", [None, "input", "input_effective_at_fallback"])
+def test_labeled_post_without_independent_collection_proof_is_not_trusted(
+    session: Session,
+    make_author_account: Callable[..., AuthorAccount],
+    make_raw_item: Callable[..., RawItem],
+    make_source: Callable[..., Source],
+    monkeypatch: MonkeyPatch,
+    provenance: str | None,
+) -> None:
+    source = make_source(name="untrusted-provenance", source_type=SourceType.NEWS)
+    account = make_author_account(source=source)
+    observed = datetime(2025, 1, 1, tzinfo=UTC)
+    raw = make_raw_item(
+        source=source,
+        published_at=observed - timedelta(minutes=1),
+        collected_at=observed,
+        raw_json={} if provenance is None else {"collected_at_provenance": provenance},
+    )
+    post = AuthorPost(
+        author_id=account.author_id,
+        author_account_id=account.id,
+        raw_item_id=raw.id,
+        published_at=observed - timedelta(minutes=1),
+        collected_at=observed,
+        effective_at=observed,
+        text_content="缺少独立采集时间证明的帖子",
+        has_media=False,
+    )
+    session.add(post)
+    session.flush()
+    opinion = AuthorOpinion(
+        author_id=account.author_id,
+        author_post_id=post.id,
+        stance=OpinionStance.LONG,
+        instrument_id=None,
+        horizon=OpinionHorizon.H1,
+        confidence=Decimal("0.7"),
+        information_type=InformationType.TECHNICAL,
+        rationale="测试独立采集时间证明",
+        parser_version="test-v1",
+        effective_at=observed,
+    )
+    session.add(opinion)
+    session.flush()
+    monkeypatch.setattr(
+        "src.alpha.evidence_gate.build_opinion_labels",
+        lambda _session: [
+            OpinionLabel(
+                opinion_id=str(opinion.id),
+                effective_at=observed.isoformat(),
+                stance="LONG",
+                horizon="H1",
+                horizon_source="explicit",
+                status="LABELED",
+                exit_at=(observed + timedelta(hours=1)).isoformat(),
+            )
+        ],
+    )
+
+    result = load_phase33_readiness(session)
+    assert result.label_status_counts == (("LABELED", 1),)
+    assert result.authors[0].trusted_posts == 0
+    assert not result.author_ready
+
+
 @pytest.mark.parametrize(
     ("first_count", "second_count", "mismatched_identity", "as_of", "expected_ready"),
     [
@@ -335,7 +405,12 @@ def test_author_sample_gate_is_per_account(
     ):
         for index in range(count):
             collected = published + timedelta(minutes=index + 2)
-            raw = make_raw_item(source=source, published_at=published, collected_at=collected)
+            raw = make_raw_item(
+                source=source,
+                published_at=published,
+                collected_at=collected,
+                raw_json={"collected_at_provenance": "independent_observation"},
+            )
             post = AuthorPost(
                 author_id=first.author_id,
                 author_account_id=account.id,

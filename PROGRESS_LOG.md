@@ -1913,3 +1913,14 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   PASS（revision `0007_phase3_feature_tables`、作者技能/权重 0 行、交易开关关闭）；
 - 本轮未改写 PostgreSQL、真实数据、技能/权重事实或 Phase 3.2 冻结 FAIL；
   Phase 3.3 Author/News 仍为 BLOCKED。
+
+## 第六十二轮（2026-09-20）：作者可信样本要求独立采集时间标记
+
+- 修复 Phase 3.3 作者库内资格漏洞：即使前瞻标签状态为 `LABELED`，原始帖子若没有
+  `collected_at_provenance=independent_observation`，也不得计入可信独立帖子；缺失标记、
+  仅输入时间和以 `effective_at` 回填时间均 fail-closed，避免无采集时点证据的旧记录撑高样本量；
+- 增加三种无独立证据的数据库集成反例，并将原有可信样本夹具明确标为独立采集时间。
+  专项 **15 passed**、全量 **1433 passed / 1 skipped**、ruff/mypy 通过。资格报告同步说明
+  此门槛并重算：作者可信帖子仍为 0，新闻仍为 30 条/0 天，Author/News 双 BLOCKED；
+- 未改写 PostgreSQL、真实数据、技能/权重事实或 Phase 3.2 冻结 FAIL。原始标记也不等于
+  法律授权已核验，用户提供的来源许可仍须人工签认。
