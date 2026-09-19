@@ -73,6 +73,13 @@ def render(
     )
 
 
+def validate_report_target(report: Path, input_path: Path, authorization_path: Path) -> None:
+    """报告不得覆盖两份不可改写的用户输入；解析绝对路径以防相对路径绕过。"""
+    target = report.resolve()
+    if target in {input_path.resolve(), authorization_path.resolve()}:
+        raise ValueError("--report 不能与帖子输入或来源授权表指向同一文件")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
@@ -80,6 +87,11 @@ def main() -> int:
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     configure_stdout()
+    if args.report is not None:
+        try:
+            validate_report_target(args.report, args.input, args.authorizations)
+        except ValueError as exc:
+            parser.error(str(exc))
     raw_rows, info = read_table(args.input)
     authorization_rows, authorization_info = read_table(args.authorizations)
     now = datetime.now(UTC)
