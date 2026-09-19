@@ -233,8 +233,8 @@ def test_multiple_opinions_and_horizon_labels_from_one_post_count_once(
 
 
 @pytest.mark.parametrize(
-    ("first_count", "second_count", "expected_ready"),
-    [(15, 15, False), (30, 0, True)],
+    ("first_count", "second_count", "mismatched_identity", "expected_ready"),
+    [(15, 15, False, False), (30, 0, False, True), (30, 0, True, False)],
 )
 def test_author_sample_gate_is_per_account(
     session: Session,
@@ -244,6 +244,7 @@ def test_author_sample_gate_is_per_account(
     monkeypatch: MonkeyPatch,
     first_count: int,
     second_count: int,
+    mismatched_identity: bool,
     expected_ready: bool,
 ) -> None:
     first_source = make_source(name="account-source-a", source_type=SourceType.NEWS)
@@ -287,6 +288,38 @@ def test_author_sample_gate_is_per_account(
             )
             session.add(opinion)
             opinions.append(opinion)
+    if mismatched_identity:
+        foreign_account = make_author_account(
+            source=second_source, external_account_id="foreign-account"
+        )
+        collected = published + timedelta(hours=2)
+        raw = make_raw_item(source=first_source, published_at=published, collected_at=collected)
+        post = AuthorPost(
+            author_id=foreign_account.author_id,
+            author_account_id=first.id,
+            raw_item_id=raw.id,
+            published_at=published,
+            collected_at=collected,
+            effective_at=collected,
+            text_content="账号与作者归属不一致的测试行",
+            has_media=False,
+        )
+        session.add(post)
+        session.flush()
+        opinion = AuthorOpinion(
+            author_id=first.author_id,
+            author_post_id=post.id,
+            stance=OpinionStance.LONG,
+            instrument_id=None,
+            horizon=OpinionHorizon.H1,
+            confidence=Decimal("0.7"),
+            information_type=InformationType.TECHNICAL,
+            rationale="测试跨表归属不一致",
+            parser_version="test-v1",
+            effective_at=collected,
+        )
+        session.add(opinion)
+        opinions.append(opinion)
     session.flush()
     labels = [
         OpinionLabel(
@@ -307,5 +340,6 @@ def test_author_sample_gate_is_per_account(
     if second_count:
         expected_counts += (("account-source-b/account-b", second_count),)
     assert result.authors[0].account_counts == expected_counts
+    assert result.authors[0].identity_consistent is not mismatched_identity
     assert result.authors[0].ready is expected_ready
     assert result.author_ready is expected_ready
