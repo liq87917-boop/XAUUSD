@@ -74,10 +74,13 @@ def render(
 
 
 def validate_report_target(report: Path, input_path: Path, authorization_path: Path) -> None:
-    """报告不得覆盖两份不可改写的用户输入；解析绝对路径以防相对路径绕过。"""
+    """报告不得覆盖两份不可改写的用户输入，包括硬链接别名。"""
     target = report.resolve()
-    if target in {input_path.resolve(), authorization_path.resolve()}:
-        raise ValueError("--report 不能与帖子输入或来源授权表指向同一文件")
+    for protected in (input_path, authorization_path):
+        if target == protected.resolve() or (
+            target.exists() and protected.exists() and target.samefile(protected)
+        ):
+            raise ValueError("--report 不能与帖子输入或来源授权表指向同一文件")
 
 
 def main() -> int:

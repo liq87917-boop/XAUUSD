@@ -1,3 +1,4 @@
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -83,3 +84,30 @@ def test_report_target_allows_separate_path(tmp_path: Path) -> None:
         tmp_path / "posts.csv",
         tmp_path / "authorizations.csv",
     )
+
+
+@pytest.mark.parametrize("protected", ["posts", "authorizations"])
+def test_report_cannot_overwrite_hardlinked_user_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, protected: str
+) -> None:
+    posts = tmp_path / "posts.csv"
+    authorizations = tmp_path / "authorizations.csv"
+    posts.write_text("original posts", encoding="utf-8")
+    authorizations.write_text("original authorizations", encoding="utf-8")
+    report = tmp_path / "report.md"
+    os.link(posts if protected == "posts" else authorizations, report)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "check_phase3_3_author_input.py",
+            "--input", str(posts),
+            "--authorizations", str(authorizations),
+            "--report", str(report),
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        main()
+    assert posts.read_text(encoding="utf-8") == "original posts"
+    assert authorizations.read_text(encoding="utf-8") == "original authorizations"
