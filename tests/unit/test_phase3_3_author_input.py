@@ -2,6 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 from src.alpha.author_input import validate_author_input
 
+AUTHORIZED = {("manual-source", "account-a")}
+
 
 def _row(index: int, *, author: str = "作者A") -> dict[str, str]:
     published = datetime(2026, 1, 1, tzinfo=UTC) + timedelta(hours=index)
@@ -24,7 +26,9 @@ def _row(index: int, *, author: str = "作者A") -> dict[str, str]:
 
 def test_thirty_causal_unique_rows_are_ready() -> None:
     result = validate_author_input(
-        [_row(index) for index in range(30)], now=datetime(2026, 2, 1, tzinfo=UTC)
+        [_row(index) for index in range(30)],
+        now=datetime(2026, 2, 1, tzinfo=UTC),
+        authorized_accounts=AUTHORIZED,
     )
     assert result.ready
     assert result.author_counts == (("作者A [manual-source/account-a]", 30),)
@@ -37,7 +41,9 @@ def test_rejects_fallback_time_duplicate_and_short_sample() -> None:
     rows[1]["url"] = rows[0]["url"]
     rows[1]["collection_time_provenance"] = "input_effective_at_fallback"
     rows[1]["effective_at"] = rows[1]["published_at"]
-    result = validate_author_input(rows, now=datetime(2026, 2, 1, tzinfo=UTC))
+    result = validate_author_input(
+        rows, now=datetime(2026, 2, 1, tzinfo=UTC), authorized_accounts=AUTHORIZED
+    )
     assert not result.ready
     assert any("正文与前文重复" in item for item in result.errors)
     assert any("url 与前文重复" in item for item in result.errors)
@@ -50,7 +56,9 @@ def test_rejects_naive_or_future_times() -> None:
     row["published_at"] = "2026-01-01 00:00:00"
     row["collected_at"] = "2027-01-01T00:00:00Z"
     row["effective_at"] = "2027-01-01T00:00:00Z"
-    result = validate_author_input([row], now=datetime(2026, 2, 1, tzinfo=UTC))
+    result = validate_author_input(
+        [row], now=datetime(2026, 2, 1, tzinfo=UTC), authorized_accounts=AUTHORIZED
+    )
     assert any("时间不可解析" in item for item in result.errors)
 
 
@@ -64,7 +72,11 @@ def test_same_display_name_cannot_merge_different_accounts() -> None:
         }
         for index in range(15)
     )
-    result = validate_author_input(rows, now=datetime(2026, 2, 1, tzinfo=UTC))
+    result = validate_author_input(
+        rows,
+        now=datetime(2026, 2, 1, tzinfo=UTC),
+        authorized_accounts={*AUTHORIZED, ("another-source", "account-b")},
+    )
     assert not result.ready
     assert result.author_counts == (
         ("作者A [another-source/account-b]", 15),
@@ -76,7 +88,9 @@ def test_same_display_name_cannot_merge_different_accounts() -> None:
 def test_same_account_must_have_consistent_author_name() -> None:
     rows = [_row(index) for index in range(30)]
     rows[-1]["author_name"] = "作者A（改名）"
-    result = validate_author_input(rows, now=datetime(2026, 2, 1, tzinfo=UTC))
+    result = validate_author_input(
+        rows, now=datetime(2026, 2, 1, tzinfo=UTC), authorized_accounts=AUTHORIZED
+    )
     assert not result.ready
     assert any("作者名不一致" in item for item in result.errors)
 
@@ -86,7 +100,19 @@ def test_rejects_copied_collection_time_and_unverifiable_url() -> None:
     row["collected_at"] = row["published_at"]
     row["effective_at"] = row["published_at"]
     row["url"] = "http://[malformed"
-    result = validate_author_input([row], now=datetime(2026, 2, 1, tzinfo=UTC))
+    result = validate_author_input(
+        [row], now=datetime(2026, 2, 1, tzinfo=UTC), authorized_accounts=AUTHORIZED
+    )
     assert not result.ready
     assert any("不能复制发布时间" in item for item in result.errors)
     assert any("http/https" in item for item in result.errors)
+
+
+def test_rejects_structurally_valid_rows_without_account_authorization() -> None:
+    result = validate_author_input(
+        [_row(index) for index in range(30)],
+        now=datetime(2026, 2, 1, tzinfo=UTC),
+        authorized_accounts=set(),
+    )
+    assert not result.ready
+    assert any("没有当前有效" in item for item in result.errors)

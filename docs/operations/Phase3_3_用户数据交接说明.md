@@ -2,7 +2,8 @@
 
 ## 1. 需要用户提供：真实作者帖子
 
-请复制 `templates/phase3_3/author_posts_template.csv` 后填写；模板只有表头，不含 Mock 行。
+请复制 `templates/phase3_3/author_posts_template.csv` 后填写；模板只有表头，不含 Mock 行。每个来源
+账号还必须在 `templates/phase3_3/author_source_authorizations_template.csv` 中登记授权证据。
 
 | 列 | 必填 | 填写要求 |
 |---|---|---|
@@ -37,11 +38,32 @@
 ```powershell
 .\.venv\Scripts\python.exe scripts/check_phase3_3_author_input.py `
   --input <填写后的CSV或XLSX> `
+  --authorizations <填写后的来源授权CSV或XLSX> `
   --report logs/phase3_3_author_input_check.md
 ```
 
 只有报告结论为 `PASS` 才进入后续人工抽检与追加导入；`BLOCKED` 时按逐行错误修正原始来源，
 不能让程序自动猜值。
+
+### 来源授权表各列
+
+| 列 | 填写要求 |
+|---|---|
+| `source` | 必须与帖子表完全一致 |
+| `external_account_id` | 必须与帖子表的稳定账号 ID 完全一致 |
+| `authorization_status` | 只有证据已核验后填 `APPROVED`；否则填 `PENDING` 或 `REJECTED` |
+| `authorization_basis` | `official_api`、`license_agreement`、`written_permission`、`user_owned` 四选一 |
+| `authorization_reference` | 可复核的 `https` 条款 URL 或 `docs/legal/` 内许可文件路径 |
+| `permits_automated_collection` | 是否明确允许自动采集，填 `true/false` |
+| `permits_local_storage` | 是否明确允许本地保存，填 `true/false` |
+| `permits_research_use` | 是否明确允许研究/模型处理，填 `true/false` |
+| `reviewed_by` | 实际核验授权的人，不得填模型名冒充人工 |
+| `reviewed_at` | 核验时间，必须带时区 |
+| `valid_from` | 授权生效时间，必须带时区 |
+| `expires_at` | 有期限时填带时区的到期时间；无期限可留空 |
+
+机械门禁只有在三项许可全部为 `true`、授权当前有效且账号键与帖子一致时才放行。授权表为空、
+状态待定、授权过期或只允许浏览但不允许存储/研究，都会保持 BLOCKED。
 
 ## 2. 新闻历史：暂时不要填写普通 CSV
 

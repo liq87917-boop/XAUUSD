@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Final
@@ -67,7 +67,12 @@ def _url_key(value: str) -> str | None:
     return f"{parsed.scheme.lower()}://{authority}{parsed.path}?{parsed.query}"
 
 
-def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -> AuthorInputAudit:
+def validate_author_input(
+    rows: Sequence[Mapping[str, str]],
+    *,
+    now: datetime,
+    authorized_accounts: Collection[tuple[str, str]],
+) -> AuthorInputAudit:
     """验证时间因果、身份、重复与每作者样本门槛；不修改输入。"""
     moment = now.astimezone(UTC)
     errors: list[str] = []
@@ -150,6 +155,9 @@ def validate_author_input(rows: Sequence[Mapping[str, str]], *, now: datetime) -
     for author, count in labelled_counts:
         if count < MIN_AUTHOR_SAMPLES:
             warnings.append(f"作者 {author!r} 只有 {count} 条 < {MIN_AUTHOR_SAMPLES}")
+    for account in sorted(counts):
+        if account not in authorized_accounts:
+            errors.append(f"账号 {account!r} 没有当前有效的采集、存储与研究授权")
     ready = (
         bool(rows)
         and not errors

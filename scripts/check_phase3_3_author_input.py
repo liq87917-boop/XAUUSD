@@ -14,14 +14,27 @@ if str(ROOT) not in sys.path:
 from scripts._console import configure_stdout, safe_print  # noqa: E402
 from scripts.import_manual_posts import normalize_rows, read_table  # noqa: E402
 from src.alpha.author_input import AuthorInputAudit, validate_author_input  # noqa: E402
+from src.alpha.source_authorization import (  # noqa: E402
+    SourceAuthorizationAudit,
+    validate_source_authorizations,
+)
 
 
-def render(audit: AuthorInputAudit, input_path: Path, sha256: str) -> str:
+def render(
+    audit: AuthorInputAudit,
+    input_path: Path,
+    sha256: str,
+    authorization_audit: SourceAuthorizationAudit,
+    authorization_path: Path,
+    authorization_sha256: str,
+) -> str:
     author_lines = [f"| {name} | {count} |" for name, count in audit.author_counts]
     if not author_lines:
         author_lines.append("| — | 0 |")
     error_lines = [f"- {item}" for item in audit.errors] or ["- 无"]
     warning_lines = [f"- {item}" for item in audit.warnings] or ["- 无"]
+    authorization_errors = [f"- {item}" for item in authorization_audit.errors] or ["- 无"]
+    authorization_warnings = [f"- {item}" for item in authorization_audit.warnings] or ["- 无"]
     return "\n".join(
         [
             "# Phase 3.3 作者输入体检报告",
@@ -31,6 +44,9 @@ def render(audit: AuthorInputAudit, input_path: Path, sha256: str) -> str:
             f"- 输入：`{input_path}`",
             f"- SHA-256：`{sha256}`",
             f"- 数据行：{audit.rows}",
+            f"- 授权表：`{authorization_path}`",
+            f"- 授权表 SHA-256：`{authorization_sha256}`",
+            f"- 当前获批账号：{len(authorization_audit.approved_accounts)}",
             "",
             "| 作者 | 行数 |",
             "|---|---:|",
@@ -44,6 +60,14 @@ def render(audit: AuthorInputAudit, input_path: Path, sha256: str) -> str:
             "",
             *warning_lines,
             "",
+            "## 来源授权硬错误",
+            "",
+            *authorization_errors,
+            "",
+            "## 来源授权提示",
+            "",
+            *authorization_warnings,
+            "",
         ]
     )
 
@@ -51,17 +75,34 @@ def render(audit: AuthorInputAudit, input_path: Path, sha256: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument("--authorizations", type=Path, required=True)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     configure_stdout()
     raw_rows, info = read_table(args.input)
-    audit = validate_author_input(normalize_rows(raw_rows), now=datetime.now(UTC))
-    report = render(audit, args.input, str(info["sha256"]))
+    authorization_rows, authorization_info = read_table(args.authorizations)
+    now = datetime.now(UTC)
+    authorization_audit = validate_source_authorizations(
+        normalize_rows(authorization_rows), now=now
+    )
+    audit = validate_author_input(
+        normalize_rows(raw_rows),
+        now=now,
+        authorized_accounts=authorization_audit.approved_accounts,
+    )
+    report = render(
+        audit,
+        args.input,
+        str(info["sha256"]),
+        authorization_audit,
+        args.authorizations,
+        str(authorization_info["sha256"]),
+    )
     safe_print(report)
     if args.report is not None:
         args.report.write_text(report, encoding="utf-8")
         safe_print(f"报告已写入：{args.report}")
-    return 0 if audit.ready else 2
+    return 0 if audit.ready and authorization_audit.ready else 2
 
 
 if __name__ == "__main__":

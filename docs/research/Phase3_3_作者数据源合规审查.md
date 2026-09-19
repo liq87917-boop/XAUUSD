@@ -27,3 +27,7 @@
 
 即使授权通过，仍必须记录真实 `collected_at`，使用
 `effective_at=max(published_at,collected_at)`，并通过现有作者输入资格门禁。
+
+工程侧已提供 `author_source_authorizations_template.csv` 和机械门禁：按
+`source + external_account_id` 绑定授权，且只有自动采集、本地存储、研究使用三项许可同时为真、
+证据引用可复核且授权当前有效时，作者输入才可能 PASS。
