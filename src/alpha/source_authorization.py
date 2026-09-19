@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Final
 from urllib.parse import urlsplit
 
@@ -56,17 +56,34 @@ def _true(value: str) -> bool:
     return value.strip().lower() == "true"
 
 
-def _valid_reference(value: str) -> bool:
+def _valid_reference(value: str, *, evidence_root: Path) -> bool:
     clean = value.strip().replace("\\", "/")
-    parsed = urlsplit(clean)
-    if parsed.scheme.lower() == "https" and parsed.hostname:
-        return True
+    try:
+        parsed = urlsplit(clean)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme.lower() == "https":
+        return bool(hostname) and parsed.username is None and parsed.password is None and port != 0
+    if parsed.scheme or parsed.netloc or "?" in clean or "#" in clean:
+        return False
     path = PurePosixPath(clean)
-    return not path.is_absolute() and path.parts[:2] == ("docs", "legal") and len(path.parts) > 2
+    structurally_valid = (
+        not path.is_absolute()
+        and path.parts[:2] == ("docs", "legal")
+        and len(path.parts) > 2
+        and ".." not in path.parts
+    )
+    if not structurally_valid:
+        return False
+    root = evidence_root.resolve()
+    candidate = (root / clean).resolve()
+    return candidate.is_relative_to(root / "docs" / "legal") and candidate.is_file()
 
 
 def validate_source_authorizations(
-    rows: Sequence[Mapping[str, str]], *, now: datetime
+    rows: Sequence[Mapping[str, str]], *, now: datetime, evidence_root: Path
 ) -> SourceAuthorizationAudit:
     """仅批准有证据、三项用途均许可且当前有效的稳定账号键。"""
     moment = now.astimezone(UTC)
@@ -94,9 +111,9 @@ def validate_source_authorizations(
         basis = str(row["authorization_basis"]).strip().lower()
         if basis not in ALLOWED_BASES:
             errors.append(f"第 {number} 行 authorization_basis 不受支持：{basis!r}")
-        if not _valid_reference(str(row["authorization_reference"])):
+        if not _valid_reference(str(row["authorization_reference"]), evidence_root=evidence_root):
             errors.append(
-                f"第 {number} 行 authorization_reference 必须是 https URL 或 docs/legal/ 内证据"
+                f"第 {number} 行 authorization_reference 必须是 https URL 或 docs/legal/ 内现存文件"
             )
         permissions = (
             "permits_automated_collection",

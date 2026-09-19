@@ -53,7 +53,7 @@
 | `external_account_id` | 必须与帖子表的稳定账号 ID 完全一致 |
 | `authorization_status` | 只有证据已核验后填 `APPROVED`；否则填 `PENDING` 或 `REJECTED` |
 | `authorization_basis` | `official_api`、`license_agreement`、`written_permission`、`user_owned` 四选一 |
-| `authorization_reference` | 可复核的 `https` 条款 URL 或 `docs/legal/` 内许可文件路径 |
+| `authorization_reference` | 可复核的 `https` 条款 URL 或项目中 `docs/legal/` 内现存许可文件路径；URL 的法律内容仍需人工核验 |
 | `permits_automated_collection` | 是否明确允许自动采集，填 `true/false` |
 | `permits_local_storage` | 是否明确允许本地保存，填 `true/false` |
 | `permits_research_use` | 是否明确允许研究/模型处理，填 `true/false` |
@@ -64,6 +64,8 @@
 
 机械门禁只有在三项许可全部为 `true`、授权当前有效且账号键与帖子一致时才放行。授权表为空、
 状态待定、授权过期或只允许浏览但不允许存储/研究，都会保持 BLOCKED。
+门禁只核对授权登记的字段、证据地址格式和本地文件是否存在；`APPROVED` 和三个 `true` 都是
+人工签认声明，程序不能证明 URL 的法律效力、许可范围或签认人身份。未经实际人工核验不得填真。
 
 ## 2. 新闻历史：暂时不要填写普通 CSV
 

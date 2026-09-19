@@ -83,7 +83,7 @@ def main() -> int:
     authorization_rows, authorization_info = read_table(args.authorizations)
     now = datetime.now(UTC)
     authorization_audit = validate_source_authorizations(
-        normalize_rows(authorization_rows), now=now
+        normalize_rows(authorization_rows), now=now, evidence_root=ROOT
     )
     audit = validate_author_input(
         normalize_rows(raw_rows),
