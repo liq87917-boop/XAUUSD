@@ -369,6 +369,76 @@ def test_labeled_post_without_independent_collection_proof_is_not_trusted(
     assert not result.author_ready
 
 
+@pytest.mark.parametrize("anomaly", ["raw_type", "raw_source", "raw_late", "opinion_early"])
+def test_labeled_post_with_broken_raw_lineage_or_time_is_not_trusted(
+    session: Session,
+    make_author_account: Callable[..., AuthorAccount],
+    make_raw_item: Callable[..., RawItem],
+    make_source: Callable[..., Source],
+    monkeypatch: MonkeyPatch,
+    anomaly: str,
+) -> None:
+    source = make_source(name="causal-author", source_type=SourceType.NEWS)
+    account = make_author_account(source=source)
+    observed = datetime(2025, 1, 1, tzinfo=UTC)
+    raw_source = (
+        make_source(name="other-author-source", source_type=SourceType.NEWS)
+        if anomaly == "raw_source"
+        else source
+    )
+    raw = make_raw_item(
+        source=raw_source,
+        item_type=RawItemType.NEWS if anomaly == "raw_type" else RawItemType.POST,
+        published_at=observed - timedelta(minutes=1),
+        collected_at=observed + timedelta(minutes=1) if anomaly == "raw_late" else observed,
+        raw_json={"collected_at_provenance": "independent_observation"},
+    )
+    post = AuthorPost(
+        author_id=account.author_id,
+        author_account_id=account.id,
+        raw_item_id=raw.id,
+        published_at=observed - timedelta(minutes=1),
+        collected_at=observed,
+        effective_at=observed,
+        text_content="原始记录链不合格的帖子",
+        has_media=False,
+    )
+    session.add(post)
+    session.flush()
+    opinion = AuthorOpinion(
+        author_id=account.author_id,
+        author_post_id=post.id,
+        stance=OpinionStance.LONG,
+        instrument_id=None,
+        horizon=OpinionHorizon.H1,
+        confidence=Decimal("0.7"),
+        information_type=InformationType.TECHNICAL,
+        rationale="测试原始记录和时间链",
+        parser_version="test-v1",
+        effective_at=(observed - timedelta(minutes=1) if anomaly == "opinion_early" else observed),
+    )
+    session.add(opinion)
+    session.flush()
+    monkeypatch.setattr(
+        "src.alpha.evidence_gate.build_opinion_labels",
+        lambda _session: [
+            OpinionLabel(
+                opinion_id=str(opinion.id),
+                effective_at=opinion.effective_at.isoformat(),
+                stance="LONG",
+                horizon="H1",
+                horizon_source="explicit",
+                status="LABELED",
+                exit_at=(observed + timedelta(hours=1)).isoformat(),
+            )
+        ],
+    )
+
+    result = load_phase33_readiness(session)
+    assert result.authors[0].trusted_posts == 0
+    assert not result.author_ready
+
+
 @pytest.mark.parametrize(
     ("first_count", "second_count", "mismatched_identity", "as_of", "expected_ready"),
     [

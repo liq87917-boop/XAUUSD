@@ -140,11 +140,16 @@ def load_phase33_readiness(
             raw = raw_items.get(str(post.raw_item_id))
             if raw is None or not isinstance(raw.raw_json, dict):
                 continue
+            if raw.item_type != RawItemType.POST or raw.source_id != accounts[key[1]].source_id:
+                continue
             if raw.raw_json.get("collected_at_provenance") != "independent_observation":
                 continue
+            raw_at = ensure_utc_from_database(raw.effective_at, field_name="raw_item_at")
             opinion_at = ensure_utc_from_database(opinion.effective_at, field_name="opinion_at")
             post_at = ensure_utc_from_database(post.effective_at, field_name="post_at")
-            if max(opinion_at, post_at, label_exit.astimezone(UTC)) <= moment:
+            if raw_at > post_at or post_at > opinion_at:
+                continue
+            if max(opinion_at, label_exit.astimezone(UTC)) <= moment:
                 trusted_posts_by_account.setdefault(key, set()).add(str(post.id))
     author_rows: list[AuthorReadiness] = []
     for author in authors:

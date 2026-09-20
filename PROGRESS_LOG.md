@@ -1924,3 +1924,19 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   此门槛并重算：作者可信帖子仍为 0，新闻仍为 30 条/0 天，Author/News 双 BLOCKED；
 - 未改写 PostgreSQL、真实数据、技能/权重事实或 Phase 3.2 冻结 FAIL。原始标记也不等于
   法律授权已核验，用户提供的来源许可仍须人工签认。
+
+## 第六十三轮（2026-09-20）：作者可信样本的原始记录链与时间因果加固
+
+- 在第六十二轮「独立采集时间标记」之上，进一步收紧 Phase 3.3 作者库内资格门禁的
+  **原始记录链与时间因果**三道防线：①`raw.item_type` 必须为 `POST`（排除把 `NEWS`
+  原始记录误挂到作者帖子、抬高独立样本）；②`raw.source_id` 必须与账号 `source_id`
+  一致（防跨源错配、身份漂移）；③时间链 `raw_at <= post_at <= opinion_at`
+  （防原始记录晚于帖子、或观点先于帖子等时间倒挂，fail-closed）；
+- 新增参数化数据库集成反例 4 类（`raw_type` / `raw_source` / `raw_late` /
+  `opinion_early`），专项 **19 passed**、全量 **1437 passed / 1 skipped**
+  （较第六十二轮 +4）、`ruff check .` 与 `mypy config database src scripts`
+  （110 个源文件）通过；本工作区两个改动文件 `ruff format --check` 通过
+  （全仓 `format --check` 仍命中 TD-33 已登记的历史格式债，非本次引入）；
+- 未改写 PostgreSQL、真实数据、技能/权重事实或 Phase 3.2 冻结 FAIL；本轮只收紧
+  资格口径，当前作者可信独立帖子仍为 0、新闻仍为 30 条/0 天，Author/News 双 BLOCKED
+  不变，继续等待用户提供数据源授权与真实语料。
