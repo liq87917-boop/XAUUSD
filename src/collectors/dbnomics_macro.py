@@ -19,6 +19,7 @@ R3 修复（P0 红线，最高优先级）：
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -34,10 +35,14 @@ from database.models.enums import RawItemType, SourceType
 from src.collectors.base import PERSIST_DUPLICATE, PERSIST_INSERTED, BaseCollector
 from src.collectors.errors import CollectorError
 from src.collectors.registry import register_collector
+from src.collectors.transport import HttpRequest
 from src.collectors.types import CollectWindow, FetchPage, RawItemPayload
 from src.common.time import parse_iso8601
 
 _log = get_logger("collectors.dbnomics_macro")
+
+#: DBnomics REST API 基础地址（REST fallback 使用，与 dbnomics 库同一数据源）
+DBNOMICS_REST_BASE: Final[str] = "https://api.db.nomics.world"
 
 #: 默认序列：国际货币基金组织（IMF）消费者价格指数（provider, series）
 #: 仅用于宏观经济数据，不负责黄金价格（黄金由 market data provider 提供）
@@ -137,6 +142,31 @@ def _parse_period(value: object) -> datetime:
     return parsed.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+
+def _rest_to_frame(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """把 DBnomics REST 响应的 ``observations`` 转成与 ``fetch_series()`` 相同的行结构。
+
+    返回 list[dict]，每行含 ``period / value / series_code``（与 library 返回的
+    ``to_dict("records")`` 字段一致，业务层不感知 library / REST 差异）。
+    """
+    observations = payload.get("observations") if isinstance(payload, Mapping) else None
+    docs = observations.get("docs") if isinstance(observations, Mapping) else None
+    if not isinstance(docs, list):
+        raise CollectorError("DBnomics REST 响应缺少 observations.docs 列表")
+    rows: list[dict[str, Any]] = []
+    for doc in docs:
+        if not isinstance(doc, Mapping):
+            continue
+        rows.append(
+            {
+                "period": doc.get("period"),
+                "value": doc.get("value"),
+                "series_code": doc.get("series_code"),
+            }
+        )
+    return rows
+
+
 @register_collector
 class DbnomicsMacroCollector(BaseCollector):
     """DBnomics 宏观序列采集器（同步库，100% Mock 测试）。"""
@@ -168,8 +198,10 @@ class DbnomicsMacroCollector(BaseCollector):
         )
         #: 测试注入 Mock，生产 lazy import dbnomics
         self._fetch_series = fetch_series
+        #: 本轮实际使用的传输通道（library / rest），供统一结果对象与日志使用
+        self.transport_used: str = "library"
 
-    def _fetch_frame(self) -> Any:
+    def _fetch_library(self) -> Any:
         if self._fetch_series is not None:
             return self._fetch_series(self.provider, self.series)
         import dbnomics  # 延迟 import：模块导入不强制安装 dbnomics
@@ -178,12 +210,42 @@ class DbnomicsMacroCollector(BaseCollector):
             self.provider, self.series, dimensions=self.dimensions or None
         )
 
+    async def _fetch_rest(self) -> Any:
+        """REST fallback：直接 HTTP 查询，复用现有 transport + send_with_retry。
+
+        只对 timeout / connection / SSL / 429 / 5xx 等暂时性错误重试（send_with_retry
+        内置）；400 / 401 / 403 / 404 等配置/权限错误不重试，直接抛错。
+        """
+        url = f"{DBNOMICS_REST_BASE}/v22/series/{self.provider}/{self.series}"
+        params: dict[str, Any] = {"observations": "true", "limit": "1000", "offset": "0"}
+        if self.dimensions:
+            params["dimensions"] = json.dumps(self.dimensions)
+        response = await self._request(HttpRequest(url=url, params=params))
+        if not response.ok:
+            raise CollectorError(
+                f"DBnomics REST 返回 HTTP {response.status}：{url}",
+                details={"status": response.status, "url": url},
+            )
+        return _rest_to_frame(response.json_body)
+
+    async def _fetch_frame(self) -> Any:
+        """library 优先 → transient 失败 REST fallback → 仍失败抛错（由 collect 降级）。"""
+        self.transport_used = "library"
+        try:
+            return self._fetch_library()
+        except Exception as library_exc:  # noqa: BLE001 - library 失败统一走 fallback
+            _log.warning(
+                "%s library 调用失败，尝试 REST fallback：%s", self.collector_name, library_exc
+            )
+        self.transport_used = "rest"
+        return await self._fetch_rest()
+
     def _rows_from_frame(self, frame: Any) -> Sequence[Mapping[str, Any]]:
         records = frame.to_dict("records") if hasattr(frame, "to_dict") else list(frame)
         return records
 
     async def _do_fetch(self, cursor: dict[str, Any] | None, window: CollectWindow) -> FetchPage:
-        frame = self._fetch_frame()
+        frame = await self._fetch_frame()
         rows = self._rows_from_frame(frame)
         observations = parse_dbnomics_series(rows, series_id=self.series_id)
         payloads = tuple(self._to_payload(obs) for obs in observations)

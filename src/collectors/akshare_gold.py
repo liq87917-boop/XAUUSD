@@ -146,6 +146,10 @@ def parse_sge_bars(rows: Sequence[Mapping[str, Any]]) -> tuple[SgeBarPoint, ...]
             raise CollectorError(
                 f"SGE 行情第 {index} 行 OHLC 无法解析为数值", details={"row_index": index}
             )
+        assert open_price is not None
+        assert high_price is not None
+        assert low_price is not None
+        assert close_price is not None
         # OHLC 关系校验（market_bars CHECK：high >= max(open, close) 且 low <= min(open, close)）
         if high_price < max(open_price, close_price) or low_price > min(open_price, close_price):
             continue
