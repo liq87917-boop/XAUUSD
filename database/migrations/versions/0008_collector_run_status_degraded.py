@@ -21,30 +21,30 @@ from collections.abc import Sequence
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = "0008_collector_run_status_degraded"
+revision: str = "0008_collector_status_degraded"
 down_revision: str | None = "0007_phase3_feature_tables"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _STATUSES_WITH_DEGRADED = (
-    "'PENDING','RUNNING','SUCCESS','PARTIAL_FAILED','DEGRADED','FAILED'"
+    "'PENDING', 'RUNNING', 'SUCCESS', 'PARTIAL_FAILED', 'DEGRADED', 'FAILED'"
 )
-_STATUSES_WITHOUT_DEGRADED = "'PENDING','RUNNING','SUCCESS','PARTIAL_FAILED','FAILED'"
+_STATUSES_WITHOUT_DEGRADED = "'PENDING', 'RUNNING', 'SUCCESS', 'PARTIAL_FAILED', 'FAILED'"
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "ck_collector_runs_collector_run_status", "collector_runs", type_="check"
-    )
-    op.create_check_constraint(
-        "collector_run_status", "collector_runs", f"status IN ({_STATUSES_WITH_DEGRADED})"
-    )
+    # SQLite 不支持 ALTER DROP CONSTRAINT，用 batch_alter_table（copy-and-move 策略），
+    # PostgreSQL 上等价于普通 ALTER。
+    with op.batch_alter_table("collector_runs") as batch_op:
+        batch_op.drop_constraint("collector_run_status", type_="check")
+        batch_op.create_check_constraint(
+            "collector_run_status", f"status IN ({_STATUSES_WITH_DEGRADED})"
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint(
-        "ck_collector_runs_collector_run_status", "collector_runs", type_="check"
-    )
-    op.create_check_constraint(
-        "collector_run_status", "collector_runs", f"status IN ({_STATUSES_WITHOUT_DEGRADED})"
-    )
+    with op.batch_alter_table("collector_runs") as batch_op:
+        batch_op.drop_constraint("collector_run_status", type_="check")
+        batch_op.create_check_constraint(
+            "collector_run_status", f"status IN ({_STATUSES_WITHOUT_DEGRADED})"
+        )
