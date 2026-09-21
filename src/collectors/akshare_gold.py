@@ -34,6 +34,7 @@ from src.collectors.base import PERSIST_DUPLICATE, PERSIST_INSERTED, BaseCollect
 from src.collectors.errors import CollectorError
 from src.collectors.registry import register_collector
 from src.collectors.types import CollectWindow, FetchPage, RawItemPayload
+from src.collectors.validation import validate_market_bar
 from src.common.time import parse_iso8601
 
 _log = get_logger("collectors.akshare_gold")
@@ -150,10 +151,19 @@ def parse_sge_bars(rows: Sequence[Mapping[str, Any]]) -> tuple[SgeBarPoint, ...]
         assert high_price is not None
         assert low_price is not None
         assert close_price is not None
-        # OHLC 关系校验（market_bars CHECK：high >= max(open, close) 且 low <= min(open, close)）
-        if high_price < max(open_price, close_price) or low_price > min(open_price, close_price):
-            continue
         volume = to_decimal(row.get("volume"))
+        # 数据质量统一校验（数据库 CHECK 之前）：无效 bar 跳过，不让一条坏数据拖垮 batch
+        issues = validate_market_bar(
+            open_time=open_time,
+            close_time=close_time,
+            open_=open_price,
+            high=high_price,
+            low=low_price,
+            close=close_price,
+            volume=volume,
+        )
+        if issues:
+            continue
         points.append(
             SgeBarPoint(
                 open_time=open_time,
