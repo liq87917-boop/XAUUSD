@@ -86,46 +86,61 @@ def test_direction_skill_returns_none_without_directional_samples() -> None:
     assert (hits, trials, raw, shrunken) == (0, 0, None, None)
 
 
-def test_timing_skill_all_positive_returns_is_one() -> None:
+def test_timing_skill_all_hits_above_threshold_is_one() -> None:
     samples = [
-        _sample("long", direction_hit=True, log_return=0.001),
-        _sample("short", stance_direction=-1, direction_hit=True, log_return=-0.002),
+        _sample(f"long{i}", direction_hit=True, log_return=0.002)
+        for i in range(MIN_AUTHOR_SAMPLES // 2)
+    ] + [
+        _sample(f"short{i}", stance_direction=-1, direction_hit=True, log_return=-0.002)
+        for i in range(MIN_AUTHOR_SAMPLES // 2)
     ]
     raw_mean, skill = compute_timing_skill(samples)
-    # 两条均为"看对且赚"：有向收益 stance_direction × log_return 均 > 0
+    # 全部命中且全部超阈值（LONG 0.002、SHORT -0.002 → 有向收益均 0.002 > 0.001）
     assert skill == pytest.approx(1.0)
-    # 有向收益均值：(1 × 0.001 + (-1) × (-0.002)) / 2 = 0.0015
-    assert raw_mean == pytest.approx(0.0015)
+    assert raw_mean == pytest.approx(0.002)
 
 
-def test_timing_skill_all_negative_returns_is_zero() -> None:
+def test_timing_skill_all_hits_below_threshold_is_zero() -> None:
     samples = [
-        _sample("long", direction_hit=False, log_return=-0.001),
-        _sample("short", stance_direction=-1, direction_hit=False, log_return=0.002),
+        _sample(f"o{i}", direction_hit=True, log_return=0.0005)
+        for i in range(MIN_AUTHOR_SAMPLES)
     ]
     raw_mean, skill = compute_timing_skill(samples)
-    # 两条均为"看错且亏"：有向收益均 < 0
+    # 全部命中但全部在 (0, 0.001] 之间 → 无一条超过阈值
     assert skill == pytest.approx(0.0)
-    assert raw_mean == pytest.approx(-0.0015)
+    assert raw_mean == pytest.approx(0.0005)
 
 
-def test_timing_skill_mixed_returns_proportion() -> None:
-    samples = [
-        _sample("win1", direction_hit=True, log_return=0.001),
-        _sample("lose1", direction_hit=False, log_return=-0.001),
-        _sample("win2", direction_hit=True, log_return=0.003),
+def test_timing_skill_mixed_threshold_proportion() -> None:
+    above = [
+        _sample(f"a{i}", direction_hit=True, log_return=0.002)
+        for i in range(MIN_AUTHOR_SAMPLES // 2)
     ]
-    raw_mean, skill = compute_timing_skill(samples)
-    # 3 条中 2 条有向收益 > 0
-    assert skill == pytest.approx(2 / 3)
-    assert raw_mean == pytest.approx((0.001 - 0.001 + 0.003) / 3)
-
-
-def test_timing_skill_none_without_directional_samples() -> None:
-    samples = [
-        _sample("flat", stance_direction=0, direction_hit=True, log_return=0.001),
-        _sample("unknown", direction_hit=None, log_return=None),
+    below = [
+        _sample(f"b{i}", direction_hit=True, log_return=0.0005)
+        for i in range(MIN_AUTHOR_SAMPLES - MIN_AUTHOR_SAMPLES // 2)
     ]
+    raw_mean, skill = compute_timing_skill(above + below)
+    # 一半超阈值、一半未超
+    assert skill == pytest.approx(0.5)
+    assert raw_mean == pytest.approx(0.00125)
+
+
+def test_timing_skill_none_without_hits() -> None:
+    samples = [
+        _sample(f"o{i}", direction_hit=False, log_return=-0.001)
+        for i in range(MIN_AUTHOR_SAMPLES)
+    ]
+    # 无命中 → (None, None)，报告层标注 NOT_EVALUATED
+    assert compute_timing_skill(samples) == (None, None)
+
+
+def test_timing_skill_none_with_insufficient_hits() -> None:
+    samples = [
+        _sample(f"o{i}", direction_hit=True, log_return=0.002)
+        for i in range(MIN_AUTHOR_SAMPLES - 1)
+    ]
+    # 命中样本数 < min_samples → (None, None)
     assert compute_timing_skill(samples) == (None, None)
 
 

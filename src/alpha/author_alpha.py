@@ -9,9 +9,9 @@
 技能维度口径（第一版，供审阅）：
 - ``direction_skill``：方向命中率，Beta(1,1) 后验均值收缩（小样本向 0.5 收缩，
   与 ``docs/05 Phase 2``「样本量修正，不能简单用胜率作为总分」一致）；
-- ``timing_skill``：方向可评价样本（LONG/SHORT 已判定）中有向 log_return
-  （``stance_direction × log_return``）> 0 的比例（天然 [0,1]，无需 sigmoid）；
-  原始均值另存 ``timing_raw`` 供报告披露；
+- ``timing_skill``：方向命中样本中有向 log_return > ``TIMING_THRESHOLD`` 的比例
+  （衡量"赢的含金量"，与 ``direction_skill`` 互为独立维度）；原始均值另存
+  ``timing_raw`` 供报告披露；
 - ``calibration_score``：1 - ECE（5 桶等频），confidence 样本不足时返回 None；
 - ``entry_skill`` / ``exit_skill`` / ``independence_score``：第一版返回 None
   （需要 ``entry_low/entry_high/stop_loss/take_profit`` 与传播图数据，
@@ -36,6 +36,9 @@ DIRECTION_PRIOR_A: Final[float] = 1.0
 DIRECTION_PRIOR_B: Final[float] = 1.0
 CALIBRATION_BINS: Final[int] = 5
 MIN_CALIBRATION_SAMPLES: Final[int] = 10
+#: timing 阈值（有向 log_return 的绝对阈值）：10 bps ≈ 黄金典型点差 + 滑点量级。
+#: 命中样本中只有有向收益超过该阈值的才算"赢出含金量"，避免把微赚/噪声当成时机好。
+TIMING_THRESHOLD: Final[float] = 0.001
 #: stance -> 有向符号；FLAT/UNKNOWN 不参与方向技能（方向未给出，不猜）。
 STANCE_DIRECTION: Final[dict[str, int]] = {"LONG": 1, "SHORT": -1, "FLAT": 0, "UNKNOWN": 0}
 
@@ -137,26 +140,37 @@ def compute_direction_skill(
 
 def compute_timing_skill(
     samples: Sequence[SkillSample],
+    threshold: float = TIMING_THRESHOLD,
+    min_samples: int = MIN_AUTHOR_SAMPLES,
 ) -> tuple[float | None, float | None]:
     """返回 ``(raw_mean, skill)``。
 
-    ``raw_mean`` 为方向可评价样本（LONG/SHORT 已判定）的平均有向 log_return
-    （``stance_direction × log_return``，> 0 表示看对方向且赚钱）；
-    ``skill`` 为其中有向收益 > 0 的比例（天然 [0,1]，无需 sigmoid）。
-    无可评价样本时返回 ``(None, None)``。
+    - ``raw_mean``：方向命中样本（``direction_hit is True``）的平均有向 log_return
+      （``stance_direction × log_return``，> 0 表示看对方向且赚钱）；
+    - ``skill``：命中样本中有向收益 > ``threshold`` 的比例（[0,1]，衡量"赢的含金量"）。
+
+    边界（均返回 ``(None, None)``，报告层标注 NOT_EVALUATED）：
+    - 无命中样本（``#{有向收益 > 0} == 0``）→ 分母为 0，无法评估；
+    - 命中样本数 < ``min_samples`` → 样本不足，timing 不可靠。
     """
+    if threshold <= 0:
+        raise ValueError("threshold 必须 > 0")
+    if min_samples <= 0:
+        raise ValueError("min_samples 必须 > 0")
     directed = [
         sample.stance_direction * sample.log_return
         for sample in samples
-        if sample.stance_direction != 0
-        and sample.direction_hit is not None
+        if sample.direction_hit is True
         and sample.log_return is not None
+        and sample.stance_direction != 0
     ]
     if not directed:
         return None, None
+    if len(directed) < min_samples:
+        return None, None
     raw_mean = sum(directed) / len(directed)
-    skill = sum(1 for value in directed if value > 0) / len(directed)
-    return raw_mean, skill
+    over_threshold = sum(1 for value in directed if value > threshold)
+    return raw_mean, over_threshold / len(directed)
 
 
 def compute_calibration_score(
@@ -212,7 +226,7 @@ def compute_author_skill(
     hits, trials, raw, shrunken = compute_direction_skill(
         visible, direction_prior_a, direction_prior_b
     )
-    timing_raw, timing_skill = compute_timing_skill(visible)
+    timing_raw, timing_skill = compute_timing_skill(visible, min_samples=min_samples)
     calibration = compute_calibration_score(visible)
     return AuthorSkillResult(
         author_id=author_id,
