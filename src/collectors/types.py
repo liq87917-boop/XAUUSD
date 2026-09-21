@@ -162,6 +162,12 @@ class CollectOutcome:
     cursor: dict[str, Any] | None = None
     resumed_from_cursor: bool = False
     error_message: str | None = None
+    #: 跳过的记录数（数据质量校验拒绝，未入库；区别于 failed——failed 是入库异常）
+    skipped_count: int = 0
+    #: 实际使用的传输通道（library / rest / cache），供统一结果对象与监控使用
+    transport: str | None = None
+    #: 错误类型（异常类名，如 TransportError / CollectorError；成功为 None）
+    error_type: str | None = None
 
     def __post_init__(self) -> None:
         if self.finished_at < self.started_at:

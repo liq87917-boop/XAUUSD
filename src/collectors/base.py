@@ -117,6 +117,10 @@ class BaseCollector(ABC):
         self._sleep = sleep
         self._attempts: list[FetchAttempt] = []
         self._warnings: tuple[str, ...] = ()
+        #: 本轮实际使用的传输通道（library / rest / cache），供统一结果对象与监控使用
+        self.transport_used: str | None = None
+        #: 本轮跳过的记录数（数据质量校验拒绝，未入库）
+        self.skipped_count: int = 0
 
         # 每轮最少记录数：来自 sources.config_json['min_records_per_run']（团队批复）
         # 类属性 min_records_per_run 作为缺省值；0 表示"不检查"。
@@ -236,6 +240,8 @@ class BaseCollector(ABC):
         """每轮采集开始前清空运行期状态（子类可覆盖以清理自身缓存与告警）。"""
         self._attempts.clear()
         self._warnings = ()
+        self.transport_used = None
+        self.skipped_count = 0
 
     def _evaluate_run_warnings(
         self, window: CollectWindow, outcome: CollectOutcome
@@ -312,6 +318,7 @@ class BaseCollector(ABC):
 
         fetched = inserted = duplicate = failed = pages = 0
         error_message: str | None = None
+        error_type: str | None = None
         finished_naturally = False
 
         while pages < self.max_pages_per_run:
@@ -319,10 +326,12 @@ class BaseCollector(ABC):
                 page = await self._do_fetch(state, window)
             except CollectorError as exc:
                 error_message = str(exc)
+                error_type = type(exc).__name__
                 break
             except Exception as exc:
                 # 明确记录后按失败处理，绝不静默吞掉（06_Cline开发规则 第 24 条）
                 error_message = f"采集器内部错误：{type(exc).__name__}: {exc}"
+                error_type = type(exc).__name__
                 break
 
             pages += 1
@@ -372,6 +381,9 @@ class BaseCollector(ABC):
             cursor=state,
             resumed_from_cursor=resume_point is not None,
             error_message=error_message,
+            skipped_count=self.skipped_count,
+            transport=self.transport_used,
+            error_type=error_type,
         )
 
         # 数据质量告警：低于预期条数（例如行情缺了 1 分钟）必须留下 WARNING 日志
@@ -385,8 +397,11 @@ class BaseCollector(ABC):
     def _resolve_status(
         self, *, error_message: str | None, processed: int, pages: int
     ) -> CollectorRunStatus:
-        """状态判定：无错误 → SUCCESS；部分推进后失败 → PARTIAL_FAILED；未推进 → FAILED。"""
+        """状态判定：SUCCESS / DEGRADED / PARTIAL_FAILED / FAILED。"""
         if error_message is None:
+            # fallback（如 REST）成功 → 降级而非完全成功
+            if self.transport_used == "rest":
+                return CollectorRunStatus.DEGRADED
             return CollectorRunStatus.SUCCESS
         if pages > 0 or processed > 0:
             return CollectorRunStatus.PARTIAL_FAILED

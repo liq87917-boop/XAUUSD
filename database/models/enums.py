@@ -75,6 +75,8 @@ class CollectorRunStatus(StrEnum):
     RUNNING = "RUNNING"
     SUCCESS = "SUCCESS"
     PARTIAL_FAILED = "PARTIAL_FAILED"
+    # 降级：provider 故障但已通过 fallback / 部分数据可用（provider FAILED != pipeline FAILED）
+    DEGRADED = "DEGRADED"
     FAILED = "FAILED"
 
 
