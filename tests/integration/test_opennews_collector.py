@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from database.models import NewsEvent, Source
 from database.models.enums import SourceType
 from src.collectors.base import PERSIST_INSERTED
+from src.collectors.errors import CollectorError
 from src.collectors.opennews import OPENNEWS_TOKEN_ENV, OpenNewsCollector
 from src.collectors.transport import HttpResponse
 from src.collectors.types import CollectWindow
@@ -27,11 +28,12 @@ def _response() -> HttpResponse:
         json_body={
             "data": [
                 {
-                    "title": "Gold rallies on Fed outlook",
-                    "content": "Gold prices rose...",
-                    "published_at": "2026-09-15T10:00:00Z",
-                    "source_name": "test-feed",
-                    "url": "https://example.invalid/gold",
+                    "text": "Gold rallies on Fed outlook",
+                    "description": "Gold prices rose...",
+                    "ts": "2026-09-15T10:00:00Z",
+                    "source": "test-feed",
+                    "link": "https://example.invalid/gold",
+                    "engineType": "news",
                 }
             ]
         },
@@ -59,7 +61,10 @@ def _window() -> CollectWindow:
     )
 
 
-def test_do_fetch_and_persist_writes_news_event(session: Session, opennews_source) -> None:
+def test_do_fetch_and_persist_writes_news_event(
+    session: Session, opennews_source, monkeypatch
+) -> None:
+    monkeypatch.setenv(OPENNEWS_TOKEN_ENV, "secret-token")
     collector = OpenNewsCollector(
         opennews_source, transport=_Transport(_response()), clock=lambda: FIXED_CLOCK
     )
@@ -77,13 +82,13 @@ def test_do_fetch_and_persist_writes_news_event(session: Session, opennews_sourc
     assert event.effective_at == FIXED_CLOCK.replace(tzinfo=None)
 
 
-def test_build_request_degrades_without_token(
+def test_build_request_raises_without_token(
     session: Session, opennews_source, monkeypatch
 ) -> None:
     monkeypatch.delenv(OPENNEWS_TOKEN_ENV, raising=False)
     collector = OpenNewsCollector(opennews_source, transport=_Transport(_response()))
-    request = collector._build_request("gold")
-    assert "Authorization" not in request.headers
+    with pytest.raises(CollectorError, match="6551.io/mcp"):
+        collector._build_request("gold")
 
 
 def test_build_request_adds_bearer_token(session: Session, opennews_source, monkeypatch) -> None:

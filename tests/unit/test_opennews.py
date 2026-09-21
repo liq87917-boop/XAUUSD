@@ -12,11 +12,12 @@ from src.collectors.opennews import _parse_published_at, parse_news_search
 
 def _entry(**overrides) -> dict:
     base = {
-        "title": "Gold rallies on Fed outlook",
-        "content": "Gold prices rose...",
-        "published_at": "2026-09-15T10:00:00Z",
-        "source_name": "test-feed",
-        "url": "https://example.invalid/gold",
+        "text": "Gold rallies on Fed outlook",
+        "description": "Gold prices rose...",
+        "ts": "2026-09-15T10:00:00Z",
+        "source": "test-feed",
+        "link": "https://example.invalid/gold",
+        "engineType": "news",
     }
     base.update(overrides)
     return base
@@ -41,7 +42,22 @@ def test_parse_news_search_missing_data_raises() -> None:
 
 
 def test_parse_news_search_skips_empty_title() -> None:
-    assert parse_news_search({"data": [_entry(title="")]}) == ()
+    assert parse_news_search({"data": [_entry(text="")]}) == ()
+
+
+def test_parse_news_search_filters_non_news_engine_types() -> None:
+    """market / onchain 等类型不进入 news_events。"""
+    items = parse_news_search(
+        {
+            "data": [
+                _entry(),
+                _entry(engineType="market", text="BTC funding rate"),
+                _entry(engineType="onchain"),
+            ]
+        }
+    )
+    assert len(items) == 1
+    assert items[0].title == "Gold rallies on Fed outlook"
 
 
 def test_parse_published_at_variants() -> None:

@@ -1,10 +1,11 @@
 """DBnomics 宏观序列采集器：``dbnomics_macro``。
 
-数据源：dbnomics ``fetch_series('WB', 'GOLD')``（世界银行黄金价格序列，或等效 IMF/FRED）。
+数据源：dbnomics ``fetch_series('IMF', 'CPI')``（国际货币基金组织消费者价格指数；
+**仅用于宏观经济数据**——CPI / 利率 / 就业 / 货币供应量 / 央行数据等，**不再负责黄金价格**）。
 依赖：``dbnomics``（已批准新增，见 pyproject.toml）；代码**延迟 import**，测试 100% Mock。
 
 落库（严格按 04 §15 ``macro_events``）：
-- ``event_code = series_id``（如 ``WB/GOLD``）；``event_at`` = 观测期（UTC 00:00）；
+- ``event_code = series_id``（如 ``IMF/CPI``，多序列时追加 series_code）；
 - ``actual_value`` = 观测值；``source_id`` = 当前数据源；
 - 逐条写 ``raw_items(item_type=MACRO)`` 原始切片。
 
@@ -38,9 +39,10 @@ from src.common.time import parse_iso8601
 
 _log = get_logger("collectors.dbnomics_macro")
 
-#: 默认序列：世界银行黄金价格（provider, series）
-DBNOMICS_PROVIDER: Final[str] = "WB"
-DBNOMICS_SERIES: Final[str] = "GOLD"
+#: 默认序列：国际货币基金组织（IMF）消费者价格指数（provider, series）
+#: 仅用于宏观经济数据，不负责黄金价格（黄金由 market data provider 提供）
+DBNOMICS_PROVIDER: Final[str] = "IMF"
+DBNOMICS_SERIES: Final[str] = "CPI"
 #: series_id = provider/series（event_code 落库值）
 DBNOMICS_SERIES_ID: Final[str] = f"{DBNOMICS_PROVIDER}/{DBNOMICS_SERIES}"
 #: 无法确定 released_at 的标注（R3 修复：禁止用于 Macro Alpha 训练）
@@ -101,9 +103,12 @@ def parse_dbnomics_series(
             )
         # R3 修复：released_at 无法确定，保守取观测期（观测期 <= 真实发布时间）。
         released_at = event_at
+        # 多序列 dataset（如 IMF/CPI 含多国多指标）时，用 series_code 区分 event_code
+        code = row.get("series_code")
+        event_code = f"{series_id}:{code}" if code else series_id
         observations.append(
             DbnomicsObservation(
-                series_id=series_id,
+                series_id=event_code,
                 event_at=event_at,
                 released_at=released_at,
                 value=value,
@@ -154,6 +159,13 @@ class DbnomicsMacroCollector(BaseCollector):
         self.series_id = f"{self.provider}/{self.series}"
         self.country = str(config.get("country") or "US")
         self.unit = config.get("unit")
+        #: 维度过滤（如 {"REF_AREA": "US"}），减少多序列 dataset 的拉取量
+        configured_dimensions = config.get("dimensions") or {}
+        self.dimensions: dict[str, Any] = (
+            {str(key): value for key, value in configured_dimensions.items()}
+            if isinstance(configured_dimensions, Mapping)
+            else {}
+        )
         #: 测试注入 Mock，生产 lazy import dbnomics
         self._fetch_series = fetch_series
 
@@ -162,7 +174,9 @@ class DbnomicsMacroCollector(BaseCollector):
             return self._fetch_series(self.provider, self.series)
         import dbnomics  # 延迟 import：模块导入不强制安装 dbnomics
 
-        return dbnomics.fetch_series(self.provider, self.series)
+        return dbnomics.fetch_series(
+            self.provider, self.series, dimensions=self.dimensions or None
+        )
 
     def _rows_from_frame(self, frame: Any) -> Sequence[Mapping[str, Any]]:
         records = frame.to_dict("records") if hasattr(frame, "to_dict") else list(frame)

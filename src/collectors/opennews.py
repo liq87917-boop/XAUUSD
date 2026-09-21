@@ -1,8 +1,9 @@
 """OpenNews 新闻搜索采集器：``opennews``。
 
 数据源：``https://ai.6551.io``，主搜索端点 ``POST /open/news_search``。
-认证：免费端点无需 Token；完整 API 需要 ``OPENNEWS_TOKEN``（从 ``.env`` 读取，
+认证：**所有端点都需要** ``Authorization: Bearer $OPENNEWS_TOKEN``（从 ``.env`` 读取，
 变量名 ``OPENNEWS_TOKEN``；``.env`` 已加入 ``.gitignore``，严禁硬编码）。
+Token 缺失时直接报错并提示到 https://6551.io/mcp 获取（无免费降级）。
 关键词：gold / XAUUSD / Federal Reserve（来自 ``config_json["keywords"]``，可配）。
 
 落库（对齐 04 §14 ``news_events`` + 01 §4.3）：
@@ -86,8 +87,9 @@ def _parse_published_at(value: object) -> datetime | None:
 def parse_news_search(payload: Mapping[str, Any] | None) -> tuple[OpenNewsItem, ...]:
     """把 ``POST /open/news_search`` 的响应 JSON 解析为新闻条目（纯函数）。
 
-    约定响应结构：``{"data": [{"title", "content", "published_at", "source_name",
-    "url"}, ...]}``。缺少 ``data`` 字段抛 ``CollectorError``。
+    约定响应结构：``{"data": [{"text", "ts", "source", "link", "description",
+    "engineType", "newsType", ...}, ...]}``。缺少 ``data`` 字段抛 ``CollectorError``。
+    只处理 ``engineType == "news"`` 的条目（market / onchain 等类型不进入 news_events）。
     """
     if not isinstance(payload, Mapping):
         raise CollectorError("OpenNews 响应不是 JSON 对象")
@@ -98,16 +100,19 @@ def parse_news_search(payload: Mapping[str, Any] | None) -> tuple[OpenNewsItem, 
     for entry in data:
         if not isinstance(entry, Mapping):
             continue
-        title = (entry.get("title") or "").strip()
+        # 只处理新闻类；market / onchain 等其他类型不进 news_events
+        if entry.get("engineType") != "news":
+            continue
+        title = (entry.get("text") or "").strip()
         if not title:
             continue
         items.append(
             OpenNewsItem(
                 title=title,
-                published_at=_parse_published_at(entry.get("published_at")),
-                content=(entry.get("content") or "").strip() or None,
-                source_name=(entry.get("source_name") or "").strip() or None,
-                url=(entry.get("url") or "").strip() or None,
+                published_at=_parse_published_at(entry.get("ts")),
+                content=(entry.get("description") or "").strip() or None,
+                source_name=(entry.get("source") or "").strip() or None,
+                url=(entry.get("link") or "").strip() or None,
             )
         )
     return tuple(items)
@@ -131,15 +136,18 @@ class OpenNewsCollector(BaseCollector):
         )
         self.base_url = (source.base_url or BASE_URL).rstrip("/")
 
-    def _token(self) -> str | None:
+    def _require_token(self) -> str:
         token = os.environ.get(OPENNEWS_TOKEN_ENV, "").strip()
-        return token or None
+        if not token:
+            raise CollectorError(
+                f"缺少 {OPENNEWS_TOKEN_ENV}：所有 OpenNews 端点都需要 Authorization: Bearer 头，"
+                f"请到 https://6551.io/mcp 获取 Token 并写入 .env"
+            )
+        return token
 
     def _build_request(self, keyword: str) -> HttpRequest:
-        headers: dict[str, str] = {}
-        token = self._token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        token = self._require_token()
+        headers = {"Authorization": f"Bearer {token}"}
         return HttpRequest(
             url=f"{self.base_url}{SEARCH_PATH}",
             method="POST",
