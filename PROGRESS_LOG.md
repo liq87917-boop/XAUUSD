@@ -1940,3 +1940,42 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 未改写 PostgreSQL、真实数据、技能/权重事实或 Phase 3.2 冻结 FAIL；本轮只收紧
   资格口径，当前作者可信独立帖子仍为 0、新闻仍为 30 条/0 天，Author/News 双 BLOCKED
   不变，继续等待用户提供数据源授权与真实语料。
+
+
+## 第六十四轮（2026-09-21）：Author Alpha 管线验证冻结 + News Alpha 离线框架
+
+### 1. Author Alpha 管线验证完成（冻结）
+
+- 修正 `compute_timing_skill`：从 sigmoid 改为「方向命中样本中有向收益 > threshold 的比例」
+  （`TIMING_THRESHOLD=0.001`，10 bps ≈ 黄金典型点差+滑点量级），与 `direction_skill` 解耦；
+  无命中或命中数 < 30 → `timing_skill=None`（报告标注 NOT_EVALUATED）；
+- 新增组装层 `src/alpha/author_skill_assembly.py`（OpinionLabel → SkillSample →
+  compute_author_skill → author_skill_snapshots，幂等写入）+ 组装层单测/集成测试；
+- 新增 `scripts/import_mock_posts.py`（250 条 Mock 合成博文入库：raw_json 写
+  `data_source=SYNTHETIC` + `is_mock=true` + `mock_batch`，作者 `canonical_name=mock:*` +
+  `display_name=[MOCK]`，与真实语料严格区分）与 `scripts/build_author_skill.py`（组装层
+  CLI，报告分 Mock/真实两层，分列 direction_skill_raw / direction_skill /
+  timing_skill_raw / timing_skill / calibration_score）；
+- 跑通：250 Mock 帖 → 275 观点 → 256 LABELED（全来自 Mock）+ 31 UNTRUSTED（真实 19 帖
+  缺 collected_at，不篡改）；4 位 Mock 作者 skill 快照幂等写入（重跑新增 0），真实层
+  0 可用标签；
+- 报告：`docs/experiments/Phase3_3_Author_Alpha_管线验证报告.md`（顶部一句
+  「本次仅验证管线正确性，不作任何真实作者技能结论」）。
+
+### 2. News Alpha 离线框架（纯函数，未跑真实数据）
+
+- 新增 `src/alpha/news_alpha.py`：`NewsObservation` → `add_forward_return_labels`
+  （时间因果：入场 bar 的 open_time 严格晚于 effective_at）→ `time_split`
+  （60/20/20 + embargo）→ `evaluate_news_gate`（train LR → validation Platt →
+  untouched test，4 基准对比：model_lr_platt / random / always_long / sentiment）；
+- 特征第一版：`sentiment` + `importance`（来自 news_events 结构化字段）；标签 horizon
+  24 根 1h bar（1d）；
+- HF 150 条标题情感只能作弱标签/特征，不得回灌为观点金标准（Phase 2 裁决）；
+- 单测 9 项；未跑真实数据，待用户确认后按 Mock/弱监督/真实三层验证。
+
+### 3. 状态
+
+- 全量 **1479 passed / 1 skipped**（较第六十三轮 +42）；`ruff` 通过；
+- TD-43 / TD-45 仍为 P0（待合法授权数据源）；未改 docs/10、docs/11 口径；未新增依赖
+  （沿用 sklearn）；未写 Alpha 事实表、未进入 Phase 3.4 Meta Ensemble。
+
