@@ -124,7 +124,9 @@ def parse_sge_bars(rows: Sequence[Mapping[str, Any]]) -> tuple[SgeBarPoint, ...]
     """把 ``ak.spot_hist_sge`` 的返回（记录列表）解析为 SGE 日线 K 线（纯函数）。
 
     ``rows`` 每行需含 ``date / open / high / low / close``（volume 可选）。
-    任何一行缺 OHLC 或数值非法 → 抛 ``CollectorError``（不静默写脏数据）。
+    任何一行缺 OHLC 或数值非法 → 抛 ``CollectorError``（不静默写脏数据）；
+    违反 OHLC 关系（``high < max(open, close)`` 或 ``low > min(open, close)``）的
+    异常 bar 直接跳过（SGE 结算价可能低于当日最低成交价，见冒烟实测）。
     """
     points: list[SgeBarPoint] = []
     for index, row in enumerate(rows):
@@ -144,6 +146,9 @@ def parse_sge_bars(rows: Sequence[Mapping[str, Any]]) -> tuple[SgeBarPoint, ...]
             raise CollectorError(
                 f"SGE 行情第 {index} 行 OHLC 无法解析为数值", details={"row_index": index}
             )
+        # OHLC 关系校验（market_bars CHECK：high >= max(open, close) 且 low <= min(open, close)）
+        if high_price < max(open_price, close_price) or low_price > min(open_price, close_price):
+            continue
         volume = to_decimal(row.get("volume"))
         points.append(
             SgeBarPoint(

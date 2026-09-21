@@ -67,3 +67,14 @@ def test_parse_sge_bars_accepts_date_object() -> None:
     rows = [{"date": date(2026, 1, 5), "open": 500, "high": 510, "low": 490, "close": 505}]
     points = parse_sge_bars(rows)
     assert points[0].open_time == datetime(2026, 1, 5, tzinfo=UTC)
+
+
+def test_parse_sge_bars_skips_invalid_ohlc() -> None:
+    """SGE 结算价可能低于最低成交价（close < low），违反 OHLC 约束的 bar 跳过。"""
+    rows = [
+        _row("2026-01-05", open=276.2, high=276.69, low=272.95, close=272.83),  # close < low
+        _row("2026-01-06"),  # 合法
+    ]
+    points = parse_sge_bars(rows)
+    assert len(points) == 1
+    assert points[0].open_time == datetime(2026, 1, 6, tzinfo=UTC)
