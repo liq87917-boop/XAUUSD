@@ -58,3 +58,12 @@ def test_to_decimal_returns_none_on_garbage() -> None:
     assert to_decimal("abc") is None
     assert to_decimal(None) is None
     assert to_decimal(505.5) == Decimal("505.50000000")
+
+
+def test_parse_sge_bars_accepts_date_object() -> None:
+    """akshare 真实返回的 date 列是 datetime.date（纯日期），不是 str。"""
+    from datetime import date
+
+    rows = [{"date": date(2026, 1, 5), "open": 500, "high": 510, "low": 490, "close": 505}]
+    points = parse_sge_bars(rows)
+    assert points[0].open_time == datetime(2026, 1, 5, tzinfo=UTC)

@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, ClassVar, Final
 
@@ -98,6 +98,9 @@ def _parse_open_time(value: object, *, field: str = "date") -> datetime:
     """把 provider 返回的日期解析为 UTC 00:00（支持 str / date / datetime / Timestamp）。"""
     if isinstance(value, datetime):
         parsed = value
+    elif isinstance(value, date):
+        # akshare spot_hist_sge 返回的 date 列是 datetime.date（纯日期）
+        parsed = datetime(value.year, value.month, value.day, tzinfo=UTC)
     elif isinstance(value, str):
         text = value.strip()
         try:
