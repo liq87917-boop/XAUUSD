@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:  # pragma: no cover
     sys.path.insert(0, str(REPO_ROOT))
 
-from database.models import Author, AuthorOpinion  # noqa: E402
+from database.models import Author, AuthorOpinion, AuthorSkillSnapshot  # noqa: E402
 from database.session import session_scope  # noqa: E402
 from scripts._console import configure_stdout, safe_print  # noqa: E402
 from src.alpha.author_alpha import TIMING_THRESHOLD, AuthorSkillResult  # noqa: E402
@@ -74,6 +74,7 @@ def render_report(
     labels: Sequence[OpinionLabel],
     as_of: datetime,
     written: int,
+    total_snapshots: int,
     dry_run: bool,
 ) -> str:
     """渲染 Markdown 报告：Mock 层（五列）+ 真实层（0 可用标签）。"""
@@ -105,7 +106,7 @@ def render_report(
         "",
         f"- 评估时点 as_of：{as_of.isoformat()}",
         f"- timing 阈值：{TIMING_THRESHOLD}（10 bps ≈ 黄金典型点差+滑点量级）",
-        f"- 写入 author_skill_snapshots：{written} 行（{write_note}）",
+        f"- author_skill_snapshots：新增 {written} / 累计 {total_snapshots}（{write_note}）",
         "",
         "## 1. Mock 层（SYNTHETIC，仅验证计算逻辑）",
         "",
@@ -184,6 +185,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             written = 0
             if not dry_run:
                 written = persist_skill_snapshots(session, results)
+            total_snapshots = int(
+                session.scalar(sa.select(sa.func.count()).select_from(AuthorSkillSnapshot)) or 0
+            )
         report = render_report(
             results,
             authors=authors,
@@ -191,6 +195,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             labels=labels,
             as_of=as_of,
             written=written,
+            total_snapshots=total_snapshots,
             dry_run=dry_run,
         )
         safe_print(report)

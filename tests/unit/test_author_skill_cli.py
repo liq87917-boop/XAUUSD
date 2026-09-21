@@ -95,6 +95,7 @@ def test_render_report_layers_mock_and_real() -> None:
         labels=labels,
         as_of=datetime(2026, 9, 5, tzinfo=UTC),
         written=1,
+        total_snapshots=4,
         dry_run=False,
     )
     # 顶部一句话结论
