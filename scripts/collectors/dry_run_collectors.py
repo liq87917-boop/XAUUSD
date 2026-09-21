@@ -44,7 +44,11 @@ def _plan() -> list[tuple[str, Source, object]]:
     )
     return [
         ("akshare_gold", akshare, AkshareGoldCollector(akshare)),
-        ("dbnomics_macro", dbnomics, DbnomicsMacroCollector(dbnomics)),
+        (
+            "dbnomics_macro",
+            dbnomics,
+            DbnomicsMacroCollector(dbnomics, transport=AiohttpTransport()),
+        ),
         ("opennews", opennews, OpenNewsCollector(opennews, transport=AiohttpTransport())),
     ]
 
