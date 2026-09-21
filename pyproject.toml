@@ -37,6 +37,14 @@ dependencies = [
     #   仅做 feed 解析，不抓取 HTML 正文；每个源必须 robots 允许后才启用。
     # ------------------------------------------------------------------
     "feedparser>=6.0.11",
+    # ------------------------------------------------------------------
+    # Phase 3.3 数据源接入（团队批准，2026-09-21）：
+    #   akshare：上海黄金交易所（SGE）历史日线行情（src/collectors/akshare_gold.py）；
+    #   dbnomics：世界银行/IMF 等宏观序列聚合（src/collectors/dbnomics_macro.py）。
+    #   均为公开数据源；代码延迟 import，测试 100% Mock 不触发真实调用。
+    # ------------------------------------------------------------------
+    "akshare>=1.14.0",
+    "dbnomics>=1.2.0",
 ]
 
 [project.optional-dependencies]

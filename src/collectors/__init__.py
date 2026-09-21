@@ -11,7 +11,9 @@
 ⚠️ 生产 / 研究环境必须使用 PostgreSQL；SQLite 仅用于本地开发与自动化测试。
 """
 
+from src.collectors.akshare_gold import AkshareGoldCollector
 from src.collectors.base import BaseCollector
+from src.collectors.dbnomics_macro import DbnomicsMacroCollector
 from src.collectors.errors import (
     CollectorError,
     CollectorFetchError,
@@ -28,6 +30,7 @@ from src.collectors.macro import MacroCollector
 # 待实现（禁止伪完成）：econ_calendar_collector；weibo_collector 属 Phase 2，且严禁未授权抓取。
 from src.collectors.market import MarketCollector
 from src.collectors.news import NewsCollector
+from src.collectors.opennews import OpenNewsCollector
 from src.collectors.registry import (
     available_collectors,
     build_collector,
@@ -69,6 +72,7 @@ from src.collectors.types import (
 
 __all__ = [
     "AiohttpTransport",
+    "AkshareGoldCollector",
     "BaseCollector",
     "CollectOutcome",
     "CollectWindow",
@@ -77,6 +81,7 @@ __all__ = [
     "CollectorHealth",
     "CollectorNotRegisteredError",
     "CollectorRunResult",
+    "DbnomicsMacroCollector",
     "FetchAttempt",
     "FetchPage",
     "HttpRequest",
@@ -85,6 +90,7 @@ __all__ = [
     "MarketCollector",
     "MediaPayload",
     "NewsCollector",
+    "OpenNewsCollector",
     "RawItemPayload",
     "RetryPolicy",
     "RssCollector",
