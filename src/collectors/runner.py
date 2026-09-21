@@ -28,7 +28,13 @@ from src.collectors.base import BaseCollector
 from src.collectors.types import CollectOutcome, CollectWindow
 from src.common.time import utc_now
 
-__all__ = ["CollectorRunResult", "load_resume_cursor", "run_collector", "run_collectors"]
+__all__ = [
+    "CollectorRunResult",
+    "load_resume_cursor",
+    "render_run_summary",
+    "run_collector",
+    "run_collectors",
+]
 
 _log = get_logger("collectors.runner")
 
@@ -241,4 +247,33 @@ async def run_collectors(
     for collector in collectors:
         results.append(await run_collector(session, collector, window=window, resume=resume))
     return tuple(results)
+
+
+def render_run_summary(results: Sequence[CollectorRunResult]) -> str:
+    """把一轮多采集器结果渲染成树状健康摘要（供日志 / 未来监控通知使用）。"""
+    lines = ["Collector Run"]
+    totals = {"fetched": 0, "inserted": 0, "duplicate": 0, "skipped": 0, "failed": 0}
+    for result in results:
+        lines.append(f"├── {result.collector_name:<20} {result.status.value}")
+        outcome = result.outcome
+        if outcome is None:
+            lines.append(f"│   └── {result.error_message or 'no outcome'}")
+            continue
+        if outcome.transport == "rest":
+            lines.append("│   └── REST fallback used")
+        totals["fetched"] += outcome.fetched_count
+        totals["inserted"] += outcome.inserted_count
+        totals["duplicate"] += outcome.duplicate_count
+        totals["skipped"] += outcome.skipped_count
+        totals["failed"] += outcome.failed_count
+    lines += [
+        "",
+        "Total:",
+        f"fetched    {totals['fetched']}",
+        f"inserted   {totals['inserted']}",
+        f"duplicate  {totals['duplicate']}",
+        f"skipped    {totals['skipped']}",
+        f"failed     {totals['failed']}",
+    ]
+    return "\n".join(lines)
 
