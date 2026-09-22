@@ -4,13 +4,13 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-008",
-  "last_completed_task": "GOLD-007",
-  "last_reviewed_task": "GOLD-007",
+  "current_task": "GOLD-009",
+  "last_completed_task": "GOLD-008",
+  "last_reviewed_task": "GOLD-008",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-007 已完成并通过工程验收，Evidence Operator 已形成默认 dry-run 的 template→preflight→quarantine→intake→recheck 单入口，并增加 gateway-only 作者归属链；但真实 Author/News 授权证据仍不足，数据资格不能由工程工具自动解除。必须由业务/operator 提供并人工核验真实授权、独立 published_at/collected_at/availability/OOS 证据；模板、示例和 Mock 不计入资格。",
+      "detail": "GOLD-008 已完成并通过工程验收，Evidence Handoff 已可确定性、只读地量化 Author/News/coverage/source-share 缺口并生成脱敏人工 checklist；真实库仍不具备足量合法授权且具有可信独立时间/availability/OOS 证据的数据，资格不能由工程工具自动解除。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
       "retryable": false
     }
   ],
@@ -28,7 +28,7 @@
       "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
     }
   ],
-  "next_action": "Run GOLD-008 only as blocker-facing tooling: produce a deterministic, redacted human handoff/readiness report from the existing Evidence Operator/qualification logic. Do not create normal Phase 3.4/model tasks while PHASE3_3_DATA is blocked. Even if future evidence reaches numeric thresholds, Phase transition remains an L3 human gate.",
+  "next_action": "Run GOLD-009 only as blocker-facing tooling: add deterministic, redacted and idempotent readiness state-change events so operators are notified by local artifacts only when PHASE3_3_DATA readiness meaningfully changes. Do not add external push services and do not create normal Phase 3.4/model tasks while blocked. Even if future evidence reaches numeric thresholds, Phase transition remains an L3 human gate.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
