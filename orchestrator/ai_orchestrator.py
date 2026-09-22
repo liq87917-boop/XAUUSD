@@ -119,8 +119,8 @@ def run_cline(task_file):
         cline_exe,
         prompt,
         "--json",
-        "--auto-approve",
-        "true"
+        "--yolo",
+        prompt
     ]
 
     print("Starting Cline...")
