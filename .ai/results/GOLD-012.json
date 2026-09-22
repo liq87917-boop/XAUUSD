@@ -1,0 +1,77 @@
+{
+  "task_id": "GOLD-012",
+  "title": "建立 Evidence Inbox 人工复核决策与审计闭环",
+  "status": "completed",
+  "finished_at": "2026-09-23T02:15:40+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    " M src/evidence/inbox.py",
+    "?? scripts/evidence_review.py",
+    "?? src/evidence/review.py",
+    "?? tests/integration/test_evidence_review_integration.py",
+    "?? tests/unit/test_evidence_review.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md          | 121 +++++++++++++++++++++++++++++++++++++++++++++++\n README.md                |  99 +++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md             |  64 ++++++++++++++++++++++++-\n src/evidence/__init__.py |  98 +++++++++++++++++++++++++++++++++++++-\n src/evidence/inbox.py    |  11 +++--\n 5 files changed, 380 insertions(+), 13 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T01:55:15+08:00",
+      "finished_at": "2026-09-23T02:15:40+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 209,
+      "duration_ms": 1000226,
+      "usage": {
+        "inputTokens": 44791069,
+        "outputTokens": 170364,
+        "cacheReadTokens": 44605952,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.2638038060000001
+      },
+      "cline_final_text": "Submission recorded (verified): ## GOLD-012 —— Evidence Inbox 人工复核决策与审计闭环（完成）\n\n### 1. 完成内容\n在 `PHASE3_3_DATA` 仍 BLOCKED 的前提下，为 GOLD-011 的本地 evidence inbox 增加了**纯本地、显式、可审计**的人工复核决策层：\n\n- **核心 `src/evidence/review.py`**（零网络 / 零数据库 / 零新增依赖）：\n  - `ReviewDecision`（`APPROVE`/`REJECT`/`NEEDS_CHANGES`）+ `ReviewReasonCode` 受控词表（`REASON_CODES_BY_DECISION` 按决策分组，跨决策使用 → 参数错误）；\n  - `record_review_decision(...)`：只对**显式 64 位内容级指纹**记录；`APPROVE` 必须①指纹**当前仍在** inbox 扫描结果中、②当前 `PREFLIGHT_PASS`、③**不是**模板/示例/Mock；内容变化→新指纹（**旧批准不继承**）、候选消失/预检回退/metadata 含凭据 → fail-closed；\n  - **追加式 ledger**（`ReviewLedger`/`ReviewRecord`）：`decision_id` 由（指纹/决策/revision/原因码）确定性派生；完全相同决策重复提交**幂等**（不新增、不改写历史）；任何差异必须显式 `revision=既有+1` + `override`，`supersedes` 留痕、历史全保留；恢复时严格校验（kind/schema/contract/安全字段/decision_id/revision 连续/supersedes 链/原因码匹配/时区）；\n  - `build_approved_intake_list(...)`：脱敏 approved-for-explicit-intake 清单，且在**当前**扫描结果上**重新验证**；失效批准进 `invalidated`（`CANDIDATE_MISSING`/`PREFLIGHT_NOT_PASSING`/`SYNTHETIC_EVIDENCE`/`EVIDENCE_INCONSISTENT`）；\n  - `run_review(...)`：默认只读；只有 `out_path` 才写 ledger（先取 GOLD-010 单实例锁），`approved_out_path` 才写清单，均复用 GOLD-009 原子写（无 `.tmp`）；输出必须在 inbox 之外；\n  - 四个安全字段**硬编码** true/true/false/false（与 approve 数量无关）；复核元数据**不是**证据时间（`FORBIDDEN_EVIDENCE_FIELDS` 全量断言）。\n- **CLI `scripts/evidence_review.py`**：`--inbox-dir` 必填、`--ledger` 只读、`--out` 唯一 ledger 写开关、`--approved-out`、`--decision/--fingerprint/--reviewer/--reason-code/--note/--reviewed-at/--revision/--override/--lock/--as-of/--json`；退出码 `0/2/3/4/5/6`，失败路径 stdout 为空、stderr 脱敏。\n- **复用而非复制**：`src/evidence/inbox.py` 的路径守护原语公开为 `ensure_outside_inbox`（行为不变），`src/evidence/__init__.py` 导出新 API。\n\n### 2. 修改的文件\n`src/evidence/inbox.py`（`_ensure_outside_inbox` → 公开 `ensure_outside_inbox` + `__all__`，仅 11 行 diff）、`src/evidence/__init__.py`（导入/导出 review API + docstring）、`README.md`（§1 交付表新增一行、§7 新章节含 CLI 用法/门禁/失效口径/退出码/**inbox scan → human review → approved list → 显式 intake** 最小路径、§10 仍未解除）、`TECH_DEBT.md`（TD-54 登记行 + 明细 + 变更日志行）、`PROGRESS_LOG.md`（第七十六轮）。\n\n### 3. 新增文件\n`src/evidence/review.py`、`scripts/evidence_review.py`、`tests/unit/test_evidence_review.py`、`tests/integration/test_evidence_review_integration.py`。\n\n### 4. 执行的测试（全部在项目 .venv）\n- `.venv\\Scripts\\python.exe -m pytest tests -q`\n- `.venv\\Scripts\\python.exe -m ruff check .`\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts`\n- 附加：新测试文件定向运行、`pytest tests/unit -k \"evidence or phase3_3\"`、以及**真实 CLI 子进程 7 步人工端到端冒烟**（预检 → 只读列出 → approve → 幂等重跑 → 冲突 reject → 显式 revision+override → 内容变化后旧指纹 approve 失败）。\n\n### 5. 测试结果（实测证据）\n- `pytest tests -q` → **2034 passed, 1 skipped in 230.03s**（唯一 skip 仍是 jieba 分支；本轮新增 **62 项**：单元 52 + 集成 10；GOLD-011 记录基线 1970 passed/1 skipped，本轮未改任何既有测试文件）；\n- `ruff check .` → `All checks passed!`；`mypy` → `Success: no issues found in 162 source files`（GOLD-011 为 160，+2 新模块）；\n- 新测试定向运行 → `62 passed in 2.19s`；`pytest tests/unit -k \"evidence or phase3_3\"` → `262 passed`（GOLD-011 既有用例全绿，证明 inbox 改名无回归）；\n- 端到端冒烟输出：`[1] preflight exit=0 preflight_pass=1 / [2] list-only exit=5 LIST_ONLY approved=0 / [3] approve exit=0 rev=1 approved_count=1 / [4] repeat approve exit=0 DECISION_IDEMPOTENT ledger byte-identical / [5] conflicting decision exit=4 fail-closed (ledger unchanged) / [6] override exit=0 decision_count=2 history preserved / [7] content changed: approve old fingerprint fail-closed, approved=0 / SMOKE OK`。\n\n### 6. 未解决的问题\n- 真实 `PHASE3_3_DATA` **仍 BLOCKED**：仓库内仍无足量合法授权且具可信独立时间/availability/OOS 证据的 Author/News 数据；人工 `APPROVE` **只表示人工预审通过**，不等于 data qualification PASS，落库仍须显式 `evidence_operator workflow --no-dry-run` 且 Phase 切换仍须 L3 人工 Gate（L3 人工门禁不在本任务范围）；\n- 记录了 1 处口径差异：GOLD-011 日志基线 1970 passed 与本次实测基线存在 2 项差异（未修改任何既有测试文件，属既有收集口径）。\n\n### 7. 是否满足 acceptance\n**满足**：①存在纯本地显式 review 入口并按指纹记录三类决策、形成不可静默覆盖的审计历史；②仅「当前指纹一致 + preflight_pass + 非合成」可 approve，内容变化/消失/损坏状态全部 fail-closed；③可生成脱敏 approved-for-explicit-intake 清单且不自动 intake、不写库、不改原始 evidence、不解除 blocker；④重复决策幂等、冲突要求显式 revision/override 并保留历史、ledger 原子写且并发安全；⑤安全字段恒定、Mock/模板/示例永不获批；⑥全量 pytest/ruff/mypy 在 .venv 通过且 README/TECH_DEBT/PROGRESS_LOG 同步并明确 `PHASE3_3_DATA` 仍 BLOCKED。\n\n### 8. 建议下一步\n- 由业务方按 `evidence-intake-v1` 提供真实授权数据（放入 inbox 子目录 + `manifest.json`）→ `scripts.evidence_inbox --out` 预检 → 逐指纹 `scripts.evidence_review --decision approve ... --out <ledger> --approved-out <list>` 记录人工决策 → 人工按清单显式 `evidence_operator workflow --no-dry-run` 落库 → `handoff`/`recheck` 复核；\n- 未执行任何 git 写操作（提交/推送由 Orchestrator 负责）；未触碰 `.ai/tasks`、`.ai/results`、`.ai/PROJECT_STATE.json`、`.env`、migrations、`src/alpha/**`。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        " M src/evidence/inbox.py",
+        "?? scripts/evidence_review.py",
+        "?? src/evidence/review.py",
+        "?? tests/integration/test_evidence_review_integration.py",
+        "?? tests/unit/test_evidence_review.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md          | 121 +++++++++++++++++++++++++++++++++++++++++++++++\n README.md                |  99 +++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md             |  64 ++++++++++++++++++++++++-\n src/evidence/__init__.py |  98 +++++++++++++++++++++++++++++++++++++-\n src/evidence/inbox.py    |  11 +++--\n 5 files changed, 380 insertions(+), 13 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  3%]\n........................................................................ [  7%]\n........................................................................ [ 10%]\n........................................................................ [ 14%]\n........................................................................ [ 17%]\n........................................................................ [ 21%]\n........................................................................ [ 24%]\n........................................................................ [ 28%]\n........................................................................ [ 31%]\n........................................................................ [ 35%]\n........................................................................ [ 38%]\n........................................................................ [ 42%]\n........................................................................ [ 45%]\n........................................................................ [ 49%]\n........................................................................ [ 53%]\n........................................................................ [ 56%]\n........................................................................ [ 60%]\n........................................................................ [ 63%]\n........................................................................ [ 67%]\n........................................................................ [ 70%]\n........................................................................ [ 74%]\n........................................................................ [ 77%]\n........................................................................ [ 81%]\n........................................................................ [ 84%]\n........................................................................ [ 88%]\n........................................................................ [ 91%]\n........................................................................ [ 95%]\n..............................................s......................... [ 99%]\n...................                                                      [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2034 passed, 1 skipped in 219.27s (0:03:39)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 162 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

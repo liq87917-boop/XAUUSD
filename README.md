@@ -62,6 +62,7 @@ Strategy 事实，不进入实盘。
 | **Evidence Readiness 状态变更通知**（GOLD-009：只读 / 默认 dry-run 的 `scripts/evidence_readiness_watch.py`；确定性脱敏快照指纹 + 幂等变化检测：首次快照 / BLOCKED 缺口变化 / reason-code 集合变化 / `ready_for_human_review` 双向变化；默认零写入、零网络，只有显式 `--out` / `--events` 才**原子**落盘快照与事件；不接邮件 / 短信 / Webhook / 第三方推送；`ready_for_human_review=true` 仍明确要求 L3 人工 Gate，`phase_transition_allowed` 恒为 false，**不解除** `PHASE3_3_DATA`） | `src/evidence/readiness_watch.py`、`scripts/evidence_readiness_watch.py` |
 | **Evidence Readiness 单次本地 tick runner**（GOLD-010：`scripts/evidence_readiness_runner.py` **只做一次** tick，供 Windows Task Scheduler / 现有本地 orchestrator 等**外部定时器**调用；自带 OS 级**单实例锁**（owner / pid / 时间可审计、**绝不删除**活动锁）与陈旧锁安全接管；三类本地 artifact（snapshot state / 事件日志 / status）全部**原子写**且有界滚动，无变化零重复事件；损坏 state / 锁冲突 / 资格计算失败一律 **fail-closed** 并保留旧 state；零网络、零数据库写入、**不自带常驻循环**、不自动改 OS 计划任务；四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/readiness_runner.py`、`scripts/evidence_readiness_runner.py` |
 | **Evidence 本地 Inbox 发现与预检**（GOLD-011：`scripts/evidence_inbox.py` **只读**扫描显式 `--inbox-dir` 的直接子目录；候选包必须由 `manifest.json` 显式关联证据文件（`evidence_type` / `source` / `authorization_reference` / `time_semantics` / `availability_semantics` / `historical_oos_applicable` / `files[].path`+`sha256`）；逐文件实测 SHA-256 并核对声明，候选包指纹只由内容摘要与结构标记派生（不含文件名 / mtime / 绝对路径 / 扫描时间），pending 清单以指纹为键**幂等**且**原子写**；路径穿越 / 绝对路径 / 符号链接 / 未声明文件 / 摘要不一致 / 凭据泄漏 / 模板示例一律 **fail-closed**；逐行预检复用 Evidence Gateway 的 `assess_row`，**绝不移动 / 删除原始证据、绝不自动 intake、零网络、零数据库写入**；`preflight_pass` 只进**人工确认队列**，四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/inbox.py`、`scripts/evidence_inbox.py` |
+| **Evidence Inbox 人工复核决策与审计**（GOLD-012：`scripts/evidence_review.py` 对**显式内容级指纹**记录 `approve` / `reject` / `needs_changes`；`APPROVE` 必须①该指纹**当前仍在** inbox 扫描结果中、②当前预检 `PREFLIGHT_PASS`、③**不是**模板 / 示例 / Mock，内容变化 → 新指纹（**旧批准绝不继承**），候选消失 / 预检回退 / ledger 损坏 / 元数据含凭据一律 **fail-closed**；追加式 ledger（确定性 `decision_id`、完全相同决策**幂等**、任何差异必须显式 `--revision` + `--override`、**绝不静默覆盖**、原子写 + 单实例锁）与**脱敏** approved-for-explicit-intake 清单（生成前在当前扫描结果上**重新验证**，失效批准进 `invalidated`）；`--out` 是唯一 ledger 写开关，`--ledger` 只读；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除原始 evidence、零网络**；复核元数据**不是**证据时间；四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/review.py`、`scripts/evidence_review.py` |
 
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
@@ -865,6 +866,88 @@ logs/evidence/inbox/                  # --inbox-dir（只扫描它的直接子�
 - **仍未解决（保持 BLOCKED）**：inbox 只是"摆放与预检"入口，**不是**资格判定器，也不具备解除
   blocker 的能力；库内仍无足量真实授权证据 → `PHASE3_3_DATA` 保持 `active=true`。
 
+### Evidence Inbox 人工复核决策与审计（`scripts/evidence_review.py`，GOLD-012）
+
+> **合规红线**：本工具只做**纯本地**的人工复核决策与审计留痕 —— 不联网、不写数据库、
+> 不新增 migration / schema、**绝不**调用任何 intake / commit 路径、**绝不**移动 / 重命名 /
+> 删除 / 改写 inbox 内任何原始 evidence。`APPROVE` **只表示人工预审通过**，
+> **不等于** data qualification PASS；`blocker_active` / `human_gate_required` 恒为 true，
+> `data_qualification_passed` / `phase_transition_allowed` 恒为 false；approve 数量达到任何
+> 阈值都**不会**自动改变这四个字段，`PHASE3_3_DATA` 保持 **BLOCKED**。
+
+```powershell
+# ① 只读列出：现有 ledger 的最新决策 + 当前仍成立的批准（零写入）
+.\.venv\Scripts\python.exe -m scripts.evidence_review `
+  --inbox-dir logs/evidence/inbox `
+  --ledger logs/evidence/inbox_review_ledger.json --json
+
+# ② 记录人工决策（不给 --out 就是 dry-run；--out 才原子落盘 ledger）
+.\.venv\Scripts\python.exe -m scripts.evidence_review `
+  --inbox-dir logs/evidence/inbox `
+  --decision approve --fingerprint <GOLD-011 的 64 位内容级指纹> `
+  --reviewer operator-li --reason-code APPROVED_FOR_EXPLICIT_INTAKE `
+  --ledger logs/evidence/inbox_review_ledger.json `
+  --out    logs/evidence/inbox_review_ledger.json `
+  --approved-out logs/evidence/approved_for_intake.json --json
+
+# ③ 推翻既有决策：必须**显式**给出新 revision + --override（历史全部保留）
+.\.venv\Scripts\python.exe -m scripts.evidence_review `
+  --inbox-dir logs/evidence/inbox --decision reject --fingerprint <同一指纹> `
+  --reviewer operator-li --reason-code REJECTED_AUTHORIZATION_INSUFFICIENT `
+  --ledger logs/evidence/inbox_review_ledger.json `
+  --out    logs/evidence/inbox_review_ledger.json --revision 2 --override
+```
+
+- **决策与词表**：`--decision` 只有 `approve` / `reject` / `needs_changes`；`--reason-code`
+  必须落在与决策匹配的**受控词表**（跨决策使用 → 退出码 `2`）；决策必须**显式引用** GOLD-011 的
+  **内容级** fingerprint（文件名 / mtime / 扫描时间都**不是**指纹）；
+- **最小审计元数据**：`--reviewer`（非敏感标识，必填）、`--reviewed-at`（ISO8601 必须带时区，
+  且不得晚于审计时点）、`--note`（可选，≤300 字符）；**凭据类内容一律拒绝记录**（fail-closed，
+  绝不把擦除后的 `***` 写进审计历史）；
+- **approve 门禁（fail-closed）**：①该指纹**当前仍在** inbox 扫描结果中、②当前预检
+  `PREFLIGHT_PASS`、③**不是**模板 / 示例 / Mock（`SYNTHETIC_EVIDENCE` 永不可批准）；
+  内容变化 → **新指纹**（旧批准绝不继承）；候选消失 / 预检回退 / ledger 损坏 → 拒绝记录且零写入；
+- **追加式 ledger（只 append）**：`kind=evidence_inbox_review_ledger`；`decision_id` 确定性
+  （只由指纹 / 决策 / revision / 原因码派生）；同一指纹 + **完全相同**决策重复提交**幂等**
+  （不新增记录、不改写历史）；任何差异都必须显式 `--revision <既有 + 1>` + `--override`
+  （否则退出码 `4`），`supersedes` 指向被取代的决策，**历史全部保留**；
+- **批准清单 ≠ 资格**：`--approved-out` 只生成**脱敏**的 `approved-for-explicit-intake` 清单，
+  且必须在**当前**扫描结果上**重新验证**（候选仍在、仍 `PREFLIGHT_PASS`、摘要与复核时一致）；
+  不满足的批准进入 `invalidated`（`CANDIDATE_MISSING` / `PREFLIGHT_NOT_PASSING` /
+  `SYNTHETIC_EVIDENCE` / `EVIDENCE_INCONSISTENT`）——**绝不因为「曾经批准过」就放行**；
+- **写开关只有一个**：`--out` 才写 ledger（原子写 + 单实例锁），`--approved-out` 才写批准清单；
+  `--ledger` **只读**（损坏 → 退出码 `4`，旧文件原样保留）；所有输出必须位于 inbox **之外**；
+- **脱敏**：artifact 只含计数 / 稳定原因码 / 指纹 / 来源名 / 已脱敏引用（URL 去 query 与
+  userinfo）/ 审计时间与 reviewer 非敏感标识，**不含** evidence 正文；
+- **退出码**：`0` 决策已记录（或幂等重复）/ `2` 参数或词表错误 / `3` inbox 或输出不可用
+  （含把 `--out` 写进 inbox 的拒绝）/ `4` ledger 损坏、决策冲突或目标不满足门禁（fail-closed，
+  零写入）/ `5` 只读运行且**没有任何**仍成立的批准（**预期 BLOCKED**）/ `6` 锁冲突；
+  失败路径 stdout 为空、stderr 已脱敏；
+- **复核元数据不是证据**：`reviewer` / `note` / 文件名 / mtime / 复核时间 / 「曾被人批准」
+  都**不是** `published_at` / `collected_at` / `effective_at` / `availability` 证据；
+  本工具的 artifact 只有上述审计字段，绝不合成任何证据时间；
+- **测试**：`tests/unit/test_evidence_review.py`、`tests/integration/test_evidence_review_integration.py`
+  （临时目录 / 零网络 / 零数据库；含真实子进程 CLI 冒烟）。
+
+**最小操作路径：inbox 扫描 → 人工复核 → 批准清单 → 显式 intake**：
+
+```powershell
+# ① 发现与预检（GOLD-011）
+.\.venv\Scripts\python.exe -m scripts.evidence_inbox `
+  --inbox-dir logs/evidence/inbox --state logs/evidence/inbox_pending.json `
+  --out logs/evidence/inbox_pending.json --json
+# ② 人工复核决策 + 批准清单（GOLD-012；见上面第 ② 条）
+# ③ 人工按清单**显式**落库（GOLD-007；不自动、不可省）
+.\.venv\Scripts\python.exe -m scripts.evidence_operator workflow `
+  --scope author --input logs/evidence/inbox/<候选包>/author.jsonl `
+  --no-dry-run --manifest logs/evidence/author_manifest.json
+.\.venv\Scripts\python.exe -m scripts.evidence_operator recheck --json
+```
+
+任何一步都**不会**自动解除 `PHASE3_3_DATA`；落库后仍以
+`scripts/evidence_readiness_watch.py` / `scripts/evidence_handoff.py` 复核，
+Phase 切换仍是 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**。
+
 ## 8. 数据模型
 
 
@@ -992,15 +1075,17 @@ logs/evidence/inbox/                  # --inbox-dir（只扫描它的直接子�
   就绪度 / 一键复核工具已由 GOLD-006 交付，单入口 operator workflow 与 gateway-only
   作者链已由 GOLD-007 交付，人工交接包已由 GOLD-008 交付，readiness 状态变更通知层已由
   GOLD-009 交付，readiness **周期 tick runner** 已由 GOLD-010 交付，**本地 inbox 发现与预检**
-  已由 GOLD-011 交付（见 §7「授权证据接收入口」、§7「证据就绪度与一键资格复核」、
-  §7「单入口 Evidence Operator 工作流」、§7「Evidence 人工交接包」、
-  §7「Evidence Readiness 状态变更通知」、§7「Evidence Readiness 单次本地 tick runner」与
-  §7「Evidence 本地 Inbox 发现与预检」），但**仓库内没有任何经该入口认证的真实授权证据**，
+  已由 GOLD-011 交付，**人工复核决策与审计层**已由 GOLD-012 交付（见 §7「授权证据接收入口」、
+  §7「证据就绪度与一键资格复核」、§7「单入口 Evidence Operator 工作流」、
+  §7「Evidence 人工交接包」、§7「Evidence Readiness 状态变更通知」、
+  §7「Evidence Readiness 单次本地 tick runner」、§7「Evidence 本地 Inbox 发现与预检」与
+  §7「Evidence Inbox 人工复核决策与审计」），但**仓库内没有任何经该入口认证的真实授权证据**，
   因此 `PHASE3_3_DATA` 保持 `active=true`；下一步是业务方按 `evidence-intake-v1` 契约
   提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 / TD-48 / TD-49 / TD-50 /
-  TD-51 / TD-52 / TD-53）。GOLD-007 ~ GOLD-011 的工具**只减少人工交接、盯盘、定时执行与
-  候选摆放 / 预检摩擦**，不解除该 blocker；任何数量达标最多只到 `ready_for_human_review=true`，
-  Phase 切换仍是 L3 人工 Gate。
+  TD-51 / TD-52 / TD-53 / TD-54）。GOLD-007 ~ GOLD-012 的工具**只减少人工交接、盯盘、定时执行、
+  候选摆放 / 预检与「谁批了哪一版内容」的审计摩擦**，不解除该 blocker；任何数量达标（含
+  全部候选被 approve）最多只到 `ready_for_human_review=true` / 有批准清单，
+  人工批准**不等于** data qualification PASS，Phase 切换仍是 L3 人工 Gate。
 
 ## 11. 强制约束速查（团队决定）
 

@@ -102,6 +102,7 @@ __all__ = [
     "PendingEntry",
     "PendingRegister",
     "PendingStateError",
+    "ensure_outside_inbox",
     "exit_code_for",
     "load_pending_register",
     "render_inbox_summary",
@@ -1455,8 +1456,12 @@ def write_pending_register(path: Path, register: PendingRegister) -> None:
         ) from exc
 
 
-def _ensure_outside_inbox(root: Path, target: Path) -> None:
-    """输出 / 状态文件必须位于 inbox 目录**之外**（否则下一次扫描会判为未声明文件）。"""
+def ensure_outside_inbox(root: Path, target: Path) -> None:
+    """输出 / 状态文件必须位于 inbox 目录**之外**（否则下一次扫描会判为未声明文件）。
+
+    公开导出：GOLD-012 的人工复核决策层（``src.evidence.review``）复用**同一**安全口径，
+    避免各处各写一套（与 ``valid_reference`` / ``atomic_write_text`` 的公开方式一致）。
+    """
     try:
         resolved_root = root.resolve()
         resolved_target = target.resolve()
@@ -1504,7 +1509,7 @@ def run_inbox_scan(
     out = Path(out_path) if out_path is not None else None
     for target in (pending, out):
         if target is not None:
-            _ensure_outside_inbox(root, target)
+            ensure_outside_inbox(root, target)
     if out is None:
         previous = load_pending_register(pending) if pending is not None else None
         return scan_inbox(root, moment=moment, previous=previous)

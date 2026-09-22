@@ -2805,3 +2805,124 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   `scripts.evidence_operator workflow --no-dry-run` 显式落库，再以 `handoff` / `recheck`
   复核；Phase 切换仍需 L3 人工确认。
 
+
+## 第七十六轮（2026-09-23）：GOLD-012 —— Evidence Inbox 人工复核决策与审计闭环
+
+### 1. 交付内容
+
+- **review 核心**（`src/evidence/review.py`，纯本地 / **零网络** / 零数据库写入）：
+  - `ReviewDecision`（`APPROVE` / `REJECT` / `NEEDS_CHANGES`）与 `ReviewReasonCode`
+    （受控词表；`REASON_CODES_BY_DECISION` 按决策分组，跨决策使用即参数错误）；
+  - `record_review_decision(...)`：只对**显式给出的 64 位内容级指纹**记录决策 —— `APPROVE`
+    必须 ①该指纹**当前仍在** inbox 扫描结果中、②当前预检 `PREFLIGHT_PASS`、③**不是**
+    模板 / 示例 / Mock；内容变化 → 新指纹（**旧批准绝不继承**），候选消失 / 预检回退 /
+    元数据非法一律 **fail-closed**（零写入）；
+  - 最小审计元数据：`reviewer`（非敏感标识，必填）、`reviewed_at`（必须带时区且不得晚于审计
+    时点）、`reason_code`、可选非敏感 `note`；**凭据类内容一律拒绝记录**（不做「擦一擦再落盘」，
+    避免把 `***` 写进审计历史）；
+  - `ReviewRecord` / `ReviewLedger`：**追加式**（只 append，**绝不静默覆盖**）；`decision_id`
+    由（指纹 / 决策 / revision / 原因码）**确定性**派生（篡改即 fail-closed）；同一指纹 +
+    **完全相同**的决策内容重复提交**幂等**（不新增记录、不改写历史）；任何差异必须显式
+    `revision = 既有 + 1` + `override`，`supersedes` 指向被取代的决策，**历史全部保留**；
+    恢复时严格校验（文档标识 / schema / 契约版本 / 安全字段 / `decision_id` / revision 连续性 /
+    `supersedes` 链 / 原因码与决策匹配 / 时区）；
+  - `build_approved_intake_list(...)`：在**当前**扫描结果上**重新验证**每条 `APPROVE`
+    （候选仍在、仍 `PREFLIGHT_PASS`、非合成、摘要与复核时一致），生成**脱敏**的
+    `approved-for-explicit-intake` 清单；失效批准进 `invalidated`（`CANDIDATE_MISSING` /
+    `PREFLIGHT_NOT_PASSING` / `SYNTHETIC_EVIDENCE` / `EVIDENCE_INCONSISTENT`），
+    **绝不因为「曾经批准过」就放行**；
+  - `run_review(...)`：默认**只读**；只有显式 `out_path` 才写 ledger，且先取 GOLD-010 的
+    **单实例锁**再读 ledger（锁冲突 → 零写入）；`approved_out_path` 才写批准清单；
+    落盘顺序「批准清单（派生）→ ledger（唯一事实来源）」，两者都复用 GOLD-009 的**原子写**；
+  - `render_review_summary(...)` / `exit_code_for(...)`：脱敏的人类可读摘要与稳定退出码；
+    四个安全字段（`blocker_active` / `human_gate_required` / `data_qualification_passed` /
+    `phase_transition_allowed`）**硬编码**，与 approve 数量无关。
+- **CLI** `scripts/evidence_review.py`：`--inbox-dir` **必填**、`--ledger` 只读、`--out` 唯一
+  ledger 写开关、`--approved-out` 批准清单、`--decision` / `--fingerprint` / `--reviewer` /
+  `--reason-code` / `--note` / `--reviewed-at` / `--revision` / `--override` / `--lock` /
+  `--as-of` / `--json`；**只跑一次即返回**；失败路径 stdout 为空、stderr 已脱敏。
+- **复用而非复制**：`src/evidence/inbox.py` 的路径守护原语改为**公开** `ensure_outside_inbox`
+  （复核层复用**同一**口径，行为不变，GOLD-011 既有测试全绿）；`src/evidence/__init__.py`
+  导出新 API。
+
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **62 项**测试（临时目录 / Mock 证据块 / **无数据库** / **零网络**，未新增依赖）：
+  - `tests/unit/test_evidence_review.py`（**52 项** / 38 个测试函数，含参数化）：退出码映射与
+    `decision_id` 确定性；受控词表（未知决策 / 原因码与决策不匹配 / 指纹非法 / reviewer 为空 /
+    note 超长）；`approve` 门禁（隔离候选 / 4 类模板示例标记 / 指纹不存在）；`reject` 与
+    `needs_changes` 可对已隔离候选记录；reviewer / note 含凭据**拒绝记录**（零写入）；
+    `reviewed_at` 时区与"不得晚于审计时点"；**幂等**（完全相同决策重复提交 → ledger 字节级不变、
+    不新增记录）；**冲突**（缺 revision / 缺 override / 跳号 → fail-closed；显式 revision +
+    override → 追加新 revision 且 `supersedes` 留痕、历史全保留）；ledger 原子写与自描述、
+    参数化篡改（文档标识 / schema / 契约版本 / 4 个安全字段 / decisions 非数组 / 记录非法 /
+    缺 `generated_at`）与不可读 ledger、**篡改 `decision_id` / revision 断链 / supersedes 断链 /
+    原因码不匹配 / 无时区 reviewed_at** 全部 fail-closed；损坏 ledger 零写入；锁冲突零写入；
+    只读运行零写入且原始 evidence 字节不变；输出写在 inbox 内被拒；**内容变化**导致旧批准失效
+    （`CANDIDATE_MISSING`）且对旧指纹 approve 失败；**候选消失**失效；**预检回退**（同一指纹在
+    较早审计时点隔离）失效；批准清单只含当前仍成立的批准（含 `decision_counts`）；脱敏（引用去
+    query、`SECRET` 不出现）；**复核元数据不含任何证据时间字段**（对 `FORBIDDEN_EVIDENCE_FIELDS`
+    递归断言 + 行内证据时间值不得被复制）；批量 approve 不改变四个安全字段；Markdown 摘要保留
+    blocker / human gate / 显式 intake 命令；多线程**并发写**不产生半写文档；以及**源码守卫**
+    （无 `aiohttp` / `httpx` / `requests` / `socket` / `urllib` / `sqlalchemy` / `subprocess`；
+    无 `unlink` / `rmtree` / `os.remove` / `os.rename` / `shutil.move`；无 `intake_evidence`；
+    无 `while` 循环；`atomic_write_text` 是唯一写路径）；
+  - `tests/integration/test_evidence_review_integration.py`（**10 项**）：真实 CLI —— 空 inbox
+    只读退出 `5` 且零写入；approve 退出 `0` + ledger / 批准清单原子落盘 + **幂等重跑**
+    （`DECISION_IDEMPOTENT`、ledger 字节级不变、原始 evidence 字节不变）；内容变化 → 旧批准失效
+    且对旧指纹 approve 退出 `4`（stdout 为空、零写入）；冲突退出 `4`，显式 revision + override
+    退出 `0` 且 `decision_count=2`；参数 / 词表错误退出 `2`（含 `--override` 缺 `--revision`、
+    `--revision` 缺 `--decision`、原因码与决策不匹配）；inbox 缺失 / `--out` 写进 inbox 退出 `3`；
+    损坏 ledger 退出 `4` 且旧文件原样保留；锁冲突退出 `6` 且零写入；Markdown 摘要保留 blocker；
+    以及**真实子进程** `python -m scripts.evidence_review` 端到端冒烟（stdout 为纯 JSON）。
+- **人工端到端冒烟**（真实 CLI 子进程，7 步，独立于 pytest）：inbox 预检 → 只读列出（`5` /
+  `LIST_ONLY` / 零写入）→ approve（`0` / `approved_count=1` / 四个安全字段恒定）→ 重复 approve
+  （`0` / `DECISION_IDEMPOTENT` / ledger 字节不变）→ 冲突 reject（`4` / fail-closed / ledger 不变）
+  → 显式 `--revision 2 --override`（`0` / `decision_count=2` / `supersedes` 正确）→ 内容变化后再
+  approve 旧指纹（`4` / 无继承）与只读列出（`5` / `approved=0`）。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **2034 passed / 1 skipped in 230.03s**
+    （唯一 skip 仍是 `tests/unit/test_text_similarity.py` 的「本环境已安装 jieba」分支；
+    本轮新增 62 项：单元 52 + 集成 10；GOLD-011 记录的基线为 1970 passed / 1 skipped —— 本轮
+    **未修改任何既有测试文件**，剩余 2 项差值来自既有测试的收集口径，非本轮改动）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 162 source files`（GOLD-011 为 160，本轮 +2 个新模块文件）。
+
+
+### 3. 范围守规
+
+- 未新增依赖、未新增 / 修改 migration 与 schema、未联网、未抓取任何站点、未触碰 `.env`、
+  未安装 / 未修改任何 OS 计划任务；
+- `src/alpha/**`（含阈值 `evidence_gate.py`）、`src/monitoring/**`、`src/scheduler/**`、
+  `src/collectors/**`、`src/processors/**` 未改动（只**复用**其契约 / 校验 / 阈值 / 原因码）；
+  `src/evidence/inbox.py` 仅把私有路径守护改名为**公开** `ensure_outside_inbox`（行为不变，
+  GOLD-011 既有测试全绿）；`src/evidence/readiness_runner.py` / `readiness_watch.py` 只被**复用**
+  （单实例锁、退出码取值与原子写原语），未改动；
+- **未解除** `PHASE3_3_DATA`：reports / ledger / 批准清单与人类可读摘要持续显式
+  `blocker_active=true` / `human_gate_required=true`、`data_qualification_passed=false`、
+  `phase_transition_allowed=false`；approve 数量（含全部候选被 approve）**不会**自动改变任何
+  安全字段；未进入 Phase 3.4，未训练 Alpha、未生成任何交易信号或订单；
+  `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；未执行任何 git
+  写操作（commit / push / reset / rebase / merge 由 Orchestrator 负责）；
+- 同步 `README.md`（§1 交付表新增一行 + §7 新章节「Evidence Inbox 人工复核决策与审计」，
+  含 CLI 用法、approve 门禁、追加式 ledger 语义、批准清单失效口径、退出码与
+  **inbox scan → human review → approved list → 显式 intake** 最小操作路径 + §10 仍未解除说明）、
+  `TECH_DEBT.md`（新增 **TD-54** 登记行 + 明细 + 变更日志行）与 `PROGRESS_LOG.md`（本轮）。
+
+### 4. 遗留 / 下一步
+
+- 仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 **BLOCKED**。review 层**只是**「谁批了哪一版
+  内容、为什么、是否被推翻」的**本地审计入口**：它把人工决策变成可复核、不可静默覆盖、
+  可重新验证的 artifact，但**不是**资格判定器，也不具备解除 blocker 的能力；
+- 业务方按 `evidence-intake-v1` 提供真实授权的 Author / News 数据（放入 inbox 子目录 +
+  `manifest.json`）→ `scripts.evidence_inbox --out` 发现与预检 → 以本工具逐指纹
+  `--decision approve ... --out <ledger> --approved-out <list>` 记录人工决策并生成批准清单 →
+  人工按清单**显式**执行 `scripts.evidence_operator workflow --no-dry-run` 落库 →
+  `handoff` / `recheck` 复核；Phase 切换仍需 **L3 人工确认**；
+- 复核元数据只接受**非敏感**最小字段（凭据类内容一律拒绝记录）；复核时间 / reviewer / note /
+  文件名 / mtime / 「曾被人批准」都**不是**证据时间，本层产量中不存在这些证据字段。
+
+
