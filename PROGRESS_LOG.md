@@ -2191,3 +2191,64 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 遗留（未修，超出本轮范围）：`processed_items` 缺 `error_message` 列（TD-19）、
   非行情数据集的 `data_versions` 快照（TD-12 剩余口径）等既有技术债照旧。
 
+
+## 第六十八轮（2026-09-22）：GOLD-004 —— 建立 Collector 运行健康度与数据资格观测层
+
+### 1. 交付内容
+
+- **独立只读观测层**（`src/monitoring/`，Scheduler 核心**零改动**）：
+  - `collector_health.py`：从 `collector_runs`（source 级运行事实）/ `raw_items`（实际采集）/`processed_items`（加工，经 `raw_items.source_id` 归因）/ `job_runs`（调度槽）/ `sources`
+    （**只取**启用状态与 `config_json["collector"]` 派生值）汇总窗口内健康度：运行次数、
+    SUCCESS/PARTIAL_FAILED/FAILED/在途、连败次数、最近成功时间、陈旧标记（复用
+    `default_stale_after` = 90 分钟）、`inserted`/`duplicate` 上报值、实际原始条数、
+    加工成功/拒绝/失败、加工观测状态；
+  - `phase33_qualification.py`：**复用** `src/alpha/evidence_gate.py` 的阈值与判定
+    （30 条可信帖子 / 200 事件 / 90 天 / 单源 40%），把 Author / News 资格缺口输出为机器可读
+    结构（当前值、要求值、比较方式、PASS/BLOCKED、原因、证据时间范围），并**持续显式输出**
+    blocker 代码 `PHASE3_3_DATA`（`blocker_active=true`、`ready=false`）；来源授权与
+    "历史可用时间证据" 两项**恒为 BLOCKED**（人工 Gate，不得用 Mock/缺失数据判 PASS）；
+  - `report.py`：组合报告（Markdown 人类可读 + 稳定 JSON），健康度与资格共用**同一审计时钟**。
+- **CLI 入口** `scripts/report_collector_health.py`：默认人类可读；`--json` 稳定机器可读
+  （`sort_keys` + `schema_version`）；`--window-hours` / `--stale-after-minutes` / `--as-of`
+  可复现；`--report` **必须**配 `--no-dry-run` 才落盘（默认 dry-run，与项目其它脚本一致）；
+  非法参数（窗口 ≤ 0、`--as-of` 无时区）由 `parser.error` 拒绝。
+- **状态词汇表（绝不把 unknown 当 healthy）**：`HEALTHY` / `DEGRADED` / `FAILED` /
+  `STALE` / `NEVER_RUN` / `NEVER_SUCCEEDED` / `UNKNOWN` / `DISABLED` / `NO_SOURCES`；
+  空库 → `NO_SOURCES`；从未成功 → `NEVER_RUN`/`NEVER_SUCCEEDED`；只有在途 → `UNKNOWN`；
+  连败 ≥ 3 或窗口内全部硬失败 → `FAILED`；`Processor NOT_OBSERVED`（有原始数据无加工结果）
+  → 整体 `DEGRADED`。
+- **脱敏（唯一实现复用）**：错误摘要经 `src/common/redaction.py::safe_text` 擦除
+  （`api_key=***`）并截断；`base_url` 经 `safe_url` 去掉 userinfo / query / fragment；
+  `sources.config_json` **整体不进入输出**（只输出 `collector` 派生名与布尔状态）。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **29 项**测试（全部 Mock / SQLite，零网络，未新增依赖）：
+  - `tests/unit/test_monitoring_health_report.py` **8**：连败口径（部分失败打断连败）、
+    状态判定全分支、加工状态三态、凭据擦除与 URL query 剥离、空库 schema 稳定、
+    `unknown ≠ healthy`、连败源 → 整体 FAILED、幂等重复运行（inserted=0 / duplicate>0）；
+  - `tests/unit/test_phase33_qualification_report.py` **8**：库内门槛全 PASS 仍被人工 Gate
+    拦下（PASS=5 / BLOCKED=2）、缺失证据绝不 PASS、阈值与 `evidence_gate` 一致、
+    单源集中度 BLOCKED、证据时间范围逐 scope、机器可读结构稳定、渲染保留 blocker；
+  - `tests/unit/test_monitoring_report.py` **2**：组合 JSON 结构、双章节渲染确定性；
+  - `tests/integration/test_monitoring_health_integration.py` **11**：空库、窗口边界
+    （恰好落在起点计入 / 更早排除）、连败 / 部分失败 / 在途 / 陈旧 / 从未运行 / 禁用、
+    幂等重复运行与 Processor 未观测降级、调度槽汇总（含 `output_json` 不可解析计数与
+    `source_id` 为空的未归因运行）、端到端脱敏（凭据 / `Bearer` / URL query 均不出现）、
+    资格 blocker 与证据窗口、CLI `--json`/dry-run/`--no-dry-run` 落盘、非法参数退出码、加载器
+    参数校验。
+- **全量门禁**：
+  - `pytest tests -q` → **1709 passed / 1 skipped in 203.94s**（唯一 skip 为 `jieba` 已安装分支）；
+  - `ruff check .` → `All checks passed!`；
+  - `mypy config database src scripts` → `Success: no issues found in 139 source files`。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增/修改 migration 与 schema、未训练 Alpha、未生成交易信号或订单；
+- `src/scheduler/**`、`src/alpha/**` 未改动（只**复用**其口径与阈值）；未进入 Phase 3.4；
+- **未解除** `PHASE3_3_DATA` blocker（报告与 JSON 中持续显式输出，`ready` 恒为 false）；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`.env`；
+- 同步 `README.md`（§1 交付表 + §7 新章节 + §10 TD-10 前置说明）与 `TECH_DEBT.md`
+  （新增 TD-46：观测层剩余边界——无告警推送/无时间序列/`SKIPPED` 无法区分
+  `DUPLICATE` 与 `REJECTED`）。
+

@@ -53,6 +53,7 @@ Strategy 事实，不进入实盘。
 | 抽样**输入缺失自动补数据** + 输入**来源体检**（`input_is_mock` 写入元数据）+ 控制台醒目警告 | `scripts/sample_annotation_set.py`、`logs/annotation_sample.meta.json` |
 | CLI 脚本**双通道**（`python scripts/x.py` 与 `python -m scripts.x` 都可运行）+ **真实进程**冒烟测试 + CSV 编码 `utf-8-sig`（Excel 中文不乱码） | `scripts/__init__.py`、`tests/integration/test_cli_scripts.py` |
 | **采集后处理 Processor Pipeline**（normalize → timezone/effective_at → identity/dedup → validation/audit → `processed_items`，append-only + 幂等 + 坏数据隔离 + 摘要脱敏；RSS 采集路径已最小接线） | `src/processors/collection/`、`src/common/redaction.py`、`src/collectors/base.py`（`post_processor` 钩子） |
+| **只读运行健康度 / 数据资格观测层**（窗口内 source 级运行与加工状态 + Phase 3.3 资格缺口机器可读输出；`--json` 稳定结构、默认 dry-run、输出脱敏，**不解除** `PHASE3_3_DATA`） | `src/monitoring/`、`scripts/report_collector_health.py` |
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
 采集时间不可信而隔离；新闻侧只有 30 条 / 56 天，最大单源占比 66.67%。详见
@@ -366,7 +367,47 @@ ProcessorInput
 - 无新增依赖、无新增 migration / schema（复用现有 `processed_items` 与 `ProcessStatus`）。
 
 
+### 运行健康度与 Phase 3.3 数据资格观测（`scripts/report_collector_health.py`，GOLD-004）
+
+> **只读观测层**：从 `job_runs` / `collector_runs` / `raw_items` / `processed_items` /
+> `sources` 汇总运行质量与资格缺口；不写库、不改写历史事实、**不解除** `PHASE3_3_DATA`
+> blocker。报告业务逻辑集中在 `src/monitoring/`，**Scheduler 核心零改动**。
+
+```powershell
+# 人类可读摘要（默认；只读，不落盘）
+.\.venv\Scripts\python.exe -m scripts.report_collector_health
+
+# 稳定 JSON（机器可读；字段与 schema_version 由测试锁定）
+.\.venv\Scripts\python.exe -m scripts.report_collector_health --json
+
+# 指定窗口 / 审计时点（可复现）
+.\.venv\Scripts\python.exe -m scripts.report_collector_health --window-hours 48 --as-of 2026-09-22T12:00:00+00:00
+
+# 落盘 Markdown 报告（必须显式 --no-dry-run，与项目其它脚本一致）
+.\.venv\Scripts\python.exe -m scripts.report_collector_health --no-dry-run --report docs/experiments/collector_health.md
+```
+
+- **source 级健康度**（窗口内）：运行次数、SUCCESS / PARTIAL_FAILED / FAILED / 在途、
+  连败次数、最近成功时间、陈旧标记（默认 90 分钟 = 3 × 30 分钟槽）、`raw_items` 实际条数、
+  `inserted` / `duplicate` 上报值、`processed_items` 成功 / 拒绝 / 失败、加工观测状态；
+- **状态词汇表**（绝不把 unknown 当 healthy）：`HEALTHY` / `DEGRADED` / `FAILED` /
+  `STALE` / `NEVER_RUN` / `NEVER_SUCCEEDED` / `UNKNOWN` / `DISABLED` / `NO_SOURCES`；
+  `NOT_OBSERVED` 明确表示"有原始数据但没有加工结果"（Processor 未启用 / 未运行）→ 整体降级；
+- **复用口径，不另造阈值**：`JOB_TYPE` / `collector_name_for` / `default_stale_after`
+  与 `src/alpha/evidence_gate.py` 的 Phase 3.3 阈值（30 条可信帖子 / 200 事件 / 90 天 /
+  单源 40%）；观测层不修改 `src/alpha/**`；
+- **Phase 3.3 资格缺口（机器可读）**：每项输出当前值、要求值、比较方式、`PASS/BLOCKED`、
+  原因与证据时间范围；来源授权与"历史可用时间证据"只能由人工 Gate 通过，本报告恒为
+  `BLOCKED`，并始终显式输出 blocker 代码 `PHASE3_3_DATA`；
+- **脱敏**：只输出白名单字段；`sources.config_json` **整体不进入输出**；错误摘要经
+  `src/common/redaction.py` 擦除凭据，`base_url` 去掉 userinfo / query / fragment；
+- **测试**：`tests/unit/test_monitoring_health_report.py`、
+  `tests/unit/test_phase33_qualification_report.py`、`tests/unit/test_monitoring_report.py`、
+  `tests/integration/test_monitoring_health_integration.py`（29 项，全部 Mock / SQLite、零网络）；
+- 无新增依赖、无新增 migration / schema、不进入 Phase 3.4、不生成交易信号。
+
 ## 8. 数据模型
+
 
 ### 8.1 Phase 1（15 张表，migration 0001 ~ 0004）
 
@@ -485,7 +526,9 @@ ProcessorInput
   Pipeline」；TD-09 见 §7「30 分钟调度」。**TD-12 仍为部分解除**：`processed_items` /
   `audit_logs` / `data_versions` 均已有写入路径，**剩余**非行情数据集的 `data_versions`
   快照与 `processed_items` 缺 `error_message` 列（TD-19），见 `TECH_DEBT.md` TD-12；
-- TD-05 / TD-07：`econ_calendar_collector` 与宏观预期值补全；TD-10：API 与 Dashboard。
+- TD-05 / TD-07：`econ_calendar_collector` 与宏观预期值补全；TD-10：API 与 Dashboard
+  （其只读前置观测层已由 GOLD-004 交付，见 §7「运行健康度与 Phase 3.3 数据资格观测」与
+  `TECH_DEBT.md` TD-46 的剩余边界）。
 
 ## 11. 强制约束速查（团队决定）
 

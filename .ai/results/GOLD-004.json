@@ -1,0 +1,77 @@
+{
+  "task_id": "GOLD-004",
+  "title": "建立 Collector 运行健康度与数据资格观测层",
+  "status": "completed",
+  "finished_at": "2026-09-22T18:00:23+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    "?? scripts/report_collector_health.py",
+    "?? src/monitoring/",
+    "?? tests/integration/test_monitoring_health_integration.py",
+    "?? tests/unit/test_monitoring_health_report.py",
+    "?? tests/unit/test_monitoring_report.py",
+    "?? tests/unit/test_phase33_qualification_report.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md | 61 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n README.md       | 45 +++++++++++++++++++++++++++++++++++++++++-\n TECH_DEBT.md    | 22 +++++++++++++++++++++\n 3 files changed, 127 insertions(+), 1 deletion(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-22T17:40:14+08:00",
+      "finished_at": "2026-09-22T18:00:23+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 134,
+      "duration_ms": 1002241,
+      "usage": {
+        "inputTokens": 30292396,
+        "outputTokens": 129230,
+        "cacheReadTokens": 30085120,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.19888475999999997
+      },
+      "cline_final_text": "Submission recorded (verified): 按 .ai/tasks/GOLD-004.json 完成\"建立 Collector 运行健康度与数据资格观测层\"，遵守 .clinerules（只读、不解除 blocker、不新增依赖/schema、不进入 Phase 3.4、不实盘）。\n\n完成内容：\n1) 新增独立只读观测层 src/monitoring/：collector_health.py（从 collector_runs/raw_items/processed_items/job_runs/sources 汇总窗口内 source 级运行次数、SUCCESS/PARTIAL_FAILED/FAILED/在途、连败、最近成功时间、陈旧、inserted/duplicate、真实 raw 条数、加工成功/拒绝/失败与加工观测状态；状态词表 HEALTHY/DEGRADED/FAILED/STALE/NEVER_RUN/NEVER_SUCCEEDED/UNKNOWN/DISABLED/NO_SOURCES，复用 JOB_TYPE/collector_name_for/default_stale_after 口径）、phase33_qualification.py（复用 src/alpha/evidence_gate 阈值 30/200/90/40%，输出机器可读缺口：当前值/要求值/比较方式/PASS-BLOCKED/原因/证据时间范围；来源授权与历史可用证据恒 BLOCKED，始终显式输出 PHASE3_3_DATA）、report.py（Markdown + 稳定 JSON 组合报告）。Scheduler 核心零改动，不修改 src/alpha/**。\n2) 新增 CLI scripts/report_collector_health.py：默认人类可读；--json 稳定机器可读；--window-hours/--stale-after-minutes/--as-of 可复现；--report 必须配 --no-dry-run 才落盘；非法参数拒绝；输出经 safe_text/safe_url 脱敏且 sources.config_json 整体不输出。\n3) 新增 29 项测试；同步 README（§1 表 + §7 新章节 + §10）、TECH_DEBT（TD-46 行与明细）、PROGRESS_LOG（第六十八轮）。\n\n验证证据（本轮实测）：\n- .venv\\Scripts\\python.exe -m pytest tests -q → 1709 passed, 1 skipped in 206.13s（stderr 空）\n- .venv\\Scripts\\python.exe -m ruff check . → All checks passed!\n- .venv\\Scripts\\python.exe -m mypy config database src scripts → Success: no issues found in 139 source files\n- 真实研究库只读端到端：python -m scripts.report_collector_health --json --window-hours 168 → 退出码 0、合法 JSON；13 sources/8 enabled、state=DEGRADED healthy=False、资格 7 项中授权与 news 全 BLOCKED、PHASE3_3_DATA active=true；输出中 api_key/token/Bearer/config_json 均不存在（脱敏验证）\n- git status 仅新增/修改 scope_guard 允许路径，未触碰 .ai/tasks、.ai/results、.ai/PROJECT_STATE.json、.env、database/migrations、src/alpha\n\n遗留（已登记 TD-46，未越权修改）：无告警推送/无时间序列；SKIPPED 无法在 SQL 层区分 DUPLICATE 与 REJECTED。TD-43/44/45 的真实数据与授权阻塞未变。acceptance 全部满足。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        "?? scripts/report_collector_health.py",
+        "?? src/monitoring/",
+        "?? tests/integration/test_monitoring_health_integration.py",
+        "?? tests/unit/test_monitoring_health_report.py",
+        "?? tests/unit/test_monitoring_report.py",
+        "?? tests/unit/test_phase33_qualification_report.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md | 61 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n README.md       | 45 +++++++++++++++++++++++++++++++++++++++++-\n TECH_DEBT.md    | 22 +++++++++++++++++++++\n 3 files changed, 127 insertions(+), 1 deletion(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  4%]\n........................................................................ [  8%]\n........................................................................ [ 12%]\n........................................................................ [ 16%]\n........................................................................ [ 21%]\n........................................................................ [ 25%]\n........................................................................ [ 29%]\n........................................................................ [ 33%]\n........................................................................ [ 37%]\n........................................................................ [ 42%]\n........................................................................ [ 46%]\n........................................................................ [ 50%]\n........................................................................ [ 54%]\n........................................................................ [ 58%]\n........................................................................ [ 63%]\n........................................................................ [ 67%]\n........................................................................ [ 71%]\n........................................................................ [ 75%]\n........................................................................ [ 80%]\n........................................................................ [ 84%]\n........................................................................ [ 88%]\n........................................................................ [ 92%]\n........................................................................ [ 96%]\n.........s............................................                   [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n1709 passed, 1 skipped in 202.50s (0:03:22)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 139 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

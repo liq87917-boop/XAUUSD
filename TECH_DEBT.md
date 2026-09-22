@@ -83,6 +83,7 @@
 | TD-43 | P0（数据阻塞） | Phase 3.3 Author / News 真实数据资格不足：作者可信标签 0（31 行全部采集时间不可信，19 帖缺独立 collected_at）；新闻仅 30 条/56 天且单源占 66.67%。Author Alpha 管线验证已完成（Mock 跑通，见 `docs/experiments/Phase3_3_Author_Alpha_管线验证报告.md`），但真实数据仍 0 可信标签 | **待合法授权数据源**：需要带独立发布时间与采集时间的真实作者帖子；需要合规、带时间戳的新闻历史达到 >=200 条、>=90 天、单源 <=40%。达标前不建条件权重表、不训练模型、不写事实 |
 | TD-44 | P0（新闻历史时间语义） | `raw_items` 强制 `effective_at >= collected_at`；今天下载的历史新闻只能从今天起使用，不能把旧 `published_at` 冒充历史可用时间。因此普通历史 CSV 即使补到 200 条也不能用于历史 OOS | 先确认具备授权且可审计历史可用时刻的数据源，再设计 append-only 的历史可用性契约与泄漏测试；在此之前禁止手工回填 News Alpha 历史事实 |
 | TD-45 | P0（作者内容采集授权） | 公开可访问不等于允许自动采集或训练。Kitco 条款明确禁止机器人/自动设备检索、数据挖掘及未经授权存储或复制内容；中金在线候选页又存在证书域名不匹配 | 不绕过证书警告，不对 Kitco 启动自动采集。用户需提供具备自动采集/研究使用授权的数据源、官方 API 或书面许可；授权确认前只保留合规审查，不保存正文样本、不写数据库 |
+| TD-46 | P2（可观测性剩余） | GOLD-004 已交付**只读**健康度 / 资格观测（`src/monitoring/` + `scripts/report_collector_health.py`，证据见 `PROGRESS_LOG.md` 第六十八轮）；**剩余**：仅有报告、无告警推送与时间序列趋势，且 `processed_items.status` 的 `SKIPPED` 无法在 SQL 层区分 `DUPLICATE` / `REJECTED`（口径见 TD-19 与 `src/monitoring/collector_health.py` 模块 docstring，需要时读 `structured_json.outcome` 抽样或新列） | 有运维/巡检需求时（TD-10 前置） |
 
 
 ---
@@ -490,7 +491,28 @@
 
 ---
 
+### TD-46 采集运行健康度 / Phase 3.3 数据资格观测的剩余边界（P2，2026-09-22）
 
+- **现状（GOLD-004 已交付）**：`src/monitoring/` 提供**只读**聚合（`collector_health` /
+  `phase33_qualification` / `report`），CLI 为 `scripts/report_collector_health.py`
+  （默认人类可读；`--json` 稳定机器可读；`--report` 需配 `--no-dry-run` 才落盘）。
+- **已覆盖**：source 级运行次数 / SUCCESS-PARTIAL-FAILED-在途 / 连败 / 陈旧 /
+  `raw_items` 实际条数 / `inserted`-`duplicate` 上报值 / `processed_items`
+  成功-拒绝-失败 / 加工观测状态，以及 Phase 3.3 资格缺口（当前值、要求值、比较方式、
+  PASS/BLOCKED、原因、证据时间范围），并持续显式输出 `PHASE3_3_DATA`。
+- **剩余（本条目跟踪）**：
+  1. **无告警推送**：只有拉取式报告，没有阈值告警通道（邮件 / webhook）——观测层刻意不做副作用；
+  2. **无时间序列**：报告是窗口快照，未落库为趋势指标（Dashboard 属 TD-10）；
+  3. **拒绝原因不可细分**：`processed_items.status` 只区分 `SUCCESS/SKIPPED/FAILED`，
+     `SKIPPED` 同时涵盖 `DUPLICATE` 与 `REJECTED`（映射见
+     `src/processors/collection/contracts.py`）；需要细分时读 `structured_json.outcome`
+     （当前不做 SQL 级 JSON 抽取，以保持 SQLite / PostgreSQL 可移植）或新增列
+     （属 schema 变更，需 migration 并与本条目同步）。
+- **解除条件**：出现明确运维 / 巡检需求（或 Dashboard 落地）时，设计告警与趋势存储，
+  并同步 `docs/03` / `docs/04`。
+- **不变量**：观测层永远只读；不得因观测结果 PASS 而解除 `PHASE3_3_DATA`。
+
+---
 
 ## 4. 已知限制（设计取舍，非缺陷）
 
