@@ -4,13 +4,13 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-011",
-  "last_completed_task": "GOLD-010",
-  "last_reviewed_task": "GOLD-010",
+  "current_task": "GOLD-012",
+  "last_completed_task": "GOLD-011",
+  "last_reviewed_task": "GOLD-011",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-010 已完成并通过工程验收，Evidence Readiness 已具备纯本地单次 runner、OS 级单实例锁、原子 state/event/status 与 fail-closed 周期调用能力；真实库仍缺少足量合法授权且具有可信独立时间/availability/OOS 证据的 Author/News 数据，资格不能由工程工具自动解除。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
+      "detail": "GOLD-011 已完成并通过工程验收：Evidence Inbox 已具备纯本地只读发现/preflight、内容 SHA-256/fingerprint、幂等 pending register、symlink/path traversal 防护与 fail-closed。真实库仍缺少足量合法授权且具有可信独立时间/availability/OOS 证据的 Author/News 数据，资格不能由工程工具自动解除。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
       "retryable": false
     }
   ],
@@ -19,7 +19,7 @@
     {"code": "CLINE_MODEL_QUOTA_OR_CONFIG", "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"},
     {"code": "CLINE_CLI_INSTALLATION", "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"}
   ],
-  "next_action": "Run GOLD-011 only as blocker-facing tooling: provide a pure-local read-only evidence inbox discovery/preflight path that reuses the existing Evidence Gateway/Operator/Readiness rules. Do not auto-intake, write the database, add external services, lower qualification thresholds, or create Phase 3.4/model tasks. Phase transition remains an L3 human gate.",
+  "next_action": "Run GOLD-012 only as blocker-facing tooling: add a pure-local explicit human review decision/audit layer for GOLD-011 inbox candidates and produce an approved-for-explicit-intake list. Do not auto-intake, write the research database, add external services, lower qualification thresholds, or create Phase 3.4/model tasks. Phase transition remains an L3 human gate.",
   "human_gates": [
     {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."}
   ],
