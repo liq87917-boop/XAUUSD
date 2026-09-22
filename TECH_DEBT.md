@@ -48,8 +48,8 @@
 | TD-08 | P1 | 生产 RSS / 行情备用源未配置（`feeds` 为空、Stooq 关闭） | 上线前运维配置 |
 | TD-09 | ✅ 已解除（2026-09-22） | ~~Scheduler（每 30 分钟任务框架）未实现~~ → `src/scheduler/`（UTC 对齐确定性 30 分钟槽 + `job_runs` 幂等 + stale RUNNING/RETRYING 接管 + 单源构造/执行故障隔离）+ `scripts/run_collector_scheduler.py`（`--once` / 常驻循环，Ctrl+C 正常退出）；复用现有 `job_runs`，无新 migration/schema；证据见 `PROGRESS_LOG.md` 第六十五轮（新增 60 项 Mock 测试，全量 pytest / ruff / mypy 通过） | 已修 |
 | TD-10 | P1 | Dashboard / API 未实现（Phase 1 交付物中的监控与查询页面） | Phase 1 收尾轮 / Phase 2 |
-| TD-11 | P1 | Processor 层未独立建立（normalize/dedup/timezone 目前内嵌在采集器内） | Phase 1 收尾轮 |
-| TD-12 | P2（部分解除） | `job_runs` 已由 30 分钟 Scheduler 写入（TD-09）；`processed_items` / `data_versions` / `audit_logs` 仍无写入路径 | 随 TD-11 |
+| TD-11 | ✅ 已解除（2026-09-22） | ~~Processor 层未独立建立（normalize/dedup/timezone 目前内嵌在采集器内）~~ → `src/processors/collection/`（`contracts` / `normalize` / `identity` / `validate` / `pipeline`）：确定性四阶段流水线（normalize → timezone/effective_at → identity/dedup → validation/audit）+ 幂等写 `processed_items`（append-only，`(raw_item_id, processor_name, processor_version)` 唯一 + 存在性检查）+ 白名单审计摘要 + 凭据擦除（`src/common/redaction.py`）；采集侧接线点 `BaseCollector(post_processor=...)`（默认 None，零行为变化），参考实现 RSS `collect_rss.py --to-db`；无新 migration/schema；证据见 `PROGRESS_LOG.md` 第六十六轮（新增 72 项 Mock 测试，全量 pytest / ruff / mypy 通过） | 已修 |
+| TD-12 | P2（部分解除，2026-09-22 收紧） | `job_runs` 已由 30 分钟 Scheduler 写入（TD-09）；`processed_items` 已有两条写入路径（`src/processors/collection/pipeline.py` 采集后处理 + `src/processors/opinion_pipeline.py`）；`audit_logs` 已由作者库仓储写入（`database/repositories/audit.py`）；`data_versions` 已由 `src/features/market.py` / `src/alpha/regime.py` 写入。**剩余**：`processed_items` 无 `error_message` 列（失败详情在 `structured_json`，见 TD-19）、非行情数据集的 `data_versions` 快照仍随各阶段补齐 | 随需求 |
 | TD-13 | P2 | `raw_media` 无下载器（图片二进制未落地，`storage_uri` 写入路径未验证） | Phase 2（微博图片） |
 | TD-14 | P2 | 依赖仅声明下界，无 lock 文件（可复现构建依赖 pip 解析） | 择期 |
 | TD-15 | ✅ 已解除 | 仓库已初始化 Git；2026-09-17 已在 W0-5 前创建本地数据库快照，代码检查点待本轮全量门禁通过后建立 | 本轮收尾 |
@@ -207,11 +207,42 @@
 
 ### TD-11 / TD-12 Processor 层与部分表未启用（P1/P2）
 
-- **现状**：`processed_items`（加工结果，append-only）无写入路径；`data_versions` / `audit_logs`
-  同样只建表未使用。normalize / dedup / timezone 处理目前内嵌在采集器内（职责边界尚可，
-  但不满足 `docs/02` 的 Processor 分层）。
-- **解除条件**：抽出 `src/processors/`（如 `bar_aggregator`、`text_normalizer`），
-  每次加工写入 `processed_items(processor_name, processor_version)`，并建立 `data_versions` 快照。
+> **更新（2026-09-22，GOLD-002）**：TD-11 **已解除**。加工层已独立为
+> `src/processors/collection/`（`contracts` / `normalize` / `identity` / `validate` / `pipeline`）：
+>
+> - **确定性四阶段流水线**：`normalize`（NFKC / 去零宽 / 折叠空白 / 超长截断）→
+>   `timezone/effective_at`（统一 UTC，`effective_at = max(published_at, collected_at, 上游下界)`）→
+>   `identity/dedup`（内容指纹 + 幂等键 `source_id + source_record_id + content_hash`）→
+>   `validation/audit`（数据质量校验 + 元数据脱敏 → 白名单摘要）；
+> - **append-only 幂等落库**：写 `processed_items(processor_name, processor_version, status,
+>   normalized_text, language, structured_json, effective_at)`，`(raw_item_id, processor_name,
+>   processor_version)` 唯一约束 + 落库前存在性检查 → 重复输入 / 重复运行新增 0 行；
+>   **不新增 migration / schema**；
+> - **不伪造时间**：`published_at` / `collected_at` / 上游 `effective_at` 都不可用时判
+>   `REJECTED` 且 `persistable=False`（不写库），绝不使用"当前时间"冒充事实时间；
+> - **坏数据隔离 + 诚实状态**：单条 `REJECTED` / `FAILED` 只影响自己，批次状态区分
+>   `SUCCESS` / `PARTIAL_FAILED` / `FAILED`；摘要只含白名单字段，凭据统一由
+>   `src/common/redaction.py` 擦除（`Bearer` 规则必须先于 `Authorization` 规则，
+>   否则 `Authorization: Bearer xxx` 会残留真实 token——已由单测锁定）；
+> - **采集侧最小接线**：`BaseCollector(post_processor=...)`（默认 `None`，零行为变化，
+>   未接线时不会产生任何 `processed_items`）；参考实现 = RSS 采集路径
+>   `python scripts/collect_rss.py --to-db`；生产工厂入口
+>   `src/collectors/bootstrap.py::default_collector_factory(post_processor=...)`。
+>   **Scheduler 核心（`src/scheduler/core.py`）不含任何 Processor 逻辑**（接线点评估结论：
+>   由 bootstrap/CLI 注入，不进调度核心）；
+> - **测试**：新增 72 项（`tests/unit/test_collection_processor.py` 35、
+>   `tests/unit/test_redaction.py` 25、`tests/integration/test_collection_processor_persistence.py` 8、
+>   `tests/integration/test_collection_processor_wiring.py` 4），全部 Mock、零网络；
+>   覆盖确定性、时区边界、`effective_at`、重复输入/重复运行、坏数据隔离、敏感字段过滤、空批次。
+>
+> TD-12 据此**收紧为"部分解除"**：`processed_items`（采集后处理 + 观点管道）、
+> `audit_logs`（作者库仓储）、`data_versions`（`src/features/market.py`、`src/alpha/regime.py`）
+> 均已具备写入路径；**仍未完成**的是"所有数据集都建立 `data_versions` 快照"这一更严口径，
+> 以及 `processed_items` 缺少 `error_message` 列（见 TD-19）。
+>
+> 原始冻结描述（保留审计历史）：`processed_items`（加工结果，append-only）原本无写入路径；
+> `data_versions` / `audit_logs` 同样只建表未使用；normalize / dedup / timezone 处理内嵌在
+> 采集器内（职责边界尚可，但不满足 `docs/02` 的 Processor 分层）。
 
 ### TD-13 `raw_media` 无下载器（P2）
 

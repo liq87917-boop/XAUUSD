@@ -8,6 +8,14 @@ from src.common.exceptions import (
     TimeSemanticsError,
 )
 from src.common.hashing import content_hash, normalize_for_hash, sha256_bytes, sha256_text
+from src.common.redaction import (
+    REDACTED,
+    is_sensitive_key,
+    redact_secrets,
+    safe_text,
+    safe_url,
+    sanitize_mapping,
+)
 from src.common.time import (
     UTC_TZ,
     is_future,
@@ -26,16 +34,22 @@ __all__ = [
     "ConfigSecurityError",
     "GoldAIError",
     "ImmutableRecordError",
+    "REDACTED",
     "SeedError",
     "TimeSemanticsError",
     "UTC_TZ",
     "content_hash",
     "is_future",
+    "is_sensitive_key",
     "normalize_for_hash",
     "parse_iso8601",
+    "redact_secrets",
     "require_aware",
     "resolve_effective_at",
     "resolve_timezone",
+    "safe_text",
+    "safe_url",
+    "sanitize_mapping",
     "sha256_bytes",
     "sha256_text",
     "to_naive_utc",

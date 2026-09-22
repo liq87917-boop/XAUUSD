@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -33,6 +32,7 @@ from src.collectors.base import BaseCollector
 from src.collectors.registry import collector_for_source
 from src.collectors.runner import CollectorRunResult, run_collectors
 from src.collectors.types import CollectWindow
+from src.common.redaction import redact_secrets
 from src.common.time import to_utc, utc_now
 from src.scheduler.slots import DEFAULT_INTERVAL_MINUTES, ScheduleSlot, resolve_slot
 
@@ -66,28 +66,9 @@ _MAX_JOB_ERROR_CHARS = 2000
 ClockFn = Callable[[], datetime]
 CollectorFactory = Callable[[Source], BaseCollector]
 
-#: 凭据擦除规则（宁多擦不可漏：Authorization / Bearer / sk- / api_key / token 等）
-#: 注意 ``["']?`` —— 摘要里可能是 JSON（``{"api_key": "..."}``），键名后的引号必须容忍。
-_REDACTION_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(?i)\b(authorization)\b[\"']?\s*[:=]\s*[^\s,;]+"), r"\1=***"),
-    (re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/=\-]+"), r"\1 ***"),
-    (re.compile(r"\bsk-[A-Za-z0-9_\-]{4,}"), "sk-***"),
-    (re.compile(r"(?i)\b(api[_-]?key)\b[\"']?\s*[:=]\s*[^\s,;]+"), r"\1=***"),
-    (
-        re.compile(
-            r"(?i)\b(access[_-]?token|refresh[_-]?token|secret|token)\b[\"']?\s*[:=]\s*[^\s,;]+"
-        ),
-        r"\1=***",
-    ),
-)
-
-
-def redact_secrets(text: str) -> str:
-    """把文本里的凭据擦成 ``***``（用于错误 / 告警摘要，避免进 ``output_json``）。"""
-    redacted = text
-    for pattern, replacement in _REDACTION_RULES:
-        redacted = pattern.sub(replacement, redacted)
-    return redacted
+# 说明：凭据擦除规则已上移到 ``src/common/redaction.py``（唯一实现）。
+# 本模块继续对外导出 ``redact_secrets``（历史调用点 / 测试不变），只是实现改为共享模块，
+# 保证 Scheduler 与 Processor 的摘要使用**同一套**规则（避免某条链路漏擦）。
 
 
 @dataclass(frozen=True, slots=True)

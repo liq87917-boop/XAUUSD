@@ -52,6 +52,7 @@ Strategy 事实，不进入实盘。
 | **Phase 2 Mock 演练数据生成器**（250 条结构化合成博文：`id`/`source`/`content` + `effective_at=max(published_at,collected_at)` + 126 条对抗样本 + 5 条同文转载 + 4 个已注册 NEWS 来源；每行 `is_mock=true`） | `scripts/generate_mock_posts.py` |
 | 抽样**输入缺失自动补数据** + 输入**来源体检**（`input_is_mock` 写入元数据）+ 控制台醒目警告 | `scripts/sample_annotation_set.py`、`logs/annotation_sample.meta.json` |
 | CLI 脚本**双通道**（`python scripts/x.py` 与 `python -m scripts.x` 都可运行）+ **真实进程**冒烟测试 + CSV 编码 `utf-8-sig`（Excel 中文不乱码） | `scripts/__init__.py`、`tests/integration/test_cli_scripts.py` |
+| **采集后处理 Processor Pipeline**（normalize → timezone/effective_at → identity/dedup → validation/audit → `processed_items`，append-only + 幂等 + 坏数据隔离 + 摘要脱敏；RSS 采集路径已最小接线） | `src/processors/collection/`、`src/common/redaction.py`、`src/collectors/base.py`（`post_processor` 钩子） |
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
 采集时间不可信而隔离；新闻侧只有 30 条 / 56 天，最大单源占比 66.67%。详见
@@ -313,6 +314,44 @@ python -m scripts.run_collector_scheduler --stale-after-minutes 45
   duplicate / failed / skipped / retry_count / warnings），**不写** token / API key /
   Authorization / 完整 source 配置；
 - 无新增依赖（仅标准库 `asyncio` / `time`）、无新增 migration / schema。
+
+### 采集后处理 Processor Pipeline（`src/processors/collection/`，TD-11）
+
+> 从采集器里抽离出来的**采集后处理层**：不再把 normalize / dedup / timezone 逻辑内嵌在
+> 采集器内（`docs/02 §5.2` 的 Processor 分层）。
+
+确定性流水线（同一输入必得同一输出）：
+
+```text
+ProcessorInput
+  → ① normalize              Unicode NFKC / 去零宽字符 / 折叠空白 / 超长截断
+  → ② timezone/effective_at  统一 UTC；effective_at = max(published_at, collected_at, 上游下界)
+  → ③ identity/dedup         内容指纹 + 幂等键（source_id + source_record_id + content_hash）
+  → ④ validation/audit       数据质量校验 + 元数据脱敏 → 白名单审计摘要
+  → processed_items（append-only；含 processor_name / processor_version / status）
+```
+
+- **职责边界**：本层不联网、不读 robots、不做 provider 授权/解析、不做调度；
+  事实时间只来自 `published_at` / `collected_at`，时间不可信时判 `REJECTED`
+  且**不落库**（宁可不写，也不用"现在"伪造）；
+- **append-only + 幂等**：`processed_items` 以 `(raw_item_id, processor_name,
+  processor_version)` 唯一 + 落库前存在性检查 → 重复输入 / 重复运行不产生重复结果；
+  全部原始记录只读，绝不 UPDATE；
+- **坏数据隔离**：单条失败（`REJECTED` / `FAILED`）只影响自己，批次状态诚实区分
+  `SUCCESS` / `PARTIAL_FAILED` / `FAILED`；审计摘要只含
+  `processor / version / status / input_count / output_count / duplicate_count /
+  rejected_count / failed_count / warnings / error` 白名单字段，凭据统一由
+  `src/common/redaction.py` 擦除（URL 去掉 query/userinfo）；
+- **接线点**：`BaseCollector(..., post_processor=...)`（默认 `None`，零行为变化）；
+  参考实现是 RSS 采集路径 `python scripts/collect_rss.py --to-db`（CLI 统计里多出
+  `processing` 摘要），生产工厂入口 `src/collectors/bootstrap.py::default_collector_factory(
+  post_processor=...)`——Scheduler 核心不感知 Processor；
+- **测试**：`tests/unit/test_collection_processor.py`（35 项）、
+  `tests/unit/test_redaction.py`（25 项）、
+  `tests/integration/test_collection_processor_persistence.py`（8 项）、
+  `tests/integration/test_collection_processor_wiring.py`（4 项），全部 Mock、零网络；
+- 无新增依赖、无新增 migration / schema（复用现有 `processed_items` 与 `ProcessStatus`）。
+
 
 ## 8. 数据模型
 

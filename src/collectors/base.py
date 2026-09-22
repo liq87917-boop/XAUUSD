@@ -46,7 +46,13 @@ from src.collectors.types import (
     FetchPage,
     RawItemPayload,
 )
+from src.common.redaction import safe_text
 from src.common.time import utc_now
+from src.processors.collection.contracts import (
+    PersistedItemProcessor,
+    ProcessedRecord,
+    RecordOutcome,
+)
 
 __all__ = ["PERSIST_DUPLICATE", "PERSIST_INSERTED", "BaseCollector"]
 
@@ -60,6 +66,9 @@ PERSIST_DUPLICATE = "duplicate"
 
 _INSERTED = PERSIST_INSERTED
 _DUPLICATE = PERSIST_DUPLICATE
+
+#: 采集器侧保留的 Processor 告警上限（防止异常刷屏把 collector_runs.warnings_json 撑爆）
+_MAX_PROCESSING_WARNINGS = 20
 
 
 class BaseCollector(ABC):
@@ -99,6 +108,7 @@ class BaseCollector(ABC):
         retry_policy: RetryPolicy | None = None,
         clock: ClockFn = utc_now,
         sleep: SleepFn | None = None,
+        post_processor: PersistedItemProcessor | None = None,
     ) -> None:
         """初始化采集器。
 
@@ -109,6 +119,10 @@ class BaseCollector(ABC):
             retry_policy: 重试策略，默认 3 次尝试 + 指数退避。
             clock: 时间源（测试可注入固定时钟，保证断言稳定）。
             sleep: 退避休眠函数（测试注入假实现，避免真正等待）。
+            post_processor: 可选**采集后处理钩子**（TD-11）：每条原始记录落库后调用一次，
+                只接收 ``(session, raw_item)``，由 Processor 负责 normalize / dedup /
+                effective_at 并写 ``processed_items``。**默认 None（零行为变化）**；
+                采集器自身不实现 Processor 业务逻辑，分层边界不被破坏。
         """
         self.source = source
         self.retry_policy = retry_policy or self.default_retry_policy
@@ -117,6 +131,9 @@ class BaseCollector(ABC):
         self._sleep = sleep
         self._attempts: list[FetchAttempt] = []
         self._warnings: tuple[str, ...] = ()
+        self._post_processor = post_processor
+        self._processing_counts: dict[str, int] = {}
+        self._processing_warnings: list[str] = []
         #: 本轮实际使用的传输通道（library / rest / cache），供统一结果对象与监控使用
         self.transport_used: str | None = None
         #: 本轮跳过的记录数（数据质量校验拒绝，未入库）
@@ -242,6 +259,8 @@ class BaseCollector(ABC):
         self._warnings = ()
         self.transport_used = None
         self.skipped_count = 0
+        self._processing_counts.clear()
+        self._processing_warnings.clear()
 
     def _evaluate_run_warnings(
         self, window: CollectWindow, outcome: CollectOutcome
@@ -250,6 +269,7 @@ class BaseCollector(ABC):
 
         通用规则：本轮实际获得记录数（inserted + duplicate）低于期望下限时不静默——
         既打印 WARNING 日志，也通过 :attr:`last_warnings` 暴露给调用方。
+        另外附带 Processor 后处理告警（若注入了 ``post_processor``）。
         """
         expected = self._expected_min_records(window)
         obtained = outcome.inserted_count + outcome.duplicate_count
@@ -257,8 +277,9 @@ class BaseCollector(ABC):
             return (
                 f"本轮仅获得 {obtained} 条记录，低于预期下限 {expected} 条"
                 f"（窗口 {window.start_utc.isoformat()} ~ {window.end_utc.isoformat()}）",
+                *self._processing_warnings,
             )
-        return ()
+        return tuple(self._processing_warnings)
 
     async def health_check(self) -> CollectorHealth:
         """对外健康检查：任何异常都转成"不健康"结果，不向调用方抛出。"""
@@ -286,6 +307,59 @@ class BaseCollector(ABC):
 
         这是**可选**扩展点：默认什么都不做，子类按需覆盖。
         """
+
+    # ------------------------------------------------------------------
+    # 采集后处理（TD-11：Processor 接线点）
+    # ------------------------------------------------------------------
+    @property
+    def post_processor(self) -> PersistedItemProcessor | None:
+        """注入的采集后处理钩子（``None`` 表示未接线，行为与本能力引入前一致）。"""
+        return self._post_processor
+
+    def processing_summary(self) -> dict[str, Any] | None:
+        """Processor 后处理的可审计摘要（未接线时返回 ``None``）。
+
+        只含白名单计数与告警（已脱敏），**不含** token / API key / 完整 source config，
+        可直接写入 ``job_runs.output_json`` / CLI 统计。
+        """
+        if self._post_processor is None:
+            return None
+        counts = self._processing_counts
+        return {
+            "processor": self._post_processor.processor_name,
+            "processor_version": self._post_processor.processor_version,
+            "processed": counts.get(RecordOutcome.SUCCESS.value, 0),
+            "duplicate": counts.get(RecordOutcome.DUPLICATE.value, 0),
+            "rejected": counts.get(RecordOutcome.REJECTED.value, 0),
+            "failed": counts.get(RecordOutcome.FAILED.value, 0),
+            "warnings": list(self._processing_warnings),
+        }
+
+    def _post_process(self, session: Session, raw_item: RawItem) -> None:
+        """把刚落库的原始记录交给 Processor（可选钩子；失败不得拖垮采集）。"""
+        processor = self._post_processor
+        if processor is None:
+            return
+        try:
+            record: ProcessedRecord = processor.process_persisted(session, raw_item)
+        except Exception as exc:  # noqa: BLE001 - 后处理异常必须可观测，但不得阻断采集
+            warning = f"Processor 后处理异常：{type(exc).__name__}: {exc}"
+            self._record_processing_warning(warning)
+            _log.warning("%s | %s", self.collector_name, warning)
+            return
+
+        outcome = record.outcome.value
+        self._processing_counts[outcome] = self._processing_counts.get(outcome, 0) + 1
+        for warning in record.warnings:
+            self._record_processing_warning(warning)
+
+    def _record_processing_warning(self, text: str) -> None:
+        """记录 Processor 告警（脱敏 + 截断 + 上限，绝不写入凭据）。"""
+        if len(self._processing_warnings) >= _MAX_PROCESSING_WARNINGS:
+            return
+        redacted = safe_text(str(text), max_chars=300)
+        if redacted:
+            self._processing_warnings.append(redacted)
 
 
     # ------------------------------------------------------------------
@@ -455,6 +529,9 @@ class BaseCollector(ABC):
 
         self._persist_media(session, raw_item, payload)
         self._after_persist(session, raw_item, payload)
+        # 采集后处理（可选）：Processor 负责 normalize / dedup / effective_at → processed_items。
+        # 必须在 raw_item 落库之后（Processor 需要 raw_item.id 与数据库里的时间字段）。
+        self._post_process(session, raw_item)
         return _INSERTED
 
     def _persist_media(self, session: Session, raw_item: RawItem, payload: RawItemPayload) -> None:

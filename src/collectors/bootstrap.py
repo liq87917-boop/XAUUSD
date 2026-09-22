@@ -5,7 +5,11 @@
    副作用注册（幂等：重复调用无副作用）；
 2. :func:`default_collector_factory`：返回 ``Source → BaseCollector`` 的生产工厂，
    按 ``sources.config_json['collector']`` 查注册表构造采集器，并注入
-   :class:`~src.collectors.transport.AiohttpTransport`。
+   :class:`~src.collectors.transport.AiohttpTransport`；
+3. 可选注入**采集后处理钩子**（TD-11）：``post_processor`` 为 ``None`` 时行为与引入前完全一致；
+   传入 Processor 后，每条原始记录落库后立即加工并写 ``processed_items``。
+   这是 ``Scheduler → Collector → Processor`` 的**唯一接线点**——
+   Scheduler 核心（``src/scheduler/core.py``）不需要（也不允许）知道 Processor 的任何逻辑。
 
 为什么单独成模块（TD-09）：
 - Scheduler 核心只做"调度 + 幂等 + 故障隔离"，**不得**出现 provider URL / 解析逻辑 /
@@ -21,6 +25,7 @@ from database.models import Source
 from src.collectors.base import BaseCollector
 from src.collectors.registry import collector_for_source
 from src.collectors.transport import AiohttpTransport, Transport
+from src.processors.collection.contracts import PersistedItemProcessor
 
 __all__ = ["CollectorFactory", "default_collector_factory", "ensure_collectors_registered"]
 
@@ -36,17 +41,26 @@ def ensure_collectors_registered() -> None:
     import src.collectors  # noqa: F401  # 副作用导入：完成 @register_collector
 
 
-def default_collector_factory(*, transport: Transport | None = None) -> CollectorFactory:
+def default_collector_factory(
+    *,
+    transport: Transport | None = None,
+    post_processor: PersistedItemProcessor | None = None,
+) -> CollectorFactory:
     """构造生产采集器工厂。
 
     Args:
         transport: HTTP 传输实现；``None`` 时惰性创建 :class:`AiohttpTransport`
             （库型采集器如 ``akshare_gold`` 不使用 HTTP，多余参数会被忽略）。
+        post_processor: 可选的采集后处理钩子（Processor）。**默认 ``None``**，
+            即不改变现有采集行为；需要"采集后立即加工"时由调用方（CLI / 调度入口）
+            显式传入 :class:`~src.processors.collection.pipeline.CollectionProcessor`。
     """
     ensure_collectors_registered()
     shared_transport: Transport = transport if transport is not None else AiohttpTransport()
 
     def _factory(source: Source) -> BaseCollector:
-        return collector_for_source(source, transport=shared_transport)
+        return collector_for_source(
+            source, transport=shared_transport, post_processor=post_processor
+        )
 
     return _factory

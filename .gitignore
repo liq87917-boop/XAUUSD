@@ -49,3 +49,6 @@ logs/llm_cache/
 **/.pytest-cache*/
 .ai/runtime/
 .ai/logs/
+
+# ---- 临时测试产物（2026-09-22 清理 GOLD-001-R2 误提交的 .tmp_pytest*，防止再次入库）----
+.tmp_pytest*

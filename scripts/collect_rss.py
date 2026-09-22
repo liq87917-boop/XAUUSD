@@ -522,7 +522,7 @@ class _RateLimitedTransport:
 
 
 async def _drive_to_db(args: argparse.Namespace, specs: Sequence[RssSourceSpec]) -> int:
-    """逐源运行正式采集框架，写入 raw_items/news_events/collector_runs。"""
+    """逐源运行正式采集框架，写入 raw_items/news_events/collector_runs（+ processed_items）。"""
     import sqlalchemy as sa
 
     from database.models import Source
@@ -530,6 +530,7 @@ async def _drive_to_db(args: argparse.Namespace, specs: Sequence[RssSourceSpec])
     from src.collectors.rss_collector import RssCollector
     from src.collectors.runner import run_collector
     from src.collectors.types import CollectWindow
+    from src.processors.collection.pipeline import CollectionProcessor
 
     now = datetime.now(UTC)
     window = CollectWindow(start_at=now - timedelta(days=args.lookback_days), end_at=now)
@@ -559,6 +560,7 @@ async def _drive_to_db(args: argparse.Namespace, specs: Sequence[RssSourceSpec])
                     cache_dir=Path(args.cache_dir),
                     cache_mode=args.cache_mode,
                     max_items_per_feed=args.per_feed_limit,
+                    post_processor=CollectionProcessor(),
                 )
                 result = await run_collector(session, collector, window=window, resume=False)
                 outcome = result.outcome
@@ -572,6 +574,8 @@ async def _drive_to_db(args: argparse.Namespace, specs: Sequence[RssSourceSpec])
                     "failed": 0 if outcome is None else outcome.failed_count,
                     "warnings": list(result.warnings),
                     "error": result.error_message,
+                    # 采集后处理（TD-11）：白名单摘要（processor/version/计数/告警），不含凭据
+                    "processing": collector.processing_summary(),
                 }
                 results.append(row)
                 print(
