@@ -2334,4 +2334,70 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；
 - 同步 `README.md`（§1 交付表 + §7 新章节 + §10 阻塞说明）与 `TECH_DEBT.md`（新增 TD-47）。
 
+## 第七十轮（2026-09-22）：GOLD-006 —— 证据就绪度与一键资格复核入口
+
+### 1. 交付内容
+
+- **operator 证据模板**（`src/evidence/templates.py` + `examples/evidence/`）：
+  - `template --scope author|news --format csv|jsonl`：列 = 契约字段（去掉系统赋值列，
+    保留可选 `available_at` / `availability_*`）+ 标记列 `record_kind,is_mock`；
+  - 示例行**显式标记** `record_kind=example` / `is_mock=true`，其余字段填非法占位值
+    （时间不是合法 ISO8601、`authorization_status=PENDING`、三项 `permits_*=false`）；
+  - 新增 `ReasonCode.SYNTHETIC_EVIDENCE`（隔离类）：`assess_row` 命中标记列即整行隔离，
+    **不写库、不计入 qualification ledger**；即使有人删掉标记列，示例行仍会因
+    授权缺失 / 时间非法被隔离（双层防护）；
+  - `write_template` 默认拒绝覆盖已存在文件，防止覆盖 operator 已填写内容。
+- **只读证据台账扩展**（`src/evidence/ledger.py`）：`ScopeLedger` 新增 OOS eligible 记录的
+  `source_counts`（来源名过 `safe_text`）与 `coverage_days` / `max_source_share` 属性。
+- **就绪度 / preflight 报告**（`src/monitoring/evidence_readiness.py`）：
+  - 阈值完全复用 `src/alpha/evidence_gate.py`（30 条 / 200 事件 / 90 天 / 单源 40%），
+    不另造阈值、不修改 `src/alpha/**`；
+  - 逐 scope 输出 `eligible_count` / `certified_count` / `not_oos_eligible_count` /
+    `coverage_days` / `max_source_share`，以及每条检查的当前值、阈值、比较方式、状态、
+    **remaining gap**、证据时间范围；无证据时 `evaluable=false`，集中度检查**不得判 PASS**；
+  - 批次量化（dry-run）：`accepted` / `quarantined` / `duplicate` / `conflict`
+    （`IDENTITY_CONFLICT`）/ `not_oos_eligible` + 稳定原因码计数；
+  - `blocker_active` 与 `human_gate_required` **恒为 true**；稳定 JSON（`sort_keys`）。
+- **CLI** `scripts/evidence_readiness.py`：`template` / `preflight` / `recheck` 三个子命令，
+  默认只读、零网络、零写入（`--report` 必须显式配 `--no-dry-run`）；`recheck` 一键串联只读台账与
+  现有 Phase 3.3 qualification report，JSON 含 `blocker_active`、`gate`
+  （qualification PASS/BLOCKED 计数 + readiness 状态）、`readiness`（实际值 / 阈值 / remaining gap）
+  与 `qualification` 全文；人类可读模式输出两份 Markdown；
+  退出码 `0`（BLOCKED 也是正常结果）/ `2` 参数或输入错误 / `3` 输入没有数据行。
+- **脱敏**：报告只含白名单标量，不读取 `sources.config_json`、不输出正文，
+  来源名过 `safe_text`，token / API key / Authorization 一律 `***`。
+- **operator 工作流**（README §7 与 `examples/evidence/README.md`）：
+  prepare template → dry-run/preflight → inspect quarantine → explicit intake → qualification recheck。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **39 项**测试（全部 Mock / 临时文件 / SQLite，零网络，未新增依赖）：
+  - `tests/unit/test_evidence_templates.py` **12**：标记列契约一致性、模板列、CSV/JSONL 示例标记、
+    格式校验、拒绝覆盖、仓库模板文件存在且可机械识别、示例行判 `SYNTHETIC_EVIDENCE` 隔离、
+    删掉标记列后仍被隔离（授权 / 时间）；
+  - `tests/unit/test_evidence_readiness.py` **15**：阈值与比较方式与 `evidence_gate` 一致、
+    空库全 BLOCKED 且 remaining gap 准确、Author 可信 eligible 缺口、availability 不达标不计入、
+    News 条数 / 覆盖天数 / 单源占比缺口、平衡场景量化 PASS **但不解除 blocker**、批次量化五项计数、
+    稳定 JSON、来源名凭据脱敏、naive `as_of` 拒绝、Markdown 渲染、scope 过滤；
+  - `tests/integration/test_evidence_readiness_integration.py` **12**：空库 preflight/recheck JSON、
+    模板文件 preflight 全隔离且 DB 零写入、重复 / 内容冲突 / 授权缺失批次量化、有效输入 dry-run 零写入、
+    授权提交后计数可见但 blocker 不解、News 三项达标仍 BLOCKED、凭据与 source config 不入报告、
+    `--report` 默认不落盘、参数与输入错误退出码、`template` 打印 / 写入 / 拒绝覆盖、Markdown 报告。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **1806 passed / 1 skipped in 223.38s**
+    （唯一 skip 为 `jieba` 已安装分支）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 149 source files`。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增/修改 migration 与 schema、未联网、未抓取任何站点、未触碰 `.env`；
+- `src/alpha/**`、`src/scheduler/**`、`src/collectors/**` 未改动（只**复用**其阈值与口径）；
+- **未解除** `PHASE3_3_DATA`（报告与 JSON 持续显式输出 `blocker_active=true`），未进入 Phase 3.4；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；
+- 同步 `README.md`（§1 交付表 + §7 新章节 + §10 阻塞说明）、`TECH_DEBT.md`（新增 TD-48）与
+  `examples/evidence/README.md`。
+
+
 

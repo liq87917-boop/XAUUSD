@@ -7,6 +7,8 @@
 - :mod:`src.evidence.intake`：validate-first / dry-run-first 的导入引擎
   （幂等、坏行隔离、append-only 落 ``raw_items`` + ``processed_items``）；
 - :mod:`src.evidence.report`：Markdown 报告 + quarantine JSONL 载荷（全部脱敏）；
+- :mod:`src.evidence.templates`：Author / News 的 operator-ready 输入模板（GOLD-006），
+  模板行带显式 synthetic/example 标记，导入时判 ``SYNTHETIC_EVIDENCE`` 隔离、绝不计入；
 - :mod:`src.evidence.ledger`：只读台账，供 GOLD-004 资格观测层统计
   "经证据入口认证且具备独立历史可用证据"的记录。
 
@@ -27,12 +29,16 @@ from src.evidence.contracts import (
     COMMON_REQUIRED_FIELDS,
     EVIDENCE_CONTRACT_VERSION,
     EVIDENCE_SCHEMA_VERSION,
+    EXAMPLE_MARKER_FLAG_FIELDS,
+    EXAMPLE_MARKER_KIND_FIELDS,
+    EXAMPLE_MARKER_VALUES,
     QUARANTINE_REASON_CODES,
     AuthorizationDeclaration,
     EvidenceScope,
     ReasonCode,
     RowStatus,
     required_field_names,
+    synthetic_marker_fields,
 )
 from src.evidence.intake import (
     EvidenceIntakeReport,
@@ -52,6 +58,17 @@ from src.evidence.ledger import (
     load_evidence_ledger,
 )
 from src.evidence.report import quarantine_payload, render_intake_report
+from src.evidence.templates import (
+    EXAMPLE_MARKER_COLUMNS,
+    TEMPLATE_FORMATS,
+    TEMPLATE_ROOT,
+    TEMPLATE_SCHEMA_VERSION,
+    example_rows,
+    render_template,
+    template_columns,
+    template_output_name,
+    write_template,
+)
 from src.evidence.validation import (
     EvidenceRecord,
     NormalizedRow,
@@ -65,7 +82,14 @@ __all__ = [
     "COMMON_REQUIRED_FIELDS",
     "EVIDENCE_CONTRACT_VERSION",
     "EVIDENCE_SCHEMA_VERSION",
+    "EXAMPLE_MARKER_COLUMNS",
+    "EXAMPLE_MARKER_FLAG_FIELDS",
+    "EXAMPLE_MARKER_KIND_FIELDS",
+    "EXAMPLE_MARKER_VALUES",
     "QUARANTINE_REASON_CODES",
+    "TEMPLATE_FORMATS",
+    "TEMPLATE_ROOT",
+    "TEMPLATE_SCHEMA_VERSION",
     "AuthorizationDeclaration",
     "EvidenceIntakeReport",
     "EvidenceLedger",
@@ -81,6 +105,7 @@ __all__ = [
     "RowStatus",
     "ScopeLedger",
     "assess_row",
+    "example_rows",
     "intake_evidence",
     "ledger_from_raw_json",
     "load_evidence_ledger",
@@ -89,6 +114,11 @@ __all__ = [
     "quarantine_payload",
     "read_input_file",
     "render_intake_report",
+    "render_template",
     "required_field_names",
     "resolve_format",
+    "synthetic_marker_fields",
+    "template_columns",
+    "template_output_name",
+    "write_template",
 ]

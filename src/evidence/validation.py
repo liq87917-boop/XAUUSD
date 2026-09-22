@@ -46,6 +46,7 @@ from src.evidence.contracts import (
     alias_map,
     canonical_field_names,
     required_field_names,
+    synthetic_marker_fields,
 )
 
 __all__ = [
@@ -337,6 +338,17 @@ def assess_row(
     ingested = (ingested_at or moment).astimezone(UTC)
     normalized = normalize_input_row(row)
     reasons: list[tuple[ReasonCode, str]] = []
+
+    # 示例 / 合成 / 模板行（GOLD-006）：先于一切业务判定隔离，绝不进入可信证据台账。
+    marker_fields = synthetic_marker_fields(row)
+    if marker_fields:
+        reasons.append(
+            (
+                ReasonCode.SYNTHETIC_EVIDENCE,
+                f"该行带显式示例 / 合成标记 {list(marker_fields)}：模板与示例不得计入真实证据"
+                "（只记录列名，不记录值）",
+            )
+        )
 
     source = normalized.get("source")
     record_id = normalized.get("source_record_id")

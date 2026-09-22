@@ -55,6 +55,7 @@ Strategy 事实，不进入实盘。
 | **采集后处理 Processor Pipeline**（normalize → timezone/effective_at → identity/dedup → validation/audit → `processed_items`，append-only + 幂等 + 坏数据隔离 + 摘要脱敏；RSS 采集路径已最小接线） | `src/processors/collection/`、`src/common/redaction.py`、`src/collectors/base.py`（`post_processor` 钩子） |
 | **只读运行健康度 / 数据资格观测层**（窗口内 source 级运行与加工状态 + Phase 3.3 资格缺口机器可读输出；`--json` 稳定结构、默认 dry-run、输出脱敏，**不解除** `PHASE3_3_DATA`） | `src/monitoring/`、`scripts/report_collector_health.py` |
 | **授权证据接收入口 Evidence Intake Gateway**（版本化契约 `evidence-intake-v1`：来源身份 / 时间语义 / 出处 / 授权声明 / 历史可用证据；默认 dry-run 与零网络、坏行隔离 + 稳定原因码、幂等且不覆盖历史事实，**不解除** `PHASE3_3_DATA`） | `src/evidence/`、`scripts/intake_evidence.py` |
+| **证据就绪度 / 一键资格复核入口**（Author / News operator 模板，示例行显式标记 `record_kind=example`、`is_mock=true`，导入判 `SYNTHETIC_EVIDENCE` 隔离、永不计入台账；默认只读 preflight 量化 `accepted/quarantined/duplicate/conflict/not_oos_eligible` 与 Author/News 的 remaining gap；`recheck` 一键串联只读台账与 Phase 3.3 qualification report，**不解除** `PHASE3_3_DATA`） | `src/evidence/templates.py`、`src/monitoring/evidence_readiness.py`、`scripts/evidence_readiness.py`、`examples/evidence/` |
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
 采集时间不可信而隔离；新闻侧只有 30 条 / 56 天，最大单源占比 66.67%。详见
@@ -475,6 +476,59 @@ ProcessorInput
   `PHASE3_3_DATA` 继续 `active=true`；业务方需按上述契约提供已授权 Author / News 数据，
   并由人工核验授权后才能产生可信证据。
 
+### 证据就绪度与一键资格复核（`scripts/evidence_readiness.py`，GOLD-006）
+
+> **合规红线**：本入口只**量化证据是否足够**并给出缺口；不判断授权法律效力、不抓取任何站点、
+> 不伪造时间。`blocker_active` 与 `human_gate_required` **恒为 true**，任何 PASS 都不解除
+> `PHASE3_3_DATA`。
+
+Operator 工作流（全部默认只读、默认零网络）：
+
+```powershell
+# ① prepare template：打印 / 写入可填写模板（示例行显式标记 synthetic/example）
+.\.venv\Scripts\python.exe -m scripts.evidence_readiness template --scope author
+.\.venv\Scripts\python.exe -m scripts.evidence_readiness template --scope news `
+  --out examples/evidence/news_evidence_template.csv
+
+# ② dry-run / preflight：只读库内台账 + 候选文件 dry-run 量化（零写入、零网络）
+.\.venv\Scripts\python.exe -m scripts.evidence_readiness preflight --scope news `
+  --input logs/evidence/news.csv --json
+
+# ③ inspect quarantine：看报告里的批次量化 / 原因码（或 intake 的 --quarantine 文件）
+# ④ explicit intake：显式提交（默认 dry-run，提交需 --no-dry-run）
+.\.venv\Scripts\python.exe -m scripts.intake_evidence --scope news --input logs/evidence/news.csv `
+  --no-dry-run --manifest logs/evidence/news_manifest.json --quarantine logs/evidence/news_quarantine.jsonl
+
+# ⑤ qualification recheck：一键串联只读台账与现有 Phase 3.3 qualification report
+.\.venv\Scripts\python.exe -m scripts.evidence_readiness recheck --json
+```
+
+- **模板**：`examples/evidence/author_evidence_template.csv` / `news_evidence_template.csv`
+  与生成器一致；每行带 `record_kind=example`、`is_mock=true`，且其余字段填**非法占位值**
+  （时间不是合法 ISO8601、`authorization_status=PENDING`、三项 `permits_* = false`）。
+  导入时整行判 `SYNTHETIC_EVIDENCE` 隔离：**模板 / 示例永不计入 qualification ledger**；
+  即使有人删掉标记列，该行仍会因授权缺失 / 时间非法被隔离。`--out` 默认拒绝覆盖已存在文件；
+- **preflight（就绪度）**：逐 scope 输出 `eligible_count` / `certified_count` /
+  `not_oos_eligible_count` / `coverage_days` / `max_source_share`，以及每条检查的
+  **当前值、阈值、比较方式、状态、remaining gap、证据时间范围**；候选文件（`--input`）
+  额外量化 `accepted` / `quarantined` / `duplicate` / `conflict`（`IDENTITY_CONFLICT`）/
+  `not_oos_eligible` 与稳定原因码计数；
+- **Author readiness**：至少报告"可信 eligible post count"（≥ 30 才达标）；
+- **News readiness**：至少报告 `eligible_count`（≥ 200）、`coverage_days`（≥ 90）、
+  `max_source_share`（≤ 40%）；无 OOS eligible 记录时集中度检查**不得判 PASS**（`evaluable=false`）；
+- **recheck**：稳定 JSON 含 `blocker_active`、`human_gate_required`、`gate`
+  （qualification 的 PASS/BLOCKED 计数与 readiness 状态）、`readiness`（实际值 + 阈值 +
+  remaining gap）与现有 `qualification` 报告全文；人类可读模式同时输出两份 Markdown；
+- **默认零写入**：`--report` 必须显式配 `--no-dry-run` 才落盘；退出码
+  `0` 报告成功（BLOCKED 也是正常结果）/ `2` 参数或输入错误 / `3` 输入没有数据行；
+- **脱敏**：只输出白名单标量（计数 / 阈值 / 缺口 / 原因码 / 已脱敏来源名 / 时间），
+  不读取 `sources.config_json`、不输出正文，token / API key / Authorization 一律
+  `***`（来源名也过 `safe_text`）；
+- **测试**：`tests/unit/test_evidence_templates.py`、`tests/unit/test_evidence_readiness.py`、
+  `tests/integration/test_evidence_readiness_integration.py`（全部 Mock / 临时文件 / SQLite，零网络）；
+- **仍未解决（保持 BLOCKED）**：真实库内仍无足量已授权证据，`PHASE3_3_DATA` 保持
+  `active=true`；本工具只列出缺口，不修改阈值、不放宽授权 / 时间 / availability 规则。
+
 ## 8. 数据模型
 
 
@@ -598,10 +652,11 @@ ProcessorInput
 - TD-05 / TD-07：`econ_calendar_collector` 与宏观预期值补全；TD-10：API 与 Dashboard
   （其只读前置观测层已由 GOLD-004 交付，见 §7「运行健康度与 Phase 3.3 数据资格观测」与
   `TECH_DEBT.md` TD-46 的剩余边界）。
-- **TD-43 / TD-44 / TD-45 仍未解除**：证据接收入口已由 GOLD-005 交付并可用
-  （见 §7「授权证据接收入口」），但**仓库内没有任何经该入口认证的真实授权证据**，
+- **TD-43 / TD-44 / TD-45 仍未解除**：证据接收入口已由 GOLD-005 交付并可用，
+  就绪度 / 一键复核工具已由 GOLD-006 交付（见 §7「授权证据接收入口」与
+  §7「证据就绪度与一键资格复核」），但**仓库内没有任何经该入口认证的真实授权证据**，
   因此 `PHASE3_3_DATA` 保持 `active=true`；下一步是业务方按 `evidence-intake-v1` 契约
-  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47）。
+  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 与 TD-48）。
 
 ## 11. 强制约束速查（团队决定）
 

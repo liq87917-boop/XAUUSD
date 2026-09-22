@@ -24,9 +24,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final
+from typing import Any, Final
 
 __all__ = [
     "ALLOWED_AUTHORIZATION_BASES",
@@ -36,6 +37,9 @@ __all__ = [
     "EVIDENCE_CONTRACT_VERSION",
     "EVIDENCE_FIELDS",
     "EVIDENCE_SCHEMA_VERSION",
+    "EXAMPLE_MARKER_FLAG_FIELDS",
+    "EXAMPLE_MARKER_KIND_FIELDS",
+    "EXAMPLE_MARKER_VALUES",
     "PERMISSION_FIELDS",
     "QUARANTINE_REASON_CODES",
     "SYSTEM_ASSIGNED_FIELDS",
@@ -48,6 +52,7 @@ __all__ = [
     "canonical_field_names",
     "field_by_name",
     "required_field_names",
+    "synthetic_marker_fields",
 ]
 
 #: 契约版本：字段增删必须升版本，并同步更新 README / 测试与既有落库元数据解释
@@ -67,6 +72,43 @@ PERMISSION_FIELDS: Final[tuple[str, ...]] = (
 )
 #: 系统赋值字段：输入提供时**忽略**（不得由外部伪造审计时间）
 SYSTEM_ASSIGNED_FIELDS: Final[tuple[str, ...]] = ("ingested_at", "fingerprint")
+
+#: 布尔型示例 / 合成标记列（GOLD-006）：取值命中 ``_MARKER_TRUTHY_VALUES`` 即视为示例行。
+#: 这些列**不属于**证据契约字段，只出现在 operator 模板与本地演练数据里。
+EXAMPLE_MARKER_FLAG_FIELDS: Final[tuple[str, ...]] = ("is_example", "is_mock", "synthetic")
+#: 枚举型示例 / 合成标记列：取值命中 :data:`EXAMPLE_MARKER_VALUES` 即视为示例行。
+EXAMPLE_MARKER_KIND_FIELDS: Final[tuple[str, ...]] = ("record_kind",)
+#: 示例 / 合成标记列的可识别取值（其余取值一律**不**判定，避免误伤真实数据）
+EXAMPLE_MARKER_VALUES: Final[frozenset[str]] = frozenset(
+    {"example", "synthetic", "mock", "template", "sample", "demo"}
+)
+#: 布尔标记列的\"真值\"词表（与 :mod:`src.evidence.validation` 的 ``_truth`` 同口径）
+_MARKER_TRUTHY_VALUES: Final[frozenset[str]] = frozenset({"true", "1", "yes", "y", "on"})
+
+
+def synthetic_marker_fields(row: Mapping[str, Any]) -> tuple[str, ...]:
+    """返回该行命中的示例 / 合成标记**列名**（绝不返回值，文本永远脱敏）。
+
+    为什么要显式标记：GOLD-006 的 operator 模板与本地演练必须能被机械识别，
+    否则\"看着像真实数据\"的示例可能被误导入并计入可信证据。命中标记的行一律
+    按 :data:`ReasonCode.SYNTHETIC_EVIDENCE` 隔离，绝不进入 qualification ledger。
+    """
+    found: set[str] = set()
+    for raw_key, raw_value in row.items():
+        if raw_key is None:
+            continue
+        name = str(raw_key).strip().lower()
+        if name not in EXAMPLE_MARKER_FLAG_FIELDS and name not in EXAMPLE_MARKER_KIND_FIELDS:
+            continue
+        text = "" if raw_value is None else str(raw_value).strip().lower()
+        if not text:
+            continue
+        if name in EXAMPLE_MARKER_FLAG_FIELDS:
+            if text in _MARKER_TRUTHY_VALUES:
+                found.add(name)
+        elif text in EXAMPLE_MARKER_VALUES:
+            found.add(name)
+    return tuple(sorted(found))
 
 
 class EvidenceScope(StrEnum):
@@ -114,6 +156,8 @@ class ReasonCode(StrEnum):
     IDENTITY_CONFLICT = "IDENTITY_CONFLICT"
     SENSITIVE_VALUE_DETECTED = "SENSITIVE_VALUE_DETECTED"
     ROW_UNREADABLE = "ROW_UNREADABLE"
+    #: 显式标记为示例 / 合成 / 模板的行（GOLD-006）：永远不会被计入真实可信证据
+    SYNTHETIC_EVIDENCE = "SYNTHETIC_EVIDENCE"
     # ---- 幂等类 ------------------------------------------------------
     DUPLICATE = "DUPLICATE"
     # ---- 资格类（非隔离）--------------------------------------------
@@ -135,6 +179,7 @@ QUARANTINE_REASON_CODES: Final[frozenset[ReasonCode]] = frozenset(
         ReasonCode.IDENTITY_CONFLICT,
         ReasonCode.SENSITIVE_VALUE_DETECTED,
         ReasonCode.ROW_UNREADABLE,
+        ReasonCode.SYNTHETIC_EVIDENCE,
     }
 )
 #: 只影响 OOS 资格、不导致隔离的原因码

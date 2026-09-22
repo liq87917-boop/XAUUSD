@@ -85,6 +85,8 @@
 | TD-45 | P0（作者内容采集授权） | 公开可访问不等于允许自动采集或训练。Kitco 条款明确禁止机器人/自动设备检索、数据挖掘及未经授权存储或复制内容；中金在线候选页又存在证书域名不匹配 | 不绕过证书警告，不对 Kitco 启动自动采集。用户需提供具备自动采集/研究使用授权的数据源、官方 API 或书面许可；授权确认前只保留合规审查，不保存正文样本、不写数据库 |
 | TD-46 | P2（可观测性剩余） | GOLD-004 已交付**只读**健康度 / 资格观测（`src/monitoring/` + `scripts/report_collector_health.py`，证据见 `PROGRESS_LOG.md` 第六十八轮）；**剩余**：仅有报告、无告警推送与时间序列趋势，且 `processed_items.status` 的 `SKIPPED` 无法在 SQL 层区分 `DUPLICATE` / `REJECTED`（口径见 TD-19 与 `src/monitoring/collector_health.py` 模块 docstring，需要时读 `structured_json.outcome` 抽样或新列） | 有运维/巡检需求时（TD-10 前置） |
 | TD-47 | P0（证据入口边界，仍 BLOCKED） | GOLD-005 已交付**合规授权数据 Evidence Intake Gateway**（`src/evidence/` + `scripts/intake_evidence.py`，契约 `evidence-intake-v1`；证据见 `PROGRESS_LOG.md` 第六十九轮）。**剩余**：①仓库内**没有任何**经该入口认证的真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45 未解除）；②入口只写 `raw_items` + `processed_items`，**不**创建 `authors` / `author_accounts` / `author_posts`（作者链接入仍走既有授权门禁 + 导入流程），Author Alpha 的可信标签仍需真实数据 + 标注；③`available_at` 证据的**法律/提供方真实性**由人工核验，程序只校验字段齐全与时间自洽；④`evidence_intake` 子报告只在资格报告里展示，尚未做告警 | 业务方按契约提交已授权数据 + 人工核验授权后，再看是否达标；若需自动化的作者链落库，另立任务并评估是否复用 `import_real_posts.py` 口径 |
+| TD-48 | P0（证据就绪度 / 一键复核的剩余边界） | GOLD-006 已交付 operator 证据模板（`examples/evidence/`，示例行显式标记 `record_kind=example`、`is_mock=true`）+ 只读 preflight/readiness（`src/monitoring/evidence_readiness.py`）+ 一键 `recheck` CLI（`scripts/evidence_readiness.py`，证据见 `PROGRESS_LOG.md` 第七十轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47 未解除），工具只报告缺口、不放行；②模板 / 示例行判 `SYNTHETIC_EVIDENCE` 隔离，**不能**用于达标；③readiness 只覆盖证据入口台账口径（Author 可信 eligible 帖子数；News 条数 / 覆盖天数 / 单源占比），不含作者链落库与人工标注；④无告警推送（与 TD-46 同源） | 业务方按契约提交已授权数据 + 人工核验后重跑 `recheck`；若需自动作者链落库，另立任务评估复用 `import_real_posts.py` 口径 |
+
 
 
 ---
@@ -546,6 +548,38 @@
   且达到 `src/alpha/evidence_gate.py` 的数量/跨度/集中度门槛；届时才讨论解除 blocker。
 - **不变量**：入口永不联网、永不抓取、永不绕过 robots / 条款 / 证书；
   永不因代码完成或 Mock 测试解除 `PHASE3_3_DATA`。
+
+---
+
+### TD-48 证据就绪度 / 一键资格复核的剩余边界（P0，2026-09-22，GOLD-006）
+
+- **已交付**：`src/evidence/templates.py`（Author / News operator 模板 + `SYNTHETIC_EVIDENCE`
+  标记识别）、`src/monitoring/evidence_readiness.py`（只读就绪度 / preflight）、
+  `scripts/evidence_readiness.py`（`template` / `preflight` / `recheck` 三个子命令）、
+  `examples/evidence/{author,news}_evidence_template.csv`。
+- **关键保证（已由测试锁定）**：
+  1. 模板示例行带 `record_kind=example` / `is_mock=true`，导入判
+     `SYNTHETIC_EVIDENCE` 隔离，**不写库、不计入 qualification ledger**；
+     即使删掉标记列，示例行的 `authorization_status=PENDING` / `permits_*=false` /
+     非法时间仍会被隔离；
+  2. `preflight` / `recheck` 默认只读、零网络、零写入（`--report` 必须配 `--no-dry-run`）；
+  3. 阈值完全复用 `src/alpha/evidence_gate.py`（30 / 200 / 90 天 / 单源 40%），
+     只报告当前值、阈值与 remaining gap，不修改任何阈值与授权 / 时间 / availability 规则；
+  4. `blocker_active` 与 `human_gate_required` 恒为 `true`：量化达标（如 News 三项全 PASS）
+     也不解除 `PHASE3_3_DATA`；
+  5. 报告只输出白名单标量：不读取 `sources.config_json`、不输出正文，
+     来源名过 `safe_text`，token / API key / Authorization 一律 `***`。
+- **剩余边界（本条目跟踪）**：
+  1. **仍无真实授权证据**：库内 0 条经入口认证的 eligible 记录 →
+     `PHASE3_3_DATA` 保持 `active=true`（TD-43 / TD-44 / TD-45 / TD-47 未解除）；
+  2. **不产生真实证据**：模板、示例、Mock、历史 CSV 都不能用于达标，工具只量化缺口；
+  3. **口径范围**：readiness 只覆盖证据入口台账（Author 可信 eligible 帖子数；
+     News 条数 / 覆盖天数 / 单源占比），不含作者链（`authors` / `author_posts`）落库与人工标注；
+  4. **无告警**：没有阈值告警推送（与 TD-46 同源）。
+- **解除条件**：业务方按 `evidence-intake-v1` 契约提交**已授权**数据并经人工核验落库，
+  再由 `scripts/evidence_readiness.py recheck` 显示量化门槛达标；届时才讨论解除 blocker。
+- **不变量**：工具永不联网、永不抓取、永不绕过 robots / 条款 / 证书；
+  永不因代码完成、模板或 Mock 测试解除 `PHASE3_3_DATA`。
 
 ---
 

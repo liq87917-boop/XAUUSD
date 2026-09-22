@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -23,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from database.models import RawItem
 from database.models.enums import RawItemType
+from src.common.redaction import safe_text
 from src.evidence.contracts import EVIDENCE_CONTRACT_VERSION, EvidenceScope
 
 __all__ = [
@@ -49,7 +51,12 @@ def _parse_time(value: Any) -> datetime | None:
 
 @dataclass(frozen=True, slots=True)
 class ScopeLedger:
-    """单个 scope 的台账计数（``certified`` ⊇ ``oos_eligible``）。"""
+    """单个 scope 的台账计数（``certified`` ⊇ ``oos_eligible``）。
+
+    ``source_counts`` 只统计 **OOS eligible** 记录的来源分布（已脱敏的来源名），
+    供 readiness 报告计算单源集中度；``evidence_start`` / ``evidence_end`` 是
+    这些记录的独立历史可用时间（``available_at``）窗口，供计算覆盖天数。
+    """
 
     scope: str
     certified_records: int
@@ -57,6 +64,21 @@ class ScopeLedger:
     not_oos_eligible_records: int
     evidence_start: datetime | None = None
     evidence_end: datetime | None = None
+    source_counts: tuple[tuple[str, int], ...] = ()
+
+    @property
+    def coverage_days(self) -> int:
+        """OOS eligible 记录的可用时间跨度（天）；无证据时为 0。"""
+        if self.evidence_start is None or self.evidence_end is None:
+            return 0
+        return max(0, (self.evidence_end - self.evidence_start).days)
+
+    @property
+    def max_source_share(self) -> float:
+        """单一来源在 OOS eligible 记录中的最大占比（无证据时为 0.0）。"""
+        if self.oos_eligible_records <= 0 or not self.source_counts:
+            return 0.0
+        return max(count for _source, count in self.source_counts) / self.oos_eligible_records
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -66,6 +88,11 @@ class ScopeLedger:
             "not_oos_eligible_records": self.not_oos_eligible_records,
             "evidence_start": self.evidence_start.isoformat() if self.evidence_start else None,
             "evidence_end": self.evidence_end.isoformat() if self.evidence_end else None,
+            "coverage_days": self.coverage_days,
+            "max_source_share": self.max_source_share,
+            "source_counts": [
+                {"source": source, "count": count} for source, count in self.source_counts
+            ],
         }
 
 
@@ -105,6 +132,9 @@ def ledger_from_raw_json(entries: Iterable[tuple[Any, Any]]) -> EvidenceLedger:
     eligible: dict[str, int] = {scope.value: 0 for scope in EvidenceScope}
     unproven: dict[str, int] = {scope.value: 0 for scope in EvidenceScope}
     windows: dict[str, list[datetime]] = {scope.value: [] for scope in EvidenceScope}
+    source_counts: dict[str, Counter[str]] = {
+        scope.value: Counter() for scope in EvidenceScope
+    }
     for raw_json, _effective_at in entries:
         if not isinstance(raw_json, Mapping):
             continue
@@ -122,6 +152,12 @@ def ledger_from_raw_json(entries: Iterable[tuple[Any, Any]]) -> EvidenceLedger:
             available = _parse_time(evidence.get("available_at"))
             if available is not None:
                 windows[scope_name].append(available)
+            # 来源名经 safe_text 脱敏（防御性：即便历史数据被手工改写也不回显凭据）
+            source_name = safe_text(
+                str(evidence.get("source") or "").strip(), max_chars=100
+            )
+            if source_name:
+                source_counts[scope_name][source_name] += 1
         else:
             unproven[scope_name] += 1
     scopes: list[ScopeLedger] = []
@@ -135,6 +171,7 @@ def ledger_from_raw_json(entries: Iterable[tuple[Any, Any]]) -> EvidenceLedger:
                 not_oos_eligible_records=unproven[scope.value],
                 evidence_start=values[0] if values else None,
                 evidence_end=values[-1] if values else None,
+                source_counts=tuple(sorted(source_counts[scope.value].items())),
             )
         )
     return EvidenceLedger(

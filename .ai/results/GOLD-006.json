@@ -1,0 +1,89 @@
+{
+  "task_id": "GOLD-006",
+  "title": "完成 Phase 3.3 Evidence Readiness 与资格复核入口",
+  "status": "completed",
+  "finished_at": "2026-09-22T20:30:16+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    " M src/evidence/contracts.py",
+    " M src/evidence/ledger.py",
+    " M src/evidence/validation.py",
+    " M src/monitoring/__init__.py",
+    "?? examples/",
+    "?? scripts/evidence_readiness.py",
+    "?? src/evidence/templates.py",
+    "?? src/monitoring/evidence_readiness.py",
+    "?? tests/integration/test_evidence_readiness_integration.py",
+    "?? tests/unit/test_evidence_readiness.py",
+    "?? tests/unit/test_evidence_templates.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md            | 66 ++++++++++++++++++++++++++++++++++++++++++++++\n README.md                  | 61 +++++++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md               | 34 ++++++++++++++++++++++++\n src/evidence/__init__.py   | 30 +++++++++++++++++++++\n src/evidence/contracts.py  | 47 ++++++++++++++++++++++++++++++++-\n src/evidence/ledger.py     | 39 ++++++++++++++++++++++++++-\n src/evidence/validation.py | 12 +++++++++\n src/monitoring/__init__.py | 26 +++++++++++++++++-\n 8 files changed, 309 insertions(+), 6 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-22T20:13:02+08:00",
+      "finished_at": "2026-09-22T20:30:16+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 133,
+      "duration_ms": 814461,
+      "usage": {
+        "inputTokens": 25374485,
+        "outputTokens": 118352,
+        "cacheReadTokens": 25138688,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.18179681399999997
+      },
+      "cline_final_text": "Submission recorded (verified): GOLD-006（完成 Phase 3.3 Evidence Readiness 与资格复核入口）已按任务与 .clinerules 执行完毕，未进入 Phase 3.4，未解除 PHASE3_3_DATA。\n\n【完成内容】\n1. Author/News operator 证据模板（`src/evidence/templates.py` + `examples/evidence/`）：列=契约字段（去掉系统赋值列，含可选 `available_at`/`availability_*`）+ 标记列 `record_kind,is_mock`；示例行显式标记 `record_kind=example`/`is_mock=true`，其余填非法占位值（时间非 ISO8601、`authorization_status=PENDING`、三项 `permits_*=false`）。新增 `ReasonCode.SYNTHETIC_EVIDENCE`（隔离类）：`assess_row` 命中标记即整行隔离，不写库、不计入 qualification ledger；即使删掉标记列仍因授权缺失/时间非法被隔离（双层防护）。`write_template` 默认拒绝覆盖已存在文件。\n2. 只读台账扩展（`src/evidence/ledger.py`）：`ScopeLedger` 新增 OOS eligible 记录的 `source_counts`（来源名过 `safe_text`）与 `coverage_days`/`max_source_share` 属性。\n3. 就绪度/preflight 报告（`src/monitoring/evidence_readiness.py`）：阈值完全复用 `src/alpha/evidence_gate.py`（30/200/90 天/单源 40%，未改 `src/alpha/**`）；逐 scope 输出 eligible_count、certified、not_oos_eligible、coverage_days、max_source_share 及每条检查的当前值/阈值/比较方式/状态/**remaining gap**/证据范围（无证据时 `evaluable=false`，集中度检查不得判 PASS）；批次量化 accepted/quarantined/duplicate/conflict(IDENTITY_CONFLICT)/not_oos_eligible + 稳定原因码；`blocker_active` 与 `human_gate_required` 恒为 true；稳定 JSON（sort_keys）。\n4. CLI `scripts/evidence_readiness.py`：`template`/`preflight`/`recheck`，默认只读、零网络、零写入（`--report` 必须显式配 `--no-dry-run`）；`recheck` 一键串联只读台账与现有 Phase 3.3 qualification report，JSON 含 blocker_active、gate（PASS/BLOCKED 计数 + readiness 状态）、readiness（实际值/阈值/remaining gap）与 qualification 全文，人类可读模式输出两份 Markdown；退出码 0/2/3。\n5. 脱敏：只输出白名单标量，不读 `sources.config_json`、不输出正文，来源名过 `safe_text`，token/API key/Authorization 一律 `***`（真实库实测输出无凭据）。\n6. operator 工作流文档化：prepare template → dry-run/preflight → inspect quarantine → explicit intake → qualification recheck。\n\n【修改文件】README.md、TECH_DEBT.md（新增 TD-48）、PROGRESS_LOG.md（第七十轮）、src/evidence/{__init__,contracts,ledger,validation}.py、src/monitoring/__init__.py\n【新增文件】src/evidence/templates.py、src/monitoring/evidence_readiness.py、scripts/evidence_readiness.py、examples/evidence/{author_evidence_template.csv,news_evidence_template.csv,README.md}、tests/unit/test_evidence_templates.py、tests/unit/test_evidence_readiness.py、tests/integration/test_evidence_readiness_integration.py\n【未触碰】.ai/tasks/**、.ai/results/**、.ai/PROJECT_STATE.json、.env、database/migrations/**、src/alpha/**、src/collectors/**、pyproject.toml（git status 已确认）\n\n【执行的测试】三条 validation_commands 全部执行：`.venv\\Scripts\\python.exe -m pytest tests -q`；`-m ruff check .`；`-m mypy config database src scripts`；并额外用真实仓库库执行只读 `recheck --json`。\n【测试结果】pytest **1806 passed / 1 skipped in 223.38s**（唯一 skip 为 jieba 已安装分支；新增 39 项测试：templates 12 / readiness 15 / integration 12，全部 Mock+临时文件+SQLite、零网络）；ruff `All checks passed!`；mypy `Success: no issues found in 149 source files`。真实库 recheck（只读，exit 0）输出 blocker_code=PHASE3_3_DATA、blocker_active=true、human_gate_required=true、gate qualification_pass=1/blocked=6、readiness_blocked_scope_count=2；Author eligible=0 remaining=30，News eligible=0 remaining=200 / coverage remaining=90 / 单源检查 evaluable=false 且 BLOCKED；输出无 `sk-`/`api_key`/`Bearer`/`config_json`。\n【遗留问题】真实库内仍无足量已授权证据（Author 0 条 eligible、News 0 条），故 PHASE3_3_DATA 保持 active=true；TD-43/44/45/47 未解除，TD-48 登记 readiness 剩余边界（不含作者链落库与标注、无告警推送）。readiness 只量化证据入口台账口径，不判断授权法律效力；模板/示例/Mock 不可用于达标。\n【是否满足 acceptance】全部满足：Author/News 模板可填且示例不计入 ledger（有独立测试）；存在默认只读/无网络 preflight；存在一键 recheck 输出 blocker_active/gate/实际值/阈值/remaining gap；News count/coverage/source-share 与 Author eligible count 有独立测试；敏感字段不入报告（含真实库实测）；全量 pytest/ruff/mypy 在项目 .venv 通过；无新增依赖/migration/schema/未授权采集；真实证据未达标时 PHASE3_3_DATA 保持 BLOCKED。\n【建议下一步】业务方按 `evidence-intake-v1` 与 `examples/evidence/` 模板提交已授权 Author/News 数据 → `preflight` 检查隔离原因 → 人工核验授权后 `intake_evidence --no-dry-run` 落库 → `evidence_readiness recheck` 复核门槛；若需自动作者链落库，另立任务评估复用 `import_real_posts.py` 口径。Cline 未执行任何 git commit/push/reset/rebase/merge。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        " M src/evidence/contracts.py",
+        " M src/evidence/ledger.py",
+        " M src/evidence/validation.py",
+        " M src/monitoring/__init__.py",
+        "?? examples/",
+        "?? scripts/evidence_readiness.py",
+        "?? src/evidence/templates.py",
+        "?? src/monitoring/evidence_readiness.py",
+        "?? tests/integration/test_evidence_readiness_integration.py",
+        "?? tests/unit/test_evidence_readiness.py",
+        "?? tests/unit/test_evidence_templates.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md            | 66 ++++++++++++++++++++++++++++++++++++++++++++++\n README.md                  | 61 +++++++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md               | 34 ++++++++++++++++++++++++\n src/evidence/__init__.py   | 30 +++++++++++++++++++++\n src/evidence/contracts.py  | 47 ++++++++++++++++++++++++++++++++-\n src/evidence/ledger.py     | 39 ++++++++++++++++++++++++++-\n src/evidence/validation.py | 12 +++++++++\n src/monitoring/__init__.py | 26 +++++++++++++++++-\n 8 files changed, 309 insertions(+), 6 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  3%]\n........................................................................ [  7%]\n........................................................................ [ 11%]\n........................................................................ [ 15%]\n........................................................................ [ 19%]\n........................................................................ [ 23%]\n........................................................................ [ 27%]\n........................................................................ [ 31%]\n........................................................................ [ 35%]\n........................................................................ [ 39%]\n........................................................................ [ 43%]\n........................................................................ [ 47%]\n........................................................................ [ 51%]\n........................................................................ [ 55%]\n........................................................................ [ 59%]\n........................................................................ [ 63%]\n........................................................................ [ 67%]\n........................................................................ [ 71%]\n........................................................................ [ 75%]\n........................................................................ [ 79%]\n........................................................................ [ 83%]\n........................................................................ [ 87%]\n........................................................................ [ 91%]\n........................................................................ [ 95%]\n..................................s..................................... [ 99%]\n.......                                                                  [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n1806 passed, 1 skipped in 214.17s (0:03:34)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 149 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
