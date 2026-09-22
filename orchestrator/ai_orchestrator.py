@@ -1,364 +1,102 @@
+import atexit
 import json
+import logging
 import os
 import shutil
 import subprocess
+import sys
 import time
+
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+
+# ============================================================
+# 基础目录
+# ============================================================
 
 ROOT = Path(__file__).resolve().parent.parent
 
 TASK_DIR = ROOT / ".ai" / "tasks"
 RESULT_DIR = ROOT / ".ai" / "results"
 RUNTIME_DIR = ROOT / ".ai" / "runtime"
+LOG_DIR = ROOT / ".ai" / "logs"
 
-POLL_SECONDS = 20
+TASK_STATE_DIR = RUNTIME_DIR / "tasks"
 
-REQUIRED_BRANCH = "cline-agent"
+LOCK_FILE = RUNTIME_DIR / "orchestrator.lock"
+LOG_FILE = LOG_DIR / "orchestrator.log"
 
 
-def run_command(command, shell=True):
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        shell=shell,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace"
+# ============================================================
+# 配置
+# ============================================================
+
+POLL_SECONDS = int(
+    os.getenv(
+        "AI_POLL_SECONDS",
+        "20"
     )
+)
 
-    return {
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr
-    }
+DEFAULT_MAX_ATTEMPTS = int(
+    os.getenv(
+        "AI_MAX_ATTEMPTS",
+        "3"
+    )
+)
 
+CLINE_TIMEOUT_SECONDS = int(
+    os.getenv(
+        "AI_CLINE_TIMEOUT",
+        "3600"
+    )
+)
 
-def git(command):
-    return run_command(f"git {command}")
+REQUIRED_BRANCH = os.getenv(
+    "AI_BRANCH",
+    "cline-agent"
+)
 
-
-def current_branch():
-    result = git("branch --show-current")
-
-    if result["returncode"] != 0:
-        return None
-
-    return result["stdout"].strip()
-
-
-def git_is_dirty():
-    result = git("status --porcelain")
-
-    return bool(result["stdout"].strip())
-
-
-def pull_latest():
-    print("Pulling latest tasks...")
-
-    result = git("pull --rebase origin cline-agent")
-
-    if result["returncode"] != 0:
-        print(result["stderr"])
-
-    return result["returncode"] == 0
+REMOTE_NAME = os.getenv(
+    "AI_REMOTE",
+    "origin"
+)
 
 
-def find_next_task():
+# ============================================================
+# 全局状态
+# ============================================================
 
-    tasks = sorted(TASK_DIR.glob("*.json"))
+_logger = logging.getLogger(
+    "ai_orchestrator"
+)
 
-    for task_file in tasks:
-
-        result_file = RESULT_DIR / task_file.name
-
-        if not result_file.exists():
-            return task_file
-
-    return None
+_lock_owned = False
 
 
-def load_task(task_file):
+# ============================================================
+# 时间
+# ============================================================
 
-    with open(task_file, "r", encoding="utf-8") as f:
-        return json.load(f)
+def now_iso():
 
-
-def run_cline(task_file):
-
-    # Windows npm 全局命令优先使用 .cmd
-    if os.name == "nt":
-        cline_exe = shutil.which("cline.cmd")
-    else:
-        cline_exe = shutil.which("cline")
-
-    if not cline_exe:
-        cline_exe = shutil.which("cline")
-
-    if not cline_exe:
-        raise RuntimeError(
-            "找不到 Cline CLI，请先执行 npm install -g cline"
+    return (
+        datetime
+        .now()
+        .astimezone()
+        .isoformat(
+            timespec="seconds"
         )
-
-    relative_task = task_file.relative_to(ROOT)
-
-    # 不再把整个 task 内容塞进命令行。
-    # Cline 自己读取 task 文件。
-    prompt = (
-        f"读取任务文件 {relative_task.as_posix()}，"
-        f"严格按照其中任务执行，同时遵守项目根目录 .clinerules。"
-        f"完成所有 requirements 和必要测试后输出结果并退出。"
-    )
-
-    args = [
-        cline_exe,
-        "--json",
-        "--yolo",
-        "--timeout",
-        "3600",
-        prompt
-    ]
-
-    print("Starting Cline...")
-    print(f"Cline executable: {cline_exe}")
-    print(f"Task file: {relative_task}")
-
-    if os.name == "nt":
-
-        # npm 在 Windows 下安装的是 cline.cmd。
-        # 显式通过 cmd shell 执行，避免 subprocess 直接调用
-        # .cmd 时出现参数丢失/TTY 模式误判。
-        command_line = subprocess.list2cmdline(args)
-
-        result = subprocess.run(
-            command_line,
-            cwd=ROOT,
-            shell=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace"
-        )
-
-    else:
-
-        result = subprocess.run(
-            args,
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace"
-        )
-
-    return {
-        "returncode": result.returncode,
-        "stdout": result.stdout,
-        "stderr": result.stderr
-    }
-
-
-def run_validations(task):
-
-    commands = task.get("validation_commands", [])
-
-    results = []
-
-    for command in commands:
-
-        print(f"Validation: {command}")
-
-        result = run_command(command)
-
-        results.append({
-            "command": command,
-            "returncode": result["returncode"],
-            "stdout": result["stdout"][-5000:],
-            "stderr": result["stderr"][-5000:]
-        })
-
-    return results
-
-
-def get_changed_files():
-
-    result = git("status --short")
-
-    return [
-        line
-        for line in result["stdout"].splitlines()
-        if line.strip()
-    ]
-
-
-def get_diff_stat():
-
-    result = git("diff --stat")
-
-    return result["stdout"]
-
-
-def save_result(task, cline_result, validations):
-
-    task_id = task["task_id"]
-
-    validation_success = all(
-        r["returncode"] == 0
-        for r in validations
-    )
-
-    success = (
-        cline_result["returncode"] == 0
-        and validation_success
-    )
-
-    result = {
-
-        "task_id": task_id,
-
-        "status": (
-            "completed"
-            if success
-            else "failed"
-        ),
-
-        "finished_at": datetime.now().isoformat(),
-
-        "cline_exit_code":
-            cline_result["returncode"],
-
-        "changed_files":
-            get_changed_files(),
-
-        "git_diff_stat":
-            get_diff_stat(),
-
-        "validations":
-            validations,
-
-        "cline_output_tail":
-            cline_result["stdout"][-8000:],
-
-        "cline_error_tail":
-            cline_result["stderr"][-5000:]
-    }
-
-    result_file = RESULT_DIR / f"{task_id}.json"
-
-    with open(
-        result_file,
-        "w",
-        encoding="utf-8"
-    ) as f:
-
-        json.dump(
-            result,
-            f,
-            ensure_ascii=False,
-            indent=2
-        )
-
-    return result
-
-
-def commit_result(task, result):
-
-    task_id = task["task_id"]
-
-    status = result["status"]
-
-    git("add -A")
-
-    if status == "completed":
-
-        message = f"ai: complete {task_id}"
-
-    else:
-
-        message = f"ai: failed {task_id}"
-
-    commit = git(
-        f'commit -m "{message}"'
-    )
-
-    if commit["returncode"] != 0:
-
-        print(commit["stdout"])
-        print(commit["stderr"])
-
-        return False
-
-    # 先同步远端，避免 ChatGPT 刚创建新 task 时冲突
-    pull = git(
-        "pull --rebase origin cline-agent"
-    )
-
-    if pull["returncode"] != 0:
-
-        print(pull["stderr"])
-
-        return False
-
-    push = git(
-        "push origin cline-agent"
-    )
-
-    if push["returncode"] != 0:
-
-        print(push["stderr"])
-
-        return False
-
-    return True
-
-
-def process_task(task_file):
-
-    task = load_task(task_file)
-
-    task_id = task["task_id"]
-
-    print("")
-    print("=" * 60)
-    print(f"Task: {task_id}")
-    print(task.get("title", ""))
-    print("=" * 60)
-
-    # 防止把你自己还没提交的代码混进 AI commit
-    if git_is_dirty():
-
-        print(
-            "工作区存在未提交修改，"
-            "为了避免覆盖人工代码，本轮停止。"
-        )
-
-        return
-
-    cline_result = run_cline(task_file)
-
-    validations = run_validations(task)
-
-    result = save_result(
-        task,
-        cline_result,
-        validations
-    )
-
-    commit_result(
-        task,
-        result
-    )
-
-    print("")
-    print(
-        f"Task {task_id}: "
-        f"{result['status']}"
     )
 
 
-def main():
+# ============================================================
+# 目录初始化
+# ============================================================
+
+def ensure_directories():
 
     TASK_DIR.mkdir(
         parents=True,
@@ -375,57 +113,2676 @@ def main():
         exist_ok=True
     )
 
-    branch = current_branch()
+    LOG_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-    if branch != REQUIRED_BRANCH:
+    TASK_STATE_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
 
-        print(
-            f"当前分支是 {branch}"
+
+# ============================================================
+# 日志
+# ============================================================
+
+def setup_logging():
+
+    if _logger.handlers:
+        return
+
+    _logger.setLevel(
+        logging.INFO
+    )
+
+    _logger.propagate = False
+
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+
+    console = logging.StreamHandler(
+        sys.stdout
+    )
+
+    console.setFormatter(
+        formatter
+    )
+
+    _logger.addHandler(
+        console
+    )
+
+    file_handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=5 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8"
+    )
+
+    file_handler.setFormatter(
+        formatter
+    )
+
+    _logger.addHandler(
+        file_handler
+    )
+
+
+# ============================================================
+# JSON
+# ============================================================
+
+def atomic_write_json(
+    path,
+    data
+):
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    temp_path = path.with_suffix(
+        path.suffix + ".tmp"
+    )
+
+    with open(
+        temp_path,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            data,
+            f,
+            ensure_ascii=False,
+            indent=2
         )
 
-        print(
-            f"必须切换到 {REQUIRED_BRANCH}"
+    os.replace(
+        temp_path,
+        path
+    )
+
+
+def read_json(
+    path,
+    default=None
+):
+
+    if not path.exists():
+        return default
+
+    try:
+
+        with open(
+            path,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            return json.load(f)
+
+    except Exception as exc:
+
+        _logger.error(
+            "读取 JSON 失败: %s | %s",
+            path,
+            exc
+        )
+
+        return default
+
+
+# ============================================================
+# 通用命令
+# ============================================================
+
+def run_command(
+    command,
+    shell=True,
+    timeout=None
+):
+
+    try:
+
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            shell=shell,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout
+        )
+
+        return {
+            "returncode":
+                result.returncode,
+
+            "stdout":
+                result.stdout,
+
+            "stderr":
+                result.stderr,
+
+            "timed_out":
+                False
+        }
+
+    except subprocess.TimeoutExpired as exc:
+
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+
+        if isinstance(
+            stdout,
+            bytes
+        ):
+
+            stdout = stdout.decode(
+                "utf-8",
+                errors="replace"
+            )
+
+        if isinstance(
+            stderr,
+            bytes
+        ):
+
+            stderr = stderr.decode(
+                "utf-8",
+                errors="replace"
+            )
+
+        return {
+
+            "returncode":
+                124,
+
+            "stdout":
+                stdout,
+
+            "stderr":
+                stderr
+                + "\nCommand timed out.",
+
+            "timed_out":
+                True
+        }
+
+
+# ============================================================
+# Git
+# ============================================================
+
+def git(
+    command,
+    timeout=120
+):
+
+    return run_command(
+        f"git {command}",
+        shell=True,
+        timeout=timeout
+    )
+
+
+def current_branch():
+
+    result = git(
+        "branch --show-current"
+    )
+
+    if (
+        result["returncode"]
+        != 0
+    ):
+
+        return None
+
+    return (
+        result["stdout"]
+        .strip()
+    )
+
+
+def get_git_status_lines():
+
+    result = git(
+        "status --porcelain"
+    )
+
+    if (
+        result["returncode"]
+        != 0
+    ):
+
+        raise RuntimeError(
+
+            "git status 执行失败: "
+
+            + (
+                result["stderr"].strip()
+                or
+                result["stdout"].strip()
+            )
+        )
+
+    return [
+
+        line
+
+        for line
+        in result["stdout"].splitlines()
+
+        if line.strip()
+    ]
+
+
+def git_is_dirty():
+
+    return bool(
+        get_git_status_lines()
+    )
+
+
+# ============================================================
+# Git Pull
+# ============================================================
+
+def pull_latest():
+
+    _logger.info(
+        "Pulling latest tasks..."
+    )
+
+    result = git(
+
+        f"pull --rebase "
+        f"{REMOTE_NAME} "
+        f"{REQUIRED_BRANCH}",
+
+        timeout=180
+    )
+
+    if (
+        result["returncode"]
+        != 0
+    ):
+
+        message = (
+            result["stderr"].strip()
+            or
+            result["stdout"].strip()
+        )
+
+        _logger.error(
+
+            "Git pull 失败，"
+            "本轮不执行任务: %s",
+
+            message
+        )
+
+        return False
+
+    return True
+
+
+# ============================================================
+# Git Push
+# ============================================================
+
+def local_ahead_count():
+
+    result = git(
+
+        f"rev-list --count "
+        f"{REMOTE_NAME}/"
+        f"{REQUIRED_BRANCH}"
+        f"..HEAD"
+    )
+
+    if (
+        result["returncode"]
+        != 0
+    ):
+
+        return None
+
+    try:
+
+        return int(
+            result["stdout"]
+            .strip()
+            or
+            "0"
+        )
+
+    except ValueError:
+
+        return None
+
+
+def push_pending_commits():
+
+    ahead = local_ahead_count()
+
+    if ahead == 0:
+
+        return True
+
+    if ahead is None:
+
+        _logger.warning(
+            "无法判断本地是否领先远端，"
+            "将尝试 push。"
+        )
+
+    else:
+
+        _logger.info(
+            "检测到 %s 个待推送 commit。",
+            ahead
+        )
+
+    result = git(
+
+        f"push "
+        f"{REMOTE_NAME} "
+        f"{REQUIRED_BRANCH}",
+
+        timeout=180
+    )
+
+    if (
+        result["returncode"]
+        != 0
+    ):
+
+        message = (
+            result["stderr"].strip()
+            or
+            result["stdout"].strip()
+        )
+
+        _logger.error(
+
+            "Git push 失败。"
+            "代码和 commit 已保留在本地，"
+            "下轮继续重试: %s",
+
+            message
+        )
+
+        return False
+
+    _logger.info(
+        "Git push 成功。"
+    )
+
+    return True
+
+
+# ============================================================
+# Git 同步
+# ============================================================
+
+def sync_repository():
+
+    if git_is_dirty():
+
+        _logger.warning(
+            "工作区存在未提交修改，"
+            "跳过 Git 同步和任务执行。"
+        )
+
+        for line in get_git_status_lines():
+
+            _logger.warning(
+                "  %s",
+                line
+            )
+
+        return False
+
+    # 先 pull。
+    #
+    # 如果之前任务已经 commit，
+    # 但 push 因网络失败，
+    # pull --rebase 可以安全同步远端，
+    # 然后下面继续 retry push。
+    if not pull_latest():
+
+        return False
+
+    if not push_pending_commits():
+
+        return False
+
+    return True
+
+
+# ============================================================
+# Task 路径
+# ============================================================
+
+def task_state_path(
+    task_id
+):
+
+    return (
+        TASK_STATE_DIR
+        /
+        f"{task_id}.json"
+    )
+
+
+def result_path(
+    task_id
+):
+
+    return (
+        RESULT_DIR
+        /
+        f"{task_id}.json"
+    )
+
+
+# ============================================================
+# Runtime Task State
+# ============================================================
+
+def write_task_state(
+    task_id,
+    status,
+    **extra
+):
+
+    data = {
+
+        "task_id":
+            task_id,
+
+        "status":
+            status,
+
+        "updated_at":
+            now_iso(),
+
+        **extra
+    }
+
+    atomic_write_json(
+        task_state_path(task_id),
+        data
+    )
+
+
+def clear_task_state(
+    task_id
+):
+
+    path = task_state_path(
+        task_id
+    )
+
+    if path.exists():
+
+        try:
+
+            path.unlink()
+
+        except OSError:
+
+            pass
+
+
+# ============================================================
+# Task 配置
+# ============================================================
+
+def get_task_max_attempts(
+    task
+):
+
+    value = task.get(
+        "max_attempts",
+        DEFAULT_MAX_ATTEMPTS
+    )
+
+    try:
+
+        value = int(
+            value
+        )
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        value = (
+            DEFAULT_MAX_ATTEMPTS
+        )
+
+    # 最少 1 次
+    # 最多 10 次
+    return max(
+        1,
+        min(
+            value,
+            10
+        )
+    )
+
+
+# ============================================================
+# Task 读取
+# ============================================================
+
+def load_task(
+    task_file
+):
+
+    with open(
+        task_file,
+        "r",
+        encoding="utf-8"
+    ) as f:
+
+        task = json.load(f)
+
+    task_id = str(
+        task.get(
+            "task_id",
+            ""
+        )
+    ).strip()
+
+    if not task_id:
+
+        raise ValueError(
+            f"任务缺少 task_id: "
+            f"{task_file}"
+        )
+
+    # 防止：
+    #
+    # 文件名：
+    # GOLD-001.json
+    #
+    # 里面却写：
+    # GOLD-002
+    #
+    if (
+        task_id
+        !=
+        task_file.stem
+    ):
+
+        raise ValueError(
+
+            "task_id 与文件名不一致: "
+
+            f"task_id={task_id}, "
+
+            f"file={task_file.name}"
+        )
+
+    return task
+
+
+# ============================================================
+# 查找下一个任务
+# ============================================================
+
+def find_next_task():
+
+    tasks = sorted(
+        TASK_DIR.glob(
+            "*.json"
+        )
+    )
+
+    for task_file in tasks:
+
+        try:
+
+            task = load_task(
+                task_file
+            )
+
+        except Exception as exc:
+
+            _logger.error(
+                "跳过无效任务 %s: %s",
+                task_file.name,
+                exc
+            )
+
+            continue
+
+        task_id = (
+            task["task_id"]
+        )
+
+        existing_result = read_json(
+            result_path(task_id),
+            default=None
+        )
+
+        # 没有 result：
+        #
+        # pending
+        #
+        if not existing_result:
+
+            return task_file
+
+        status = str(
+            existing_result.get(
+                "status",
+                ""
+            )
+        ).lower()
+
+        # 终态
+        if status in {
+            "completed",
+            "blocked"
+        }:
+
+            continue
+
+        # 兼容旧结果
+        if status in {
+            "pending",
+            "running",
+            "failed"
+        }:
+
+            return task_file
+
+        # 未知状态
+        #
+        # 保守交给 process_task
+        #
+        return task_file
+
+    return None
+
+
+# ============================================================
+# Cline Prompt
+# ============================================================
+
+def build_cline_prompt(
+    task_file
+):
+
+    relative_task = (
+        task_file
+        .relative_to(ROOT)
+        .as_posix()
+    )
+
+    return (
+
+        f"读取任务文件 "
+        f"{relative_task}，"
+
+        f"严格按照其中任务执行，"
+
+        f"同时遵守项目根目录 "
+        f".clinerules。"
+
+        f"先分析现有代码和相关文档，"
+        f"再进行最小范围修改。"
+
+        f"完成 task 中的 "
+        f"requirements、acceptance "
+        f"和必要测试。"
+
+        f"不要修改 .ai/tasks，"
+
+        f"不要修改 .ai/results。"
+
+        f"完成后总结："
+
+        f"完成内容、修改文件、"
+        f"测试结果、遗留问题、"
+        f"是否满足 acceptance，"
+
+        f"然后退出。"
+    )
+
+
+# ============================================================
+# Cline CLI
+# ============================================================
+
+def find_cline_executable():
+
+    # Windows npm 全局 CLI
+    #
+    # 优先寻找：
+    #
+    # cline.cmd
+    #
+    if os.name == "nt":
+
+        cline_exe = shutil.which(
+            "cline.cmd"
+        )
+
+        if cline_exe:
+
+            return cline_exe
+
+    return shutil.which(
+        "cline"
+    )
+
+
+# ============================================================
+# Cline JSON 解析
+# ============================================================
+
+def parse_cline_json_output(
+    stdout
+):
+
+    # 不保存 reasoning。
+    #
+    # 只保存 run_result / done 的最终信息。
+    #
+    summary = {
+
+        "finish_reason":
+            None,
+
+        "final_text":
+            "",
+
+        "iterations":
+            None,
+
+        "duration_ms":
+            None,
+
+        "usage":
+            None,
+
+        "model":
+            None
+    }
+
+    for raw_line in stdout.splitlines():
+
+        line = (
+            raw_line
+            .strip()
+        )
+
+        if not line.startswith(
+            "{"
+        ):
+
+            continue
+
+        try:
+
+            event = json.loads(
+                line
+            )
+
+        except json.JSONDecodeError:
+
+            continue
+
+        event_type = event.get(
+            "type"
+        )
+
+        # ----------------------------------------------------
+        # run_result
+        # ----------------------------------------------------
+
+        if event_type == "run_result":
+
+            summary[
+                "finish_reason"
+            ] = event.get(
+                "finishReason"
+            )
+
+            summary[
+                "final_text"
+            ] = (
+                event.get(
+                    "text"
+                )
+                or
+                ""
+            )
+
+            summary[
+                "iterations"
+            ] = event.get(
+                "iterations"
+            )
+
+            summary[
+                "duration_ms"
+            ] = event.get(
+                "durationMs"
+            )
+
+            summary[
+                "usage"
+            ] = (
+                event.get(
+                    "aggregateUsage"
+                )
+                or
+                event.get(
+                    "usage"
+                )
+            )
+
+            model = event.get(
+                "model"
+            )
+
+            if isinstance(
+                model,
+                dict
+            ):
+
+                summary[
+                    "model"
+                ] = model.get(
+                    "id"
+                )
+
+            elif isinstance(
+                model,
+                str
+            ):
+
+                summary[
+                    "model"
+                ] = model
+
+        # ----------------------------------------------------
+        # done
+        # ----------------------------------------------------
+
+        elif (
+            event_type
+            ==
+            "agent_event"
+        ):
+
+            inner = event.get(
+                "event"
+            )
+
+            if (
+                isinstance(
+                    inner,
+                    dict
+                )
+                and
+                inner.get("type")
+                ==
+                "done"
+            ):
+
+                if not summary[
+                    "final_text"
+                ]:
+
+                    summary[
+                        "final_text"
+                    ] = (
+                        inner.get(
+                            "text"
+                        )
+                        or
+                        ""
+                    )
+
+                if (
+                    summary[
+                        "finish_reason"
+                    ]
+                    is None
+                ):
+
+                    summary[
+                        "finish_reason"
+                    ] = inner.get(
+                        "reason"
+                    )
+
+                if (
+                    summary[
+                        "iterations"
+                    ]
+                    is None
+                ):
+
+                    summary[
+                        "iterations"
+                    ] = inner.get(
+                        "iterations"
+                    )
+
+                if (
+                    summary[
+                        "usage"
+                    ]
+                    is None
+                ):
+
+                    summary[
+                        "usage"
+                    ] = inner.get(
+                        "usage"
+                    )
+
+    return summary
+
+
+# ============================================================
+# 执行 Cline
+# ============================================================
+
+def run_cline(
+    task_file
+):
+
+    cline_exe = (
+        find_cline_executable()
+    )
+
+    if not cline_exe:
+
+        raise RuntimeError(
+
+            "找不到 Cline CLI，"
+            "请先执行 "
+            "npm install -g cline"
+        )
+
+    prompt = build_cline_prompt(
+        task_file
+    )
+
+    args = [
+
+        cline_exe,
+
+        "--json",
+
+        "--yolo",
+
+        "--timeout",
+
+        str(
+            CLINE_TIMEOUT_SECONDS
+        ),
+
+        prompt
+    ]
+
+    _logger.info(
+        "Starting Cline..."
+    )
+
+    _logger.info(
+        "Cline executable: %s",
+        cline_exe
+    )
+
+    _logger.info(
+        "Task file: %s",
+        task_file.relative_to(
+            ROOT
+        )
+    )
+
+    try:
+
+        # ====================================================
+        # Windows
+        # ====================================================
+        #
+        # 这里保留我们已经实际验证成功的方案：
+        #
+        # Python
+        #   ↓
+        # Windows Shell
+        #   ↓
+        # cline.cmd
+        #   ↓
+        # Cline headless
+        #
+        # 不使用 stdin pipe。
+        #
+        if os.name == "nt":
+
+            command_line = (
+                subprocess
+                .list2cmdline(
+                    args
+                )
+            )
+
+            result = subprocess.run(
+
+                command_line,
+
+                cwd=ROOT,
+
+                shell=True,
+
+                capture_output=True,
+
+                text=True,
+
+                encoding="utf-8",
+
+                errors="replace",
+
+                timeout=(
+                    CLINE_TIMEOUT_SECONDS
+                    +
+                    60
+                )
+            )
+
+        # ====================================================
+        # Linux / macOS
+        # ====================================================
+        else:
+
+            result = subprocess.run(
+
+                args,
+
+                cwd=ROOT,
+
+                capture_output=True,
+
+                text=True,
+
+                encoding="utf-8",
+
+                errors="replace",
+
+                timeout=(
+                    CLINE_TIMEOUT_SECONDS
+                    +
+                    60
+                )
+            )
+
+        parsed = (
+            parse_cline_json_output(
+                result.stdout
+            )
+        )
+
+        return {
+
+            "returncode":
+                result.returncode,
+
+            "stdout":
+                result.stdout,
+
+            "stderr":
+                result.stderr,
+
+            "timed_out":
+                False,
+
+            "summary":
+                parsed
+        }
+
+    except subprocess.TimeoutExpired as exc:
+
+        stdout = (
+            exc.stdout
+            or
+            ""
+        )
+
+        stderr = (
+            exc.stderr
+            or
+            ""
+        )
+
+        if isinstance(
+            stdout,
+            bytes
+        ):
+
+            stdout = stdout.decode(
+                "utf-8",
+                errors="replace"
+            )
+
+        if isinstance(
+            stderr,
+            bytes
+        ):
+
+            stderr = stderr.decode(
+                "utf-8",
+                errors="replace"
+            )
+
+        return {
+
+            "returncode":
+                124,
+
+            "stdout":
+                stdout,
+
+            "stderr":
+                (
+                    stderr
+                    +
+                    "\nCline process timed out."
+                ),
+
+            "timed_out":
+                True,
+
+            "summary":
+                parse_cline_json_output(
+                    stdout
+                )
+        }
+
+
+# ============================================================
+# Validation
+# ============================================================
+
+def run_validations(
+    task
+):
+
+    commands = task.get(
+        "validation_commands",
+        []
+    )
+
+    results = []
+
+    for command in commands:
+
+        _logger.info(
+            "Validation: %s",
+            command
+        )
+
+        result = run_command(
+
+            command,
+
+            shell=True,
+
+            timeout=(
+                CLINE_TIMEOUT_SECONDS
+            )
+        )
+
+        results.append({
+
+            "command":
+                command,
+
+            "returncode":
+                result[
+                    "returncode"
+                ],
+
+            "timed_out":
+                result[
+                    "timed_out"
+                ],
+
+            "stdout_tail":
+                result[
+                    "stdout"
+                ][-5000:],
+
+            "stderr_tail":
+                result[
+                    "stderr"
+                ][-5000:]
+        })
+
+    return results
+
+
+def validations_passed(
+    validations
+):
+
+    return all(
+
+        item[
+            "returncode"
+        ]
+        == 0
+
+        for item
+        in validations
+    )
+
+
+# ============================================================
+# Git Diff
+# ============================================================
+
+def get_changed_files():
+
+    result = git(
+        "status --short"
+    )
+
+    if (
+        result["returncode"]
+        != 0
+    ):
+
+        return []
+
+    return [
+
+        line
+
+        for line
+        in result["stdout"].splitlines()
+
+        if line.strip()
+    ]
+
+
+def get_diff_stat():
+
+    result = git(
+        "diff --stat"
+    )
+
+    if (
+        result["returncode"]
+        == 0
+    ):
+
+        return result[
+            "stdout"
+        ]
+
+    return ""
+
+
+# ============================================================
+# 失败回滚
+# ============================================================
+
+def reset_task_changes():
+
+    _logger.warning(
+        "回滚本次失败尝试产生的代码修改..."
+    )
+
+    reset = git(
+        "reset --hard HEAD"
+    )
+
+    if (
+        reset["returncode"]
+        != 0
+    ):
+
+        raise RuntimeError(
+
+            "git reset --hard HEAD 失败: "
+
+            + (
+                reset["stderr"].strip()
+                or
+                reset["stdout"].strip()
+            )
+        )
+
+    # 删除本轮 Cline 新建、
+    # 但尚未进入 Git 的文件。
+    #
+    # .gitignore 中的 runtime/logs
+    # 不会被删除。
+    clean = git(
+        "clean -fd"
+    )
+
+    if (
+        clean["returncode"]
+        != 0
+    ):
+
+        raise RuntimeError(
+
+            "git clean -fd 失败: "
+
+            + (
+                clean["stderr"].strip()
+                or
+                clean["stdout"].strip()
+            )
+        )
+
+
+# ============================================================
+# Attempt Result
+# ============================================================
+
+def build_attempt_record(
+    attempt,
+    started_at,
+    finished_at,
+    cline_result,
+    validations,
+    changed_files,
+    diff_stat
+):
+
+    summary = (
+        cline_result.get(
+            "summary"
+        )
+        or
+        {}
+    )
+
+    return {
+
+        "attempt":
+            attempt,
+
+        "started_at":
+            started_at,
+
+        "finished_at":
+            finished_at,
+
+        "cline_exit_code":
+            cline_result[
+                "returncode"
+            ],
+
+        "cline_timed_out":
+            cline_result.get(
+                "timed_out",
+                False
+            ),
+
+        "finish_reason":
+            summary.get(
+                "finish_reason"
+            ),
+
+        "model":
+            summary.get(
+                "model"
+            ),
+
+        "iterations":
+            summary.get(
+                "iterations"
+            ),
+
+        "duration_ms":
+            summary.get(
+                "duration_ms"
+            ),
+
+        "usage":
+            summary.get(
+                "usage"
+            ),
+
+        "cline_final_text":
+            summary.get(
+                "final_text",
+                ""
+            ),
+
+        "cline_error_tail":
+            cline_result.get(
+                "stderr",
+                ""
+            )[-5000:],
+
+        "changed_files":
+            changed_files,
+
+        "git_diff_stat":
+            diff_stat,
+
+        "validations":
+            validations
+    }
+
+
+# ============================================================
+# 最终结果
+# ============================================================
+
+def write_final_result(
+    task,
+    status,
+    attempts,
+    changed_files=None,
+    diff_stat="",
+    note=None
+):
+
+    task_id = (
+        task["task_id"]
+    )
+
+    result = {
+
+        "task_id":
+            task_id,
+
+        "title":
+            task.get(
+                "title",
+                ""
+            ),
+
+        "status":
+            status,
+
+        "finished_at":
+            now_iso(),
+
+        "attempt_count":
+            len(
+                attempts
+            ),
+
+        "max_attempts":
+            get_task_max_attempts(
+                task
+            ),
+
+        "changed_files":
+            (
+                changed_files
+                or
+                []
+            ),
+
+        "git_diff_stat":
+            diff_stat,
+
+        "attempts":
+            attempts
+    }
+
+    if note:
+
+        result[
+            "note"
+        ] = note
+
+    atomic_write_json(
+        result_path(task_id),
+        result
+    )
+
+    return result
+
+
+# ============================================================
+# Commit + Push
+# ============================================================
+
+def commit_task_result(
+    task,
+    status
+):
+
+    task_id = (
+        task["task_id"]
+    )
+
+    # 任务开始前工作区一定是 clean。
+    #
+    # 所以这里的修改理论上全部来自：
+    #
+    # Cline
+    # +
+    # result.json
+    #
+    git(
+        "add -A"
+    )
+
+    if status == "completed":
+
+        commit_message = (
+            f"ai: complete "
+            f"{task_id}"
+        )
+
+    else:
+
+        commit_message = (
+            f"ai: blocked "
+            f"{task_id}"
+        )
+
+    commit = git(
+        f'commit -m "{commit_message}"'
+    )
+
+    if (
+        commit["returncode"]
+        != 0
+    ):
+
+        message = (
+            commit["stderr"].strip()
+            or
+            commit["stdout"].strip()
+        )
+
+        _logger.error(
+            "Git commit 失败: %s",
+            message
+        )
+
+        return False
+
+    _logger.info(
+        "Git commit 完成: %s",
+        commit_message
+    )
+
+    # --------------------------------------------------------
+    # push 失败时：
+    #
+    # 不回滚 commit。
+    #
+    # 下一轮：
+    #
+    # sync_repository()
+    #
+    # 会继续 retry push。
+    #
+    # 因为 result 已经处于 terminal 状态，
+    # 所以不会重新执行 Cline。
+    # --------------------------------------------------------
+
+    if not push_pending_commits():
+
+        _logger.warning(
+
+            "任务已经完成并提交到本地 Git，"
+            "但尚未推送成功。"
+
+            "下轮会优先重试 push，"
+            "不会重新执行任务。"
+        )
+
+        return False
+
+    return True
+
+
+# ============================================================
+# 执行 Task
+# ============================================================
+
+def process_task(
+    task_file
+):
+
+    task = load_task(
+        task_file
+    )
+
+    task_id = (
+        task["task_id"]
+    )
+
+    max_attempts = (
+        get_task_max_attempts(
+            task
+        )
+    )
+
+    existing_result = read_json(
+        result_path(task_id),
+        default=None
+    )
+
+    prior_attempts = []
+
+    # ========================================================
+    # V2 result
+    # ========================================================
+
+    if (
+        existing_result
+        and
+        isinstance(
+            existing_result.get(
+                "attempts"
+            ),
+            list
+        )
+    ):
+
+        prior_attempts = (
+            existing_result[
+                "attempts"
+            ]
+        )
+
+    # ========================================================
+    # 兼容 V1 failed result
+    # ========================================================
+
+    elif (
+        existing_result
+        and
+        existing_result.get(
+            "status"
+        )
+        ==
+        "failed"
+    ):
+
+        prior_attempts = [
+
+            {
+                "attempt":
+                    1,
+
+                "finished_at":
+                    existing_result.get(
+                        "finished_at"
+                    ),
+
+                "cline_exit_code":
+                    existing_result.get(
+                        "cline_exit_code"
+                    ),
+
+                "cline_error_tail":
+                    existing_result.get(
+                        "cline_error_tail",
+                        ""
+                    ),
+
+                "migrated_from_v1":
+                    True
+            }
+        ]
+
+    start_attempt = (
+        len(
+            prior_attempts
+        )
+        +
+        1
+    )
+
+    # ========================================================
+    # 已达到重试上限
+    # ========================================================
+
+    if (
+        start_attempt
+        >
+        max_attempts
+    ):
+
+        _logger.error(
+
+            "Task %s 已达到"
+            "最大尝试次数 %s，"
+            "标记为 blocked。",
+
+            task_id,
+            max_attempts
+        )
+
+        if git_is_dirty():
+
+            reset_task_changes()
+
+        write_final_result(
+
+            task,
+
+            "blocked",
+
+            prior_attempts,
+
+            note=(
+                "Maximum retry count reached."
+            )
+        )
+
+        commit_task_result(
+            task,
+            "blocked"
+        )
+
+        clear_task_state(
+            task_id
         )
 
         return
 
-    print("")
-    print("AI Orchestrator started")
-    print(f"Project: {ROOT}")
-    print(f"Branch : {branch}")
-    print("")
+    # ========================================================
+    # 输出任务信息
+    # ========================================================
 
-    while True:
+    _logger.info(
+        "=" * 60
+    )
 
-        try:
+    _logger.info(
+        "Task: %s",
+        task_id
+    )
 
-            pull_latest()
+    _logger.info(
+        "%s",
+        task.get(
+            "title",
+            ""
+        )
+    )
 
-            task_file = find_next_task()
+    _logger.info(
+        "Max attempts: %s",
+        max_attempts
+    )
 
-            if task_file:
+    _logger.info(
+        "=" * 60
+    )
 
-                process_task(task_file)
+    # ========================================================
+    # 最后安全检查
+    # ========================================================
+
+    if git_is_dirty():
+
+        _logger.warning(
+
+            "工作区存在未提交修改，"
+            "为了避免覆盖人工代码，"
+            "本轮停止。"
+        )
+
+        for line in get_git_status_lines():
+
+            _logger.warning(
+                "  %s",
+                line
+            )
+
+        return
+
+    attempts = list(
+        prior_attempts
+    )
+
+    # ========================================================
+    # Retry Loop
+    # ========================================================
+
+    for attempt in range(
+        start_attempt,
+        max_attempts + 1
+    ):
+
+        started_at = now_iso()
+
+        write_task_state(
+
+            task_id,
+
+            "running",
+
+            attempt=
+                attempt,
+
+            max_attempts=
+                max_attempts,
+
+            started_at=
+                started_at
+        )
+
+        _logger.info(
+
+            "执行 Task %s，"
+            "attempt %s/%s",
+
+            task_id,
+            attempt,
+            max_attempts
+        )
+
+        # ----------------------------------------------------
+        # Cline
+        # ----------------------------------------------------
+
+        cline_result = run_cline(
+            task_file
+        )
+
+        # ----------------------------------------------------
+        # Validation
+        # ----------------------------------------------------
+
+        validations = run_validations(
+            task
+        )
+
+        # ----------------------------------------------------
+        # Git diff
+        # ----------------------------------------------------
+
+        changed_files = (
+            get_changed_files()
+        )
+
+        diff_stat = (
+            get_diff_stat()
+        )
+
+        finished_at = now_iso()
+
+        # ----------------------------------------------------
+        # Attempt 记录
+        # ----------------------------------------------------
+
+        attempt_record = (
+            build_attempt_record(
+
+                attempt=
+                    attempt,
+
+                started_at=
+                    started_at,
+
+                finished_at=
+                    finished_at,
+
+                cline_result=
+                    cline_result,
+
+                validations=
+                    validations,
+
+                changed_files=
+                    changed_files,
+
+                diff_stat=
+                    diff_stat
+            )
+        )
+
+        attempts.append(
+            attempt_record
+        )
+
+        # ====================================================
+        # 判断成功
+        # ====================================================
+
+        success = (
+
+            cline_result[
+                "returncode"
+            ]
+            ==
+            0
+
+            and
+
+            validations_passed(
+                validations
+            )
+        )
+
+        # ====================================================
+        # SUCCESS
+        # ====================================================
+
+        if success:
+
+            write_task_state(
+
+                task_id,
+
+                "completed",
+
+                attempt=
+                    attempt,
+
+                max_attempts=
+                    max_attempts,
+
+                finished_at=
+                    finished_at
+            )
+
+            write_final_result(
+
+                task,
+
+                "completed",
+
+                attempts,
+
+                changed_files=
+                    changed_files,
+
+                diff_stat=
+                    diff_stat
+            )
+
+            pushed = (
+                commit_task_result(
+
+                    task,
+
+                    "completed"
+                )
+            )
+
+            clear_task_state(
+                task_id
+            )
+
+            if pushed:
+
+                _logger.info(
+                    "Task %s: completed",
+                    task_id
+                )
 
             else:
 
-                print(
-                    "No new task..."
+                _logger.warning(
+
+                    "Task %s: "
+                    "completed locally, "
+                    "push pending",
+
+                    task_id
                 )
 
-        except KeyboardInterrupt:
+            return
 
-            print("Stopping...")
-            break
+        # ====================================================
+        # FAILED
+        # ====================================================
 
-        except Exception as e:
+        _logger.warning(
 
-            print(
-                f"ERROR: {e}"
+            "Task %s "
+            "attempt %s/%s 失败。",
+
+            task_id,
+            attempt,
+            max_attempts
+        )
+
+        stderr = (
+            cline_result
+            .get(
+                "stderr",
+                ""
+            )
+            .strip()
+        )
+
+        if stderr:
+
+            _logger.warning(
+
+                "Cline stderr: %s",
+
+                stderr[
+                    -1500:
+                ]
             )
 
-        time.sleep(POLL_SECONDS)
+        failed_validations = [
 
+            item[
+                "command"
+            ]
+
+            for item
+            in validations
+
+            if (
+                item[
+                    "returncode"
+                ]
+                !=
+                0
+            )
+        ]
+
+        if failed_validations:
+
+            _logger.warning(
+
+                "失败的 validation: %s",
+
+                ", ".join(
+                    failed_validations
+                )
+            )
+
+        write_task_state(
+
+            task_id,
+
+            "failed",
+
+            attempt=
+                attempt,
+
+            max_attempts=
+                max_attempts,
+
+            finished_at=
+                finished_at
+        )
+
+        # ----------------------------------------------------
+        # 失败 attempt 不能污染下一次 retry
+        # ----------------------------------------------------
+
+        reset_task_changes()
+
+        # ====================================================
+        # RETRY
+        # ====================================================
+
+        if (
+            attempt
+            <
+            max_attempts
+        ):
+
+            wait_seconds = min(
+                POLL_SECONDS,
+                10
+            )
+
+            _logger.info(
+
+                "将在 %s 秒后"
+                "重试 Task %s。",
+
+                wait_seconds,
+                task_id
+            )
+
+            time.sleep(
+                wait_seconds
+            )
+
+            continue
+
+        # ====================================================
+        # BLOCKED
+        # ====================================================
+
+        write_task_state(
+
+            task_id,
+
+            "blocked",
+
+            attempt=
+                attempt,
+
+            max_attempts=
+                max_attempts,
+
+            finished_at=
+                finished_at
+        )
+
+        write_final_result(
+
+            task,
+
+            "blocked",
+
+            attempts,
+
+            note=(
+                "Task failed after "
+                "maximum retry count."
+            )
+        )
+
+        commit_task_result(
+            task,
+            "blocked"
+        )
+
+        clear_task_state(
+            task_id
+        )
+
+        _logger.error(
+
+            "Task %s: blocked "
+            "after %s attempts",
+
+            task_id,
+            max_attempts
+        )
+
+        return
+
+
+# ============================================================
+# 单实例锁
+# ============================================================
+
+def is_pid_running(
+    pid
+):
+
+    if (
+        not pid
+        or
+        pid <= 0
+    ):
+
+        return False
+
+    if (
+        pid
+        ==
+        os.getpid()
+    ):
+
+        return True
+
+    # ========================================================
+    # Windows
+    # ========================================================
+
+    if os.name == "nt":
+
+        result = subprocess.run(
+
+            [
+                "tasklist",
+
+                "/FI",
+
+                f"PID eq {pid}",
+
+                "/NH"
+            ],
+
+            capture_output=True,
+
+            text=True,
+
+            encoding="utf-8",
+
+            errors="replace"
+        )
+
+        output = (
+            result.stdout
+            .lower()
+        )
+
+        return (
+            str(pid)
+            in
+            output
+        )
+
+    # ========================================================
+    # Linux / macOS
+    # ========================================================
+
+    try:
+
+        os.kill(
+            pid,
+            0
+        )
+
+        return True
+
+    except OSError:
+
+        return False
+
+
+def acquire_lock():
+
+    global _lock_owned
+
+    ensure_directories()
+
+    # ========================================================
+    # 已存在 Lock
+    # ========================================================
+
+    if LOCK_FILE.exists():
+
+        existing = (
+            read_json(
+                LOCK_FILE,
+                default={}
+            )
+            or
+            {}
+        )
+
+        pid = existing.get(
+            "pid"
+        )
+
+        try:
+
+            pid = int(
+                pid
+            )
+
+        except (
+            TypeError,
+            ValueError
+        ):
+
+            pid = None
+
+        # ----------------------------------------------------
+        # 另一个 Orchestrator 正在运行
+        # ----------------------------------------------------
+
+        if (
+            pid
+            and
+            is_pid_running(
+                pid
+            )
+        ):
+
+            raise RuntimeError(
+
+                "已有 Orchestrator "
+                "正在运行，"
+
+                f"PID={pid}。"
+            )
+
+        # ----------------------------------------------------
+        # 上一次异常结束留下的 lock
+        # ----------------------------------------------------
+
+        _logger.warning(
+            "发现陈旧 lock 文件，"
+            "自动清理。"
+        )
+
+        try:
+
+            LOCK_FILE.unlink()
+
+        except OSError as exc:
+
+            raise RuntimeError(
+
+                "无法清理陈旧 "
+                f"lock 文件: {exc}"
+            ) from exc
+
+    # ========================================================
+    # 创建 Lock
+    # ========================================================
+
+    fd = os.open(
+
+        LOCK_FILE,
+
+        os.O_CREAT
+        |
+        os.O_EXCL
+        |
+        os.O_WRONLY
+    )
+
+    try:
+
+        data = json.dumps(
+
+            {
+                "pid":
+                    os.getpid(),
+
+                "started_at":
+                    now_iso(),
+
+                "project":
+                    str(ROOT)
+            },
+
+            ensure_ascii=False,
+
+            indent=2
+        )
+
+        os.write(
+            fd,
+            data.encode(
+                "utf-8"
+            )
+        )
+
+    finally:
+
+        os.close(
+            fd
+        )
+
+    _lock_owned = True
+
+
+def release_lock():
+
+    global _lock_owned
+
+    if not _lock_owned:
+
+        return
+
+    try:
+
+        if LOCK_FILE.exists():
+
+            LOCK_FILE.unlink()
+
+    except OSError:
+
+        pass
+
+    _lock_owned = False
+
+
+# ============================================================
+# 可中断 Sleep
+# ============================================================
+
+def sleep_interruptibly(
+    seconds
+):
+
+    end = (
+        time.monotonic()
+        +
+        seconds
+    )
+
+    while True:
+
+        remaining = (
+            end
+            -
+            time.monotonic()
+        )
+
+        if (
+            remaining
+            <=
+            0
+        ):
+
+            return
+
+        time.sleep(
+
+            min(
+                remaining,
+                1
+            )
+        )
+
+
+# ============================================================
+# Main
+# ============================================================
+
+def main():
+
+    ensure_directories()
+
+    setup_logging()
+
+    # ========================================================
+    # Lock
+    # ========================================================
+
+    try:
+
+        acquire_lock()
+
+    except Exception as exc:
+
+        _logger.error(
+            "%s",
+            exc
+        )
+
+        return 2
+
+    atexit.register(
+        release_lock
+    )
+
+    # ========================================================
+    # Branch
+    # ========================================================
+
+    branch = current_branch()
+
+    if (
+        branch
+        !=
+        REQUIRED_BRANCH
+    ):
+
+        _logger.error(
+            "当前分支是 %s",
+            branch
+        )
+
+        _logger.error(
+            "必须切换到 %s",
+            REQUIRED_BRANCH
+        )
+
+        release_lock()
+
+        return 2
+
+    # ========================================================
+    # 启动信息
+    # ========================================================
+
+    _logger.info(
+        ""
+    )
+
+    _logger.info(
+        "AI Orchestrator V2 started"
+    )
+
+    _logger.info(
+        "Project: %s",
+        ROOT
+    )
+
+    _logger.info(
+        "Branch : %s",
+        branch
+    )
+
+    _logger.info(
+        "Poll   : %ss",
+        POLL_SECONDS
+    )
+
+    _logger.info(
+        "Retries: %s",
+        DEFAULT_MAX_ATTEMPTS
+    )
+
+    _logger.info(
+        "Cline timeout: %ss",
+        CLINE_TIMEOUT_SECONDS
+    )
+
+    _logger.info(
+        ""
+    )
+
+    # ========================================================
+    # Main Loop
+    # ========================================================
+
+    try:
+
+        while True:
+
+            try:
+
+                # ============================================
+                # Git Sync
+                # ============================================
+
+                if not sync_repository():
+
+                    sleep_interruptibly(
+                        POLL_SECONDS
+                    )
+
+                    continue
+
+                # ============================================
+                # Task
+                # ============================================
+
+                task_file = (
+                    find_next_task()
+                )
+
+                if task_file:
+
+                    process_task(
+                        task_file
+                    )
+
+                else:
+
+                    _logger.info(
+                        "No new task..."
+                    )
+
+                # ============================================
+                # Sleep
+                # ============================================
+
+                sleep_interruptibly(
+                    POLL_SECONDS
+                )
+
+            except KeyboardInterrupt:
+
+                raise
+
+            except Exception:
+
+                _logger.exception(
+                    "本轮执行出现"
+                    "未处理异常。"
+                )
+
+                sleep_interruptibly(
+                    POLL_SECONDS
+                )
+
+    # ========================================================
+    # Ctrl + C
+    # ========================================================
+
+    except KeyboardInterrupt:
+
+        _logger.info(
+            "Stopping..."
+        )
+
+    # ========================================================
+    # Cleanup
+    # ========================================================
+
+    finally:
+
+        release_lock()
+
+    return 0
+
+
+# ============================================================
+# Entry
+# ============================================================
 
 if __name__ == "__main__":
-    main()
+
+    sys.exit(
+        main()
+    )
