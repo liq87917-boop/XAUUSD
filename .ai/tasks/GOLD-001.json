@@ -1,0 +1,59 @@
+{
+  "task_id": "GOLD-001",
+  "title": "实现 30 分钟 Collector Scheduler 并解除 TD-09",
+  "max_attempts": 3,
+  "goal": "在不新增第三方依赖、不修改数据库 schema 的前提下，实现可长期运行的 30 分钟采集调度框架，复用现有 JobRun、collector registry 与 run_collectors，使当前合规采集器能够按确定性时间窗持续积累可审计数据，并满足 TD-09 的幂等、故障隔离和崩溃恢复要求。",
+  "context": [
+    "当前 TECH_DEBT.md 中 TD-09 仍为 P0：只有单轮 run_collectors，没有 30 分钟调度器、job_runs 幂等执行和 worker 崩溃恢复。",
+    "database/models/system.py 已存在 JobRun，idempotency_key 有唯一约束；JobStatus 已有 PENDING/RUNNING/SUCCESS/PARTIAL_FAILED/RETRYING/FAILED/CANCELLED。",
+    "src/collectors/runner.py 已实现 run_collectors，并已验证单个 provider 失败不阻塞其他 provider。",
+    "近期已接入 akshare_gold、dbnomics_macro、opennews，并完成 smoke/dry-run、统一数据质量校验与 provider 故障隔离。",
+    "Phase 3.3 Author/News 仍因真实数据资格不足而 BLOCKED；本任务只建设采集基础设施，不得绕过授权/时间语义门禁，也不得进入 Phase 3.4、策略、回测或实盘。"
+  ],
+  "requirements": [
+    "新增独立 Scheduler 模块，建议放在 src/scheduler/ 下；Scheduler 层不得包含任何具体 provider 的 URL、解析逻辑或业务特例。",
+    "实现 30 分钟对齐的确定性调度槽：同一 UTC 30 分钟窗口必须生成稳定 idempotency_key；重复触发同一窗口只能执行一次。",
+    "复用现有 database.models.JobRun 持久化每轮调度状态，不新增 migration、不修改现有 schema。",
+    "实现单轮入口（例如 run_scheduled_collection_once）：从数据库读取 enabled=true 且配置了 config_json.collector 的 Source，按 registry 构造采集器并调用现有 run_collectors。",
+    "Scheduler 需要确保生产 collector 模块完成注册，但不得在调度核心写 provider-specific 分支；注册/bootstrap 与调度逻辑分离。",
+    "JobRun 状态至少正确覆盖 RUNNING、SUCCESS、PARTIAL_FAILED、FAILED；输出 output_json 记录每个 collector 的名称、source、status、run_id、fetched/inserted/duplicate/failed/skipped/retry/warnings 等摘要，不记录密钥或敏感配置。",
+    "若某个 collector/source 构造失败或执行失败，不得阻止其他 enabled source 执行；最终 JobRun 应反映 PARTIAL_FAILED 或 FAILED，而不是静默 SUCCESS。",
+    "实现 worker 崩溃恢复：同一 idempotency_key 已存在 RUNNING/RETRYING 且超过明确的 stale 阈值时，允许安全接管并增加 retry_count；不能创建第二条 JobRun。对未过 stale 阈值的 RUNNING 必须跳过，防止并发重复执行。",
+    "所有时间必须为 timezone-aware UTC；禁止 naive datetime；调度窗口边界必须可注入 clock，便于测试。",
+    "增加 CLI，例如 scripts/run_collector_scheduler.py，至少支持 --once、--interval-minutes（默认 30）以及安全的循环模式；Ctrl+C 正常退出。CLI 不得读取或打印 API Key/Token。",
+    "循环模式采用标准库 asyncio/time 自研循环，不引入 APScheduler、Celery 等新依赖。",
+    "为 Scheduler 增加单元/集成测试，测试 100% Mock、禁止真实外部网络。",
+    "至少覆盖：同一 30 分钟槽重复调用只执行一次；下一个槽会执行；单 provider 失败不阻塞其他 provider；构造失败隔离；stale RUNNING 恢复且 retry_count 增加；非 stale RUNNING 不重复执行；输出摘要不含敏感字段；UTC/slot 边界正确。",
+    "保持现有 append-only、effective_at=max(published_at,collected_at)、News/Author 授权门禁不变；不得通过回填伪造历史可用时间。",
+    "不得修改 .env，不得添加真实密钥，不得启用未授权来源，不得触碰 LIVE_TRADING=false。",
+    "完成后更新 TECH_DEBT.md：只有当幂等、30 分钟调度、崩溃恢复与故障隔离测试全部通过时，才把 TD-09 标为已解除，并写清证据；否则保持未解除并记录剩余项。",
+    "更新 PROGRESS_LOG.md，记录本轮实现、测试结果、仍存在的数据资格阻塞；不要改变 Phase 3.2 FAIL 与 Phase 3.3 BLOCKED 的研究结论。",
+    "如 README 有运维命令区，补充 Scheduler 的 --once 与常驻运行示例；不得把它描述为生产实盘服务。"
+  ],
+  "constraints": [
+    "不新增第三方依赖。",
+    "不新增或修改 Alembic migration。",
+    "不修改数据库 schema。",
+    "不进入 Phase 3.4 Meta Ensemble。",
+    "不训练新的 Alpha 模型，不改 Phase 3.2 Technical/Macro 冻结负面结果。",
+    "不为凑 News/Author 数量伪造、回填或修改 published_at、collected_at、effective_at。",
+    "不自动采集未获授权的作者内容；不绕过 robots、证书或来源授权。",
+    "测试不得联网。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；由 Orchestrator 负责 Git。"
+  ],
+  "validation_commands": [
+    "py -m pytest tests -q",
+    "py -m ruff check .",
+    "py -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在可复用的 Scheduler 核心模块与 CLI 单轮/循环入口。",
+    "同一 UTC 30 分钟槽重复触发不会重复执行采集，也不会产生第二条 JobRun。",
+    "stale RUNNING/RETRYING JobRun 可安全恢复，retry_count 正确增加；非 stale 运行不会被并发接管。",
+    "单个 provider 构造或执行失败不阻断其他 provider，最终 JobRun 状态和 output_json 可审计。",
+    "Scheduler 测试全部使用 Mock，不访问真实网络。",
+    "全量 pytest、ruff check、mypy 全部通过。",
+    "没有新增依赖、migration、schema 变更、密钥、实盘代码或 Phase 3.4 代码。",
+    "TD-09 文档状态与实际验收证据一致，PROGRESS_LOG 已留痕。"
+  ]
+}
