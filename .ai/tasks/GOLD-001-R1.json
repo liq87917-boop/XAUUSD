@@ -1,0 +1,79 @@
+{
+  "task_id": "GOLD-001-R1",
+  "supersedes": "GOLD-001",
+  "type": "RECOVERY",
+  "title": "恢复并完成 30 分钟 Collector Scheduler",
+  "max_attempts": 3,
+  "goal": "恢复 GOLD-001。前一任务因 Cline 模型额度耗尽和 validation 解释器错误被阻塞；这些外部环境问题现已由用户确认恢复。重新实现并验收 30 分钟 Collector Scheduler，满足 TD-09 的幂等、故障隔离和崩溃恢复要求。",
+  "recovery_context": [
+    "GOLD-001 的 result 状态为 blocked；其代码改动已被 Orchestrator 回滚，不得假设上次工作区改动仍存在。",
+    "用户已确认项目 .venv Python 正常，并且 Cline 当前模型可用。",
+    "本次 validation 必须固定使用项目解释器 .venv\\Scripts\\python.exe，禁止使用 py 或系统 python。",
+    "Phase 3.3 Author/News 数据资格仍为 BLOCKED；本任务仅完成采集调度基础设施，不得进入 Phase 3.4。"
+  ],
+  "requirements": [
+    "先阅读 .ai/tasks/GOLD-001.json、.ai/results/GOLD-001.json、.ai/DEVELOPMENT_PROTOCOL.md、TECH_DEBT.md、PROGRESS_LOG.md，确认恢复目标和边界。",
+    "新增独立 Scheduler 核心模块，建议放在 src/scheduler/；调度核心不得包含具体 provider URL、解析逻辑或业务特例。",
+    "实现 UTC 对齐的 30 分钟确定性调度槽；同一槽生成稳定 idempotency_key，同一槽重复触发只能执行一次。",
+    "复用现有 JobRun，不新增 migration、不修改 schema。",
+    "实现单轮入口：读取 enabled=true 且配置 config_json.collector 的 Source，通过 collector registry 构造采集器并调用现有 run_collectors。",
+    "生产 collector 注册/bootstrap 与 Scheduler 核心分离。允许新增 src/collectors/bootstrap.py 或等价模块，不要通过修改 smoke/dry-run 脚本来实现注册。",
+    "单个 source 在构造阶段或执行阶段失败，不得阻断其他 source；最终 JobRun 必须诚实为 PARTIAL_FAILED 或 FAILED。",
+    "JobRun.output_json 必须记录每个 collector 的 source、status、run_id、fetched、inserted、duplicate、failed、skipped、retry_count、warnings 等摘要，且不得包含 token、API key、Authorization 或完整 source config。",
+    "实现 stale RUNNING/RETRYING 恢复：超过明确 stale 阈值后复用同一 JobRun 并增加 retry_count；未过 stale 阈值必须跳过，不得并发重复执行。",
+    "所有时间必须 timezone-aware UTC；调度窗口和 clock 可注入以便测试。",
+    "新增 scripts/run_collector_scheduler.py，至少支持 --once、--interval-minutes（默认 30）和安全循环；Ctrl+C 正常退出。",
+    "循环使用标准库 asyncio/time，不新增 APScheduler/Celery 等依赖。",
+    "测试必须 100% Mock 且禁止真实网络。至少覆盖：同槽幂等、下一槽可执行、provider 执行失败隔离、collector 构造失败隔离、stale 恢复、非 stale 不接管、敏感字段不进入摘要、UTC 槽边界。",
+    "保持 append-only、effective_at=max(published_at,collected_at)、Author/News 授权门禁和 LIVE_TRADING=false 不变。",
+    "只有 Scheduler 验收真正通过后才能把 TECH_DEBT.md 的 TD-09 标为已解除；否则保持未解除并写清剩余问题。",
+    "更新 PROGRESS_LOG.md；如 README 有运维命令区，补 --once 和常驻运行示例，并明确这是研究数据采集服务，不是实盘服务。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/scheduler/**",
+      "src/collectors/bootstrap.py",
+      "src/collectors/__init__.py",
+      "scripts/run_collector_scheduler.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      "orchestrator/**",
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**"
+    ],
+    "note": "若确实必须修改 allowed_primary_paths 之外的生产文件，必须先在最终报告中明确说明原因；不得修改 forbidden_paths。"
+  },
+  "constraints": [
+    "不新增第三方依赖。",
+    "不新增或修改 migration，不修改数据库 schema。",
+    "不进入 Phase 3.4，不训练新的 Alpha，不改变 Phase 3.2 Technical/Macro 冻结负面结论。",
+    "不得伪造或回填 published_at、collected_at、effective_at 以凑历史样本。",
+    "不得采集未授权作者内容，不绕过 robots、证书或授权限制。",
+    "测试不得联网。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；由 Orchestrator 负责 Git。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "Scheduler 核心模块与 CLI 单轮/循环入口存在且职责清晰。",
+    "同一 UTC 30 分钟槽重复触发不重复执行且不产生第二条 JobRun。",
+    "stale RUNNING/RETRYING 可安全恢复并增加 retry_count；非 stale 不被接管。",
+    "collector 构造失败或执行失败均不阻断其他 source，最终状态与 output_json 可审计。",
+    "output_json 不包含敏感配置。",
+    "测试完全 Mock、无真实网络。",
+    "项目 .venv 下的全量 pytest、ruff、mypy 全部通过。",
+    "无新增依赖、migration、schema、密钥、实盘或 Phase 3.4 代码。",
+    "TD-09 和 PROGRESS_LOG 与实际验收证据一致。"
+  ]
+}
