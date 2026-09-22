@@ -57,6 +57,7 @@ __all__ = [
     "RowAssessment",
     "assess_row",
     "normalize_input_row",
+    "valid_reference",
 ]
 
 #: 正文入库存留上限（与 ``src/processors/collection/contracts.py`` 的默认值一致）
@@ -110,12 +111,15 @@ def _aware_time(value: str) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def _valid_reference(value: str) -> bool:
+def valid_reference(value: str) -> bool:
     """引用是否可核验：``https`` URL（无凭据）或 ``docs/legal/`` 内的相对路径。
 
     语义与 ``src/alpha/source_authorization.py`` 的引用格式一致，
     但本层**不检查文件是否真实存在**（存在性由人工 Gate / 只读体检复核），
     因此本函数是纯函数、可离线重放。
+
+    公开导出：Evidence inbox 预检（``src.evidence.inbox``）复用**同一**引用校验口径，
+    避免各处各写一套（对应 ``src/common/redaction`` 的同一设计原则）。
     """
     clean = value.strip().replace("\\", "/")
     if not clean:
@@ -401,7 +405,7 @@ def assess_row(
                 f"{sorted(ALLOWED_AUTHORIZATION_BASES)}",
             )
         )
-    if reference and not _valid_reference(reference):
+    if reference and not valid_reference(reference):
         reasons.append(
             (
                 ReasonCode.AUTHORIZATION_REFERENCE_INVALID,
@@ -496,7 +500,7 @@ def assess_row(
             reasons.append((ReasonCode.AUTHORIZATION_MISSING, "collected_at 已超出授权有效期"))
 
     provenance = normalized.get("provenance_reference")
-    if provenance and not _valid_reference(provenance):
+    if provenance and not valid_reference(provenance):
         reasons.append(
             (
                 ReasonCode.PROVENANCE_MISSING,
@@ -519,7 +523,7 @@ def assess_row(
         availability_problem = "available_at 是未来时间"
     elif not availability_provenance:
         availability_problem = "缺少 availability_provenance（无法审计证据形式）"
-    elif not _valid_reference(availability_reference):
+    elif not valid_reference(availability_reference):
         availability_problem = "availability_reference 必须是 https URL 或 docs/legal/ 内相对路径"
     elif (
         published is not None

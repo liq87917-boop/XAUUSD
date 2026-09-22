@@ -2701,3 +2701,107 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   调度方式由**人工**配置（README 给出示例，工具不会自动安装计划任务）；Phase 切换仍需 L3 人工确认。
 
 
+## 第七十五轮（2026-09-23）：GOLD-011 —— 授权 Evidence 本地 Inbox 发现与预检闭环
+
+### 1. 交付内容
+
+- **inbox 核心**（`src/evidence/inbox.py`，纯本地 / **只读发现** / 零网络 / 零数据库写入）：
+  - `scan_inbox(...)`：**只读**扫描显式 inbox 目录的**直接子目录**；符号链接子目录列入
+    `skipped`（**不跟随**）；inbox 根目录下的散落文件按 `MANIFEST_MISSING` 隔离提示
+    （**不移动 / 不删除**）；输出按内容指纹确定性排序；
+  - `_layout(...)`：对候选包做**内容级**目录快照（`sha256:<hex>` / `symlink` / `dir` /
+    `other` / `unreadable`）；**不读 mtime**、**不跟随符号链接**、子目录与非常规条目一律记
+    稳定原因码；
+  - `_package_fingerprint(...)`：候选包指纹只由**文件内容摘要与结构标记**派生（排序、确定性），
+    **不含**文件名 / mtime / 绝对路径 / 扫描时间；测试锁定「改 mtime / 换审计时点都不改变指纹」；
+  - `_read_manifest` / `_parse_declarations` / `_parse_file_entries`：`manifest.json` 必填
+    `evidence_type`（author|news）/ `source`（或别名 `provider`）/ `authorization_reference` /
+    `time_semantics` / `availability_semantics` / `historical_oos_applicable`（bool）/
+    `files`（`path` + `sha256` + 可选 `format`）；缺失 / 类型错误 / schema 或 contract 版本
+    不符 / 证据类型不支持 → 稳定 `InboxReasonCode`；
+  - `_check_files`：声明路径必须是**包内单级文件名**（拒绝绝对路径 / `..` / 多级 / 盘符 /
+    UNC）；**只依据包内内容摘要判定**（绝不越界读取）；逐文件核对 64 位 `sha256` 与内容是否
+    一致（不一致即隔离且**不再解析内容**）；包内除 manifest 外的文件必须**全部**声明，
+    否则 `EVIDENCE_FILE_UNDECLARED`；
+  - `_preflight_rows`：**复用 Evidence Gateway** 的 `assess_row`（`evidence-intake-v1`）做
+    逐行机械校验（授权 / 时间 / availability / 隔离原因码与 `intake` **完全同源**），汇总
+    `rows` / `acceptable` / `quarantined` / `not_oos_eligible` 与稳定原因码计数；
+    `DUPLICATE` / `IDENTITY_CONFLICT`（需要读库）留给**显式 intake**；
+  - `_sensitive_reasons`：凭据类**键名**只记录键名（`authorization_reference` 等契约字段按
+    intake 的列白名单豁免，避免"名字含 authorization 被自伤"），值级凭据（`token=` /
+    `api_key=`）只记录字段名；引用类字段用 `safe_url` 去掉 query / userinfo；绝不输出 evidence
+    正文；
+  - `CandidatePackage` / `InboxPreflightReport`：稳定、脱敏的 `discovered` /
+    `already_pending` / `status_changed` / `preflight_pass` / `quarantined` / `skipped` /
+    `requires_human_action`；四个安全字段**硬编码**为 true / true / false / false；
+  - `PendingEntry` / `PendingRegister` / `load_pending_register` / `write_pending_register`：
+    pending 清单以内容指纹为键（**当前 inbox 内容的镜像**）：同内容重复扫描**不重复生成**、
+    `first_seen_at` 保留、只推进 `scan_count` / `last_seen_at`；内容变化 → 新指纹（新条目）；
+    同一指纹状态变化记入 `status_changed`；既有 state 损坏 / 被篡改 → **严格校验 fail-closed**；
+    清单**原子写**（复用 GOLD-009 的 `atomic_write_text`）；
+  - `run_inbox_scan(...)`：只有显式 `out_path` 才写文件，且先取**单实例锁**
+    （复用 GOLD-010 的 `SingleInstanceLock`）再读 state；输出 / 状态**必须位于 inbox 之外**
+    （否则会被下一次扫描判为未声明文件）；`exit_code_for` 复用 GOLD-010 的退出码取值。
+- **CLI** `scripts/evidence_inbox.py`：`--inbox-dir` **必填**、`--state` 只读、`--out` 唯一写
+  开关、`--lock` 可选（缺省 `<out>.lock`）、`--as-of`（ISO8601 必须带时区）、`--json`；
+  **只跑一次即返回**；失败路径 stdout 为空、stderr 已脱敏。
+- **复用而非复制**：`src/evidence/validation.py` 的私有引用校验原语改为**公开**
+  `valid_reference`（inbox 与 Evidence Gateway 共用**同一**口径，行为不变）；
+  `src/evidence/__init__.py` 导出新 API。
+
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **65 项**测试（临时目录 / Mock 证据块 / **无数据库** / **零网络**，未新增依赖）：
+  - `tests/unit/test_evidence_inbox.py` **55**：退出码映射、空 inbox、缺失目录、无时区时点
+    拒绝、合法 JSONL / CSV（含 `provider` 别名）、行级隔离复用 gateway 原因码、
+    缺可用性证据、缺 manifest、manifest 损坏（缺省 / 非对象，参数化）、缺必填声明
+    （7 个字段参数化并逐字段期望原因码）、类型 / 版本不符、引用非法、摘要不一致 / 非法、
+    未声明文件、路径穿越 / 绝对路径 / 盘符 / UNC（参数化）、空 / 空白 `path`、
+    符号链接文件与符号链接候选包、示例模板（4 种标记参数化）、示例命名包、空证据文件、
+    部分隔离整包 fail-closed、重复扫描幂等（`first_seen_at` 保留）、内容变更 → 新指纹、
+    同指纹状态变化 → `status_changed`、mtime / 扫描时间不参与指纹、pending 原子写、
+    输出写在 inbox 内被拒、损坏 state fail-closed、state 不能削弱硬编码安全字段、
+    锁冲突零写入、全面脱敏，以及**源码守卫**（无 `aiohttp` / `httpx` / `requests` /
+    `socket` / `urllib` / `sqlalchemy` / `subprocess`；无 `unlink` / `rmtree` /
+    `os.remove` / `os.rename` / `shutil.move`；无 `intake_evidence`；无 `while` 循环）；
+  - `tests/integration/test_evidence_inbox_integration.py` **10**：真实 CLI —— 空 inbox 退出
+    `5` 且零写入、合法候选退出 `0` + pending 原子落盘 + 幂等重扫（`discovered=0`、
+    `first_seen_at` 保留、`scan_count` 递增）+ **原始 evidence 字节级未被改写**、
+    隔离候选退出 `5` + 稳定原因码、默认 Markdown 摘要保留 blocker 与安全字段、
+    损坏 state 退出 `4` 且旧文件原样保留、锁冲突退出 `6` 且零写入、把 `--out` 写进 inbox
+    退出 `3`、inbox 目录缺失退出 `3`、参数错误退出 `2`，以及**真实子进程**
+    `python -m scripts.evidence_inbox` 端到端冒烟（stdout 为纯 JSON）。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **1970 passed / 1 skipped in 232.16s**
+    （唯一 skip 仍是 `tests/unit/test_text_similarity.py` 的「本环境已安装 jieba」分支；
+    本轮新增 65 项：单元 55 + 集成 10；GOLD-010 记录的基线为 1903 passed / 1 skipped）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 160 source files`（GOLD-010 为 158，本轮 +2 个新模块文件）。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增 / 修改 migration 与 schema、未联网、未抓取任何站点、未触碰 `.env`、
+  未安装 / 未修改任何 OS 计划任务；
+- `src/alpha/**`（含阈值 `evidence_gate.py`）、`src/monitoring/**`、`src/scheduler/**`、
+  `src/collectors/**`、`src/processors/**` 未改动（只**复用**其契约 / 校验 / 阈值 / 原因码）；
+  `src/evidence/validation.py` 仅把私有引用校验改为**公开** `valid_reference`（行为不变，
+  GOLD-005 / GOLD-006 的既有测试全绿）；`src/evidence/readiness_runner.py` 只被**复用**
+  （单实例锁与退出码取值），未改动；
+- **未解除** `PHASE3_3_DATA`：预检报告、pending 清单与人类可读摘要持续显式
+  `blocker_active=true` / `human_gate_required=true`、`data_qualification_passed=false`、
+  `phase_transition_allowed=false`、`requires_human_action=true`；未进入 Phase 3.4，
+  未生成任何交易信号或订单；`LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；
+- 同步 `README.md`（§1 交付表新增一行 + §7 新章节「Evidence 本地 Inbox 发现与预检」，
+  含最小目录 / manifest 示例、CLI 用法、安全拒绝清单、退出码与**显式 intake** 步骤 +
+  §10 仍未解除说明）与 `TECH_DEBT.md`（新增 **TD-53** 登记行 + 明细 + 变更日志行）。
+- **遗留 / 下一步**：仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 **BLOCKED**。inbox **只做
+  "摆放与预检"**（把"候选放哪里、如何确定性发现、manifest 是否齐全、摘要是否一致"补齐），
+  **不是**资格判定器、也不具备解除 blocker 的能力；业务方仍须按 `evidence-intake-v1` 提供真实
+  授权的 Author / News 数据（放入 inbox 子目录 + `manifest.json`），经
+  `scripts.evidence_inbox --out` 预检与**人工核验**后，用
+  `scripts.evidence_operator workflow --no-dry-run` 显式落库，再以 `handoff` / `recheck`
+  复核；Phase 切换仍需 L3 人工确认。
+

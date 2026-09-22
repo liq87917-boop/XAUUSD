@@ -1,0 +1,77 @@
+{
+  "task_id": "GOLD-011",
+  "title": "建立授权 Evidence 本地 Inbox 发现与预检闭环",
+  "status": "completed",
+  "finished_at": "2026-09-23T01:24:38+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    " M src/evidence/validation.py",
+    "?? scripts/evidence_inbox.py",
+    "?? src/evidence/inbox.py",
+    "?? tests/integration/test_evidence_inbox_integration.py",
+    "?? tests/unit/test_evidence_inbox.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md            | 104 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                  | 103 +++++++++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md               |  66 ++++++++++++++++++++++++++++\n src/evidence/__init__.py   |  74 +++++++++++++++++++++++++++++++-\n src/evidence/validation.py |  12 ++++--\n 5 files changed, 346 insertions(+), 13 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T00:58:10+08:00",
+      "finished_at": "2026-09-23T01:24:38+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 191,
+      "duration_ms": 1331672,
+      "usage": {
+        "inputTokens": 48945366,
+        "outputTokens": 197741,
+        "cacheReadTokens": 48687360,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.3034075800000001
+      },
+      "cline_final_text": "Submission recorded (verified): ## 1. 完成内容（GOLD-011：授权 Evidence 本地 Inbox 发现与预检闭环）\n\n在 PHASE3_3_DATA 仍 BLOCKED 的前提下，把 GOLD-005~010 的 Evidence Gateway / Operator / Readiness 能力接到一个**纯本地、只读发现**的 evidence inbox，并复用既有一切口径（未复制、未降低任何阈值）：\n\n- **新核心 `src/evidence/inbox.py`**：`scan_inbox()` 只扫描**显式** `--inbox-dir` 的**直接子目录**；候选包必须由 `manifest.json` 显式关联（`evidence_type`/`source`(或 `provider`)/`authorization_reference`/`time_semantics`/`availability_semantics`/`historical_oos_applicable`/`files[].path+sha256`）；`_layout` 逐文件实测 SHA-256（**不跟随符号链接**、不读 mtime），`_package_fingerprint` 只由**内容摘要与结构标记**派生（不含文件名/mtime/绝对路径/扫描时间）；`_check_files` 拒绝绝对路径/`..`/多级/盘符/UNC/未声明文件且**绝不越界读取**；`_preflight_rows` **直接复用** Evidence Gateway 的 `assess_row`（`evidence-intake-v1`）做逐行机械校验（授权/时间/availability/隔离原因码与 `intake` 完全同源，`DUPLICATE`/`IDENTITY_CONFLICT` 留给显式 intake）；模板/示例/Mock（显式标记或名称命中词表）→ `SYNTHETIC_EVIDENCE` 整包隔离；`PendingRegister` 以内容指纹为键**幂等**（同内容不重复生成、`first_seen_at` 保留、内容变化→新条目、同指纹状态变化→`status_changed`）且**原子写**；`run_inbox_scan` 只在显式 `--out` 时先取**单实例锁**（复用 GOLD-010 原语）再读 state，输出/状态必须在 inbox 之外。所有 artifact 恒为 `blocker_active=true`/`human_gate_required=true`/`data_qualification_passed=false`/`phase_transition_allowed=false`/`requires_human_action=true`（硬编码）。\n- **新 CLI `scripts/evidence_inbox.py`**：`--inbox-dir` 必填、`--state` 只读、`--out` 唯一写开关、`--lock` 可选、`--as-of`（必须带时区）、`--json`；退出码 `0` 有候选（仍需人工+显式 intake）/`2` 参数/`3` inbox 或输出不可用（含 `--out` 写进 inbox 的拒绝）/`4` state 损坏/`5` 无候选（预期 BLOCKED）/`6` 锁冲突；失败路径 stdout 为空、stderr 脱敏、零写入。\n- **复用而非复制**：`src/evidence/validation.py` 的私有引用校验公开为 `valid_reference`（行为不变，GOLD-005/006 既有测试全绿）；`src/evidence/__init__.py` 导出新 API。\n- 同步 README（§1 交付表新增一行 + §7 新章节含最小目录/manifest 示例、CLI 用法、退出码、fail-closed 清单与**显式 intake** 步骤 + §10 说明）、TECH_DEBT（TD-53 登记行 / 明细 / 变更日志行）、PROGRESS_LOG（第七十五轮）。\n\n## 2. 修改的文件\n`src/evidence/validation.py`（`_valid_reference` → 公开 `valid_reference`，内部 3 处调用同步）、`src/evidence/__init__.py`（导出 inbox API 与 `inbox_exit_code_for`，更新包 docstring）、`README.md`、`TECH_DEBT.md`、`PROGRESS_LOG.md`。\n\n## 3. 新增的文件\n`src/evidence/inbox.py`、`scripts/evidence_inbox.py`、`tests/unit/test_evidence_inbox.py`、`tests/integration/test_evidence_inbox_integration.py`（`git status` 仅这 9 项，未触碰 `.ai/**`、`.env`、migration、`src/alpha/**`）。\n\n## 4. 执行的测试（项目 `.venv`，最终状态实测）\n- `.venv\\Scripts\\python.exe -m pytest tests -q` → **1970 passed / 1 skipped in 230.40s**（唯一 skip 仍为 `test_text_similarity.py` 的「已安装 jieba」分支；本轮新增 65 项：单元 55 + 集成 10，`--collect-only` 单独核对为 65）。\n- `.venv\\Scripts\\python.exe -m ruff check .` → `All checks passed!`\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts` → `Success: no issues found in 160 source files`（158 → +2 新模块）。\n- 覆盖：空 inbox、合法 JSONL/CSV（含 `provider` 别名）、缺 manifest、manifest 损坏/非对象、7 个必填声明逐字段缺失、类型/版本不符、引用非法、摘要缺失/不一致、未声明文件、路径穿越/绝对路径/盘符/UNC、空 path、符号链接（文件与候选包）、示例模板 4 种标记与示例命名、空证据文件、部分隔离整包 fail-closed、重复扫描幂等、内容变更→新指纹、同指纹状态变化、mtime/扫描时间不参与指纹、pending 原子写、输出写进 inbox 被拒、损坏 state fail-closed、state 不能削弱硬编码安全字段、锁冲突零写入、全量脱敏、源码守卫（无网络/数据库/删除移动/intake/循环）+ 真实子进程 `python -m scripts.evidence_inbox` 冒烟（零网络、零数据库、临时目录）。\n\n## 5. 未解决的问题\n真实 PHASE3_3_DATA 仍 **BLOCKED**（库内无足量合法授权且具备可信独立时间/availability/OOS 证据的 Author/News 数据）；inbox 只是「摆放 + 预检」入口，`preflight_pass` 不证明授权法律效力、不解除 blocker，Phase 切换仍需 L3 人工 Gate。设计上有意为之的边界：`files[].path` 只允许包内单级文件名；包内除 manifest 外的文件必须全部声明；pending 清单是当前 inbox 内容的镜像（移除的内容从清单消失，变化仍由 `discovered`/`status_changed`/`quarantined` 如实报出）。未新增依赖、migration/schema、联网、OS 计划任务改动或实盘代码。\n\n## 6. 是否满足 acceptance\n全部满足：①存在纯本地只读 scanner，可从显式目录确定性生成脱敏 pending/preflight artifact（`discovered`/`preflight_pass`/`quarantined`/`requires_human_action` 显式区分）；②内容 SHA-256 + 确定性指纹、重复扫描幂等，缺失授权/时间/availability/OOS 证据一律 fail-closed；③不自动 intake、不写数据库、不移动/删除原始证据（测试断言字符级未变）、零网络，且防 symlink/path traversal（含越界文件从未被读取）；④模板/Mock/示例整包隔离且安全字段恒定；⑤全量 pytest/ruff/mypy 全部通过；⑥README/TECH_DEBT/PROGRESS_LOG 明确仍 BLOCKED 并给出 evidence drop → preflight → 显式 intake 操作路径。\n\n## 7. 建议下一步\n业务方按 `evidence-intake-v1` 将真实授权 Author/News 数据（+ manifest）放入 inbox 子目录 → `scripts.evidence_inbox --out` 预检 → 人工核验后 `scripts.evidence_operator workflow --no-dry-run` 显式落库 → `evidence_handoff` / `evidence_operator recheck` 复核；任何数量达标最多到 `ready_for_human_review=true`，Phase 切换仍须 L3 人工确认。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        " M src/evidence/validation.py",
+        "?? scripts/evidence_inbox.py",
+        "?? src/evidence/inbox.py",
+        "?? tests/integration/test_evidence_inbox_integration.py",
+        "?? tests/unit/test_evidence_inbox.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md            | 104 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                  | 103 +++++++++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md               |  66 ++++++++++++++++++++++++++++\n src/evidence/__init__.py   |  74 +++++++++++++++++++++++++++++++-\n src/evidence/validation.py |  12 ++++--\n 5 files changed, 346 insertions(+), 13 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  3%]\n........................................................................ [  7%]\n........................................................................ [ 10%]\n........................................................................ [ 14%]\n........................................................................ [ 18%]\n........................................................................ [ 21%]\n........................................................................ [ 25%]\n........................................................................ [ 29%]\n........................................................................ [ 32%]\n........................................................................ [ 36%]\n........................................................................ [ 40%]\n........................................................................ [ 43%]\n........................................................................ [ 47%]\n........................................................................ [ 51%]\n........................................................................ [ 54%]\n........................................................................ [ 58%]\n........................................................................ [ 62%]\n........................................................................ [ 65%]\n........................................................................ [ 69%]\n........................................................................ [ 73%]\n........................................................................ [ 76%]\n........................................................................ [ 80%]\n........................................................................ [ 84%]\n........................................................................ [ 87%]\n........................................................................ [ 91%]\n........................................................................ [ 94%]\n......................................................s................. [ 98%]\n...........................                                              [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n1970 passed, 1 skipped in 251.01s (0:04:11)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 160 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

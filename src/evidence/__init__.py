@@ -14,7 +14,12 @@
 - :mod:`src.evidence.workflow`：operator 工作流的写入门禁与隔离摘要（GOLD-007），
   显式写入前二次验证；只允许 ``ACCEPTED`` 行 append-only 落库；
 - :mod:`src.evidence.author_chain`：**gateway-only** 作者归属链（GOLD-007），
-  只消费已通过证据入口的 Author 证据，普通 CSV / 历史样本无法绕过。
+  只消费已通过证据入口的 Author 证据，普通 CSV / 历史样本无法绕过；
+- :mod:`src.evidence.inbox`：**纯本地只读**的 Evidence Inbox 发现与预检（GOLD-011）：
+  只扫描**显式** ``--inbox-dir``，候选包必须由 ``manifest.json`` 显式关联证据文件
+  （含内容 SHA-256），复用 gateway 的契约 / 引用校验 / 逐行机械校验 / 原因码 / 脱敏，
+  生成**脱敏**的 discovered / preflight_pass / quarantined / requires_human_action artifact，
+  **绝不**移动或删除原始 evidence、绝不自动 intake、绝不解除 ``PHASE3_3_DATA``。
 
 红线（与 `.clinerules` 一致）：
 
@@ -24,7 +29,8 @@
 - 不因代码完成或 Mock 测试解除 ``PHASE3_3_DATA``。
 
 入口：``scripts/intake_evidence.py``（单步 intake）与 ``scripts/evidence_operator.py``
-（GOLD-007 单入口 operator workflow；两者均默认 dry-run、默认零写入、默认零网络）。
+（GOLD-007 单入口 operator workflow；两者均默认 dry-run、默认零写入、默认零网络）；
+``scripts/evidence_inbox.py``（GOLD-011 只读发现 + 预检；唯一写入口是显式 ``--out``）。
 """
 
 from __future__ import annotations
@@ -70,6 +76,39 @@ from src.evidence.handoff import (
     build_handoff_report,
     render_handoff_markdown,
 )
+from src.evidence.inbox import (
+    EXIT_NO_CANDIDATES,
+    EXIT_UNUSABLE,
+    FILE_ENTRY_REQUIRED_FIELDS,
+    INBOX_NOTE,
+    INBOX_REPORT_KIND,
+    INBOX_REPORT_NAME,
+    INBOX_SCHEMA_VERSION,
+    MANIFEST_FILE_NAME,
+    MANIFEST_REQUIRED_FIELDS,
+    MAX_PATH_CHARS,
+    PENDING_FILE_NAME,
+    PENDING_KIND,
+    PENDING_LOCK_SUFFIX,
+    SUPPORTED_FILE_FORMATS,
+    CandidatePackage,
+    InboxArtifactWriteError,
+    InboxDirError,
+    InboxError,
+    InboxPreflightReport,
+    InboxReasonCode,
+    InboxStatus,
+    ManifestFileRef,
+    PendingEntry,
+    PendingRegister,
+    PendingStateError,
+    load_pending_register,
+    render_inbox_summary,
+    run_inbox_scan,
+    scan_inbox,
+    write_pending_register,
+)
+from src.evidence.inbox import exit_code_for as inbox_exit_code_for
 from src.evidence.intake import (
     EvidenceIntakeReport,
     InputFile,
@@ -197,18 +236,31 @@ __all__ = [
     "EXIT_BLOCKED",
     "EXIT_CONFIG_ERROR",
     "EXIT_LOCK_CONFLICT",
+    "EXIT_NO_CANDIDATES",
     "EXIT_OK",
     "EXIT_QUALIFICATION_FAILED",
     "EXIT_STATE_INVALID",
+    "EXIT_UNUSABLE",
     "EXIT_WORKDIR_UNUSABLE",
+    "FILE_ENTRY_REQUIRED_FIELDS",
     "HANDOFF_NOTE",
     "HANDOFF_REPORT_NAME",
     "HANDOFF_SCHEMA_VERSION",
+    "INBOX_NOTE",
+    "INBOX_REPORT_KIND",
+    "INBOX_REPORT_NAME",
+    "INBOX_SCHEMA_VERSION",
     "LOCK_FILE_NAME",
     "LOCK_KIND",
+    "MANIFEST_FILE_NAME",
+    "MANIFEST_REQUIRED_FIELDS",
+    "MAX_PATH_CHARS",
     "OPERATOR_STEPS",
     "OPERATOR_WORKFLOW_SCHEMA_VERSION",
+    "PENDING_FILE_NAME",
     "PENDING_HUMAN_REVIEW_STATUS",
+    "PENDING_KIND",
+    "PENDING_LOCK_SUFFIX",
     "QUARANTINE_REASON_CODES",
     "RUNNER_NOTE",
     "RUNNER_REPORT_NAME",
@@ -219,6 +271,7 @@ __all__ = [
     "STATE_FILE_NAME",
     "STATUS_FILE_NAME",
     "STATUS_KIND",
+    "SUPPORTED_FILE_FORMATS",
     "TEMPLATE_FORMATS",
     "TEMPLATE_ROOT",
     "TEMPLATE_SCHEMA_VERSION",
@@ -230,6 +283,7 @@ __all__ = [
     "ArtifactWriteError",
     "AuthorizationDeclaration",
     "AuthorChainReport",
+    "CandidatePackage",
     "ChecklistItem",
     "EvidenceHandoffReport",
     "EvidenceIntakeReport",
@@ -238,13 +292,23 @@ __all__ = [
     "EvidenceScope",
     "ExcludedEvidence",
     "GatewayAuthorEvidence",
+    "InboxArtifactWriteError",
+    "InboxDirError",
+    "InboxError",
+    "InboxPreflightReport",
+    "InboxReasonCode",
+    "InboxStatus",
     "InputFile",
     "InputRow",
     "IntakeCounts",
     "LockConflictError",
     "LockInfo",
     "LockUnavailableError",
+    "ManifestFileRef",
     "NormalizedRow",
+    "PendingEntry",
+    "PendingRegister",
+    "PendingStateError",
     "QualificationError",
     "QuarantineEntry",
     "QuarantineSummary",
@@ -282,17 +346,20 @@ __all__ = [
     "example_rows",
     "exit_code_for",
     "gateway_author_evidence",
+    "inbox_exit_code_for",
     "intake_evidence",
     "ledger_from_raw_json",
     "load_event_journal",
     "load_evidence_ledger",
     "load_gateway_author_evidence",
     "load_input_rows",
+    "load_pending_register",
     "load_snapshot_state",
     "normalize_input_row",
     "quarantine_payload",
     "read_input_file",
     "render_handoff_markdown",
+    "render_inbox_summary",
     "render_intake_report",
     "render_quarantine_summary",
     "render_template",
@@ -301,12 +368,15 @@ __all__ = [
     "render_write_gate",
     "required_field_names",
     "resolve_format",
+    "run_inbox_scan",
     "run_tick",
+    "scan_inbox",
     "synthetic_marker_fields",
     "template_columns",
     "template_output_name",
     "write_event_journal",
     "write_events",
+    "write_pending_register",
     "write_snapshot_state",
     "write_status",
     "write_template",

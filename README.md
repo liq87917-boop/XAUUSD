@@ -61,6 +61,7 @@ Strategy 事实，不进入实盘。
 | **Evidence 人工交接包**（GOLD-008：只读 / 默认 dry-run 的 `scripts/evidence_handoff.py`；机器可读 JSON + 人类可读 Markdown，量化 Author/News `eligible`/`required`/`remaining`、coverage gap、source-share 可评估性与主要隔离原因码；明确人工证据 checklist（authorization / provenance / published_at / collected_at / availability / identity），模板 / Mock / 示例醒目标记为不计资格；`data_qualification_passed` / `phase_transition_allowed` 恒为 false，**只减少人工交接摩擦、不解除** `PHASE3_3_DATA`） | `src/evidence/handoff.py`、`scripts/evidence_handoff.py` |
 | **Evidence Readiness 状态变更通知**（GOLD-009：只读 / 默认 dry-run 的 `scripts/evidence_readiness_watch.py`；确定性脱敏快照指纹 + 幂等变化检测：首次快照 / BLOCKED 缺口变化 / reason-code 集合变化 / `ready_for_human_review` 双向变化；默认零写入、零网络，只有显式 `--out` / `--events` 才**原子**落盘快照与事件；不接邮件 / 短信 / Webhook / 第三方推送；`ready_for_human_review=true` 仍明确要求 L3 人工 Gate，`phase_transition_allowed` 恒为 false，**不解除** `PHASE3_3_DATA`） | `src/evidence/readiness_watch.py`、`scripts/evidence_readiness_watch.py` |
 | **Evidence Readiness 单次本地 tick runner**（GOLD-010：`scripts/evidence_readiness_runner.py` **只做一次** tick，供 Windows Task Scheduler / 现有本地 orchestrator 等**外部定时器**调用；自带 OS 级**单实例锁**（owner / pid / 时间可审计、**绝不删除**活动锁）与陈旧锁安全接管；三类本地 artifact（snapshot state / 事件日志 / status）全部**原子写**且有界滚动，无变化零重复事件；损坏 state / 锁冲突 / 资格计算失败一律 **fail-closed** 并保留旧 state；零网络、零数据库写入、**不自带常驻循环**、不自动改 OS 计划任务；四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/readiness_runner.py`、`scripts/evidence_readiness_runner.py` |
+| **Evidence 本地 Inbox 发现与预检**（GOLD-011：`scripts/evidence_inbox.py` **只读**扫描显式 `--inbox-dir` 的直接子目录；候选包必须由 `manifest.json` 显式关联证据文件（`evidence_type` / `source` / `authorization_reference` / `time_semantics` / `availability_semantics` / `historical_oos_applicable` / `files[].path`+`sha256`）；逐文件实测 SHA-256 并核对声明，候选包指纹只由内容摘要与结构标记派生（不含文件名 / mtime / 绝对路径 / 扫描时间），pending 清单以指纹为键**幂等**且**原子写**；路径穿越 / 绝对路径 / 符号链接 / 未声明文件 / 摘要不一致 / 凭据泄漏 / 模板示例一律 **fail-closed**；逐行预检复用 Evidence Gateway 的 `assess_row`，**绝不移动 / 删除原始证据、绝不自动 intake、零网络、零数据库写入**；`preflight_pass` 只进**人工确认队列**，四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/inbox.py`、`scripts/evidence_inbox.py` |
 
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
@@ -778,6 +779,92 @@ schtasks /Create /TN "GOLD-AI Evidence Readiness Tick" /SC MINUTE /MO 30 /ST 00:
 > 状态文件与事件日志本身**不含**任何正文 / 凭据，可安全交给本地运维查看。
 > 本工具**不会**联网、不会发通知，README 只提供调用方式。
 
+### Evidence 本地 Inbox 发现与预检（`scripts/evidence_inbox.py`，GOLD-011）
+
+> **合规红线**：本工具只做**纯本地只读发现与预检** —— 只扫描你显式给出的 `--inbox-dir`，
+> **绝不**移动 / 重命名 / 删除 / 改写 inbox 内任何原始 evidence，不联网、不写数据库、
+> 不新增 migration / schema、不接第三方推送、**不自动 intake**。
+> `blocker_active` / `human_gate_required` 恒为 true，`data_qualification_passed` /
+> `phase_transition_allowed` 恒为 false；`preflight_pass` 也只进**人工确认 / 显式 intake** 队列，
+> 无真实合格授权证据时 `PHASE3_3_DATA` 保持 **BLOCKED**。
+
+**operator 放置候选 evidence 的最小目录 / manifest 示例**（候选包 = inbox 的**子目录**）：
+
+```text
+logs/evidence/inbox/                  # --inbox-dir（只扫描它的直接子目录）
+└── vendor-author-2026-06/            # 一个候选包
+    ├── manifest.json                 # 必填：显式关联证据文件与语义
+    └── author.jsonl                  # 候选证据（JSONL / CSV，一行一条记录）
+```
+
+```json
+{
+  "schema_version": 1,
+  "contract_version": "evidence-intake-v1",
+  "evidence_type": "author",
+  "source": "vendor-author",
+  "authorization_reference": "https://vendor.example/terms",
+  "time_semantics": "provider_export_iso8601_with_tz",
+  "availability_semantics": "provider_archive_export_daily_snapshot",
+  "historical_oos_applicable": true,
+  "files": [
+    {"path": "author.jsonl", "sha256": "<64 位小写十六进制摘要>", "format": "jsonl"}
+  ]
+}
+```
+
+```powershell
+# 只读扫描（零写入；stdout 打印脱敏结果）
+.\.venv\Scripts\python.exe -m scripts.evidence_inbox --inbox-dir logs/evidence/inbox --json
+
+# 唯一写开关：--out 原子落盘 pending 清单（--state 只读；自带单实例锁防并发重扫）
+.\.venv\Scripts\python.exe -m scripts.evidence_inbox `
+  --inbox-dir logs/evidence/inbox `
+  --state logs/evidence/inbox_pending.json `
+  --out   logs/evidence/inbox_pending.json --json
+```
+
+- **候选包 = 子目录 + manifest**：`manifest.json` 必填 `evidence_type`（author|news）/
+  `source`（或别名 `provider`）/ `authorization_reference` / `time_semantics` /
+  `availability_semantics` / `historical_oos_applicable`（布尔）/ `files`（每个文件
+  `path` + `sha256`）；缺任一项 / 格式错误 / schema 或 contract 版本不符 / 证据类型不支持
+  → **fail-closed** + 稳定原因码；inbox 根目录下的**散落文件**不是候选包，
+  会以 `MANIFEST_MISSING` 隔离提示（**不会被移动或删除**）；
+- **内容 SHA-256 与确定性指纹**：逐文件实测 SHA-256 并与声明核对（不一致即隔离且**不再解析
+  内容**）；候选包指纹只由内容摘要与结构标记派生，**不含**文件名 / mtime / 绝对路径 / 扫描时间
+  （改 mtime、换 `--as-of` 都不改变指纹）；
+- **幂等**：pending 清单以指纹为键（当前 inbox 内容的镜像）——同内容重复扫描 `discovered=0`、
+  条目与 `first_seen_at` 不变，只推进 `scan_count` / `last_seen_at`；内容变化 → 新指纹（新条目）；
+  同一指纹的状态变化记入 `status_changed`；清单**原子写**（无残留 `.tmp`）；
+- **只允许单级文件名**：`files[].path` 必须是候选包目录下的**直接子文件**；包内除
+  `manifest.json` 之外的**所有**文件都必须声明，否则整包隔离；
+- **安全拒绝（fail-closed）**：路径穿越 / 绝对路径 / 多级路径 / 符号链接（文件与目录）/
+  未声明文件 / 摘要不一致 / 凭据类键或值 / 示例模板（`is_mock` / `is_example` / `synthetic` /
+  `record_kind=example`，或包名 / 文件名命中示例词表）/ 无可用行 / 缺 OOS 证据一律隔离并给稳定
+  原因码；**越界文件从未被读取**（只依据候选包目录内的内容摘要判定）；
+- **复用同一口径**：逐行预检直接调用 Evidence Gateway 的 `assess_row`（`evidence-intake-v1`，
+  见 §7「授权证据接收入口」），授权 / 时间 / availability / 隔离原因码与 `intake` **完全同源**，
+  **不复制、不降低任何阈值**；`DUPLICATE` / `IDENTITY_CONFLICT`（需要读库）留给显式 intake；
+- **脱敏**：只输出计数 / 稳定原因码 / 来源名 / 指纹前缀 / 时间与已脱敏引用（URL 去 query 与
+  userinfo），**不含** evidence 正文；凭据类字段只记录**键名**；
+- **退出码**：`0` 存在可确认候选（**仍需人工 + 显式 intake**）/ `2` 参数错误 /
+  `3` inbox 目录或输出不可用（含把 `--out` 写进 inbox 的拒绝）/ `4` 既有 pending state 损坏
+  （安全失败，零写入）/ `5` 无候选（**预期 BLOCKED**）/ `6` 锁冲突；
+- **预检通过后的显式 intake（人工）**：人工核验授权与可用性证据后，仍须显式落库：
+  ```powershell
+  .\.venv\Scripts\python.exe -m scripts.evidence_operator workflow `
+    --scope author --input logs/evidence/inbox/vendor-author-2026-06/author.jsonl `
+    --no-dry-run --manifest logs/evidence/author_manifest.json
+  .\.venv\Scripts\python.exe -m scripts.evidence_operator recheck --json
+  ```
+  落库后仍以 `scripts/evidence_readiness_watch.py` / `scripts/evidence_handoff.py` 复核；
+  Phase 切换仍须 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**；
+- **测试**：`tests/unit/test_evidence_inbox.py`（55 项）、
+  `tests/integration/test_evidence_inbox_integration.py`（10 项，含真实子进程 CLI 冒烟）；
+  全部临时目录 / 零网络 / 零数据库；
+- **仍未解决（保持 BLOCKED）**：inbox 只是"摆放与预检"入口，**不是**资格判定器，也不具备解除
+  blocker 的能力；库内仍无足量真实授权证据 → `PHASE3_3_DATA` 保持 `active=true`。
+
 ## 8. 数据模型
 
 
@@ -904,14 +991,16 @@ schtasks /Create /TN "GOLD-AI Evidence Readiness Tick" /SC MINUTE /MO 30 /ST 00:
 - **TD-43 / TD-44 / TD-45 仍未解除**：证据接收入口已由 GOLD-005 交付并可用，
   就绪度 / 一键复核工具已由 GOLD-006 交付，单入口 operator workflow 与 gateway-only
   作者链已由 GOLD-007 交付，人工交接包已由 GOLD-008 交付，readiness 状态变更通知层已由
-  GOLD-009 交付，readiness **周期 tick runner** 已由 GOLD-010 交付（见 §7「授权证据接收入口」、
-  §7「证据就绪度与一键资格复核」、§7「单入口 Evidence Operator 工作流」、
-  §7「Evidence 人工交接包」、§7「Evidence Readiness 状态变更通知」与
-  §7「Evidence Readiness 单次本地 tick runner」），但**仓库内没有任何经该入口认证的真实授权证据**，
+  GOLD-009 交付，readiness **周期 tick runner** 已由 GOLD-010 交付，**本地 inbox 发现与预检**
+  已由 GOLD-011 交付（见 §7「授权证据接收入口」、§7「证据就绪度与一键资格复核」、
+  §7「单入口 Evidence Operator 工作流」、§7「Evidence 人工交接包」、
+  §7「Evidence Readiness 状态变更通知」、§7「Evidence Readiness 单次本地 tick runner」与
+  §7「Evidence 本地 Inbox 发现与预检」），但**仓库内没有任何经该入口认证的真实授权证据**，
   因此 `PHASE3_3_DATA` 保持 `active=true`；下一步是业务方按 `evidence-intake-v1` 契约
-  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 / TD-48 / TD-49 / TD-50 / TD-51 / TD-52）。
-  GOLD-007 / GOLD-008 / GOLD-009 / GOLD-010 的工具**只减少人工交接、盯盘与定时执行摩擦**，
-  不解除该 blocker；任何数量达标最多只到 `ready_for_human_review=true`，Phase 切换仍是 L3 人工 Gate。
+  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 / TD-48 / TD-49 / TD-50 /
+  TD-51 / TD-52 / TD-53）。GOLD-007 ~ GOLD-011 的工具**只减少人工交接、盯盘、定时执行与
+  候选摆放 / 预检摩擦**，不解除该 blocker；任何数量达标最多只到 `ready_for_human_review=true`，
+  Phase 切换仍是 L3 人工 Gate。
 
 ## 11. 强制约束速查（团队决定）
 
