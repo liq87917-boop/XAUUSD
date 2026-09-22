@@ -1,0 +1,79 @@
+{
+  "task_id": "GOLD-002",
+  "type": "FEATURE",
+  "title": "建立独立 Processor Pipeline 与数据处理审计基础",
+  "max_attempts": 3,
+  "goal": "在 GOLD-001-R2 的 30 分钟 Collector Scheduler 已通过全量质量门禁后，完成 TD-11：将 normalize/dedup/timezone 等采集后处理职责从 Collector 层抽离为独立、可测试、可审计的 Processor Pipeline，并为 processed_items/data_versions/audit_logs 后续写入路径建立最小可靠基础；同时清理 R2 误提交的 pytest 临时产物。",
+  "recovery_context": [
+    "GOLD-001-R2 已完成：30 分钟 Scheduler、job_runs 幂等、stale 接管、单源故障隔离已落地。",
+    "R2 验收基线：1589 passed / 1 skipped；ruff 全通过；mypy config database src scripts 全通过。",
+    "TECH_DEBT TD-11 当前为 P1：Processor 层未独立建立，normalize/dedup/timezone 仍内嵌在采集器。",
+    "TD-12 仅部分解除：job_runs 已有写入路径；processed_items/data_versions/audit_logs 仍待后续完善。",
+    "Phase 3.3 Author/News 数据资格仍 BLOCKED；不得因本任务进入 Phase 3.4 或训练 Alpha。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-001-R2 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md，以及最近 commits/diff；以仓库现状为准，不重复实现已完成能力。",
+    "先清理 GOLD-001-R2 误提交的 .tmp_pytest*.log/.txt/.pid 等临时测试产物，并完善 .gitignore 防止同类文件再次入库；不得删除真实业务日志或测试夹具。",
+    "建立独立 src/processors/（或与现有架构一致的等价目录）作为采集后处理层；Processor 不负责联网、不负责 provider 授权、不负责调度。",
+    "定义最小稳定的 Processor 输入/输出契约，使 Collector 原始结果可以经过 normalize -> timezone/effective_at -> dedup/identity -> validation/audit summary 的确定性流水线。",
+    "保持 append-only 原则；禁止通过 UPDATE 覆盖历史事实。effective_at 必须继续遵守 max(published_at, collected_at) 规则，不得伪造 published_at/collected_at。",
+    "优先复用现有 normalize、dedup、时间处理和模型工具；采用渐进迁移，禁止一次性重写全部 Collector。至少选择一个低风险现有采集路径完成端到端 Processor 接入作为参考实现。",
+    "Processor 必须与具体 provider URL、HTTP transport、robots/auth/token/API key 解耦；不得把密钥或完整 source config 写入 processed/audit 输出。",
+    "为幂等处理定义稳定 identity/dedup key；同一原始事实重复进入 Processor 不得产生重复 processed 结果。若现有 schema 不足以安全落库，不得擅自新增 migration，先以服务层/测试契约完成并在 TECH_DEBT 明确记录。",
+    "为处理结果提供可审计摘要：processor/version/status/input_count/output_count/duplicate_count/rejected_count/warnings/error 等白名单字段；异常必须脱敏。",
+    "Processor 单条数据失败应尽可能隔离，不得导致整个批次静默丢失；批次最终状态必须诚实区分 SUCCESS/PARTIAL_FAILED/FAILED（可复用现有枚举/语义，避免无必要 schema 改动）。",
+    "新增充分的 unit/integration tests，100% Mock、禁止联网，覆盖确定性、时区边界、effective_at、重复输入、坏数据隔离、敏感字段过滤、空批次和重复运行。",
+    "评估 Scheduler -> Collector -> Processor 的接线点；只做最小安全接入，不把 Processor 业务逻辑塞入 Scheduler core。",
+    "完成后更新 README、TECH_DEBT、PROGRESS_LOG；只有验收证据充分时才解除 TD-11。TD-12 只能按实际完成范围更新，不得宣称全部解除。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      ".gitignore",
+      "src/processors/**",
+      "src/common/**",
+      "src/collectors/**",
+      "src/scheduler/**",
+      "scripts/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**"
+    ],
+    "note": "允许对现有 Collector/Scheduler 做最小接线改动；若需修改 database/models 或其他生产路径，必须先证明现有模型无法满足，并在最终报告逐项说明。禁止新增 migration/schema。"
+  },
+  "constraints": [
+    "不新增第三方依赖，优先标准库和项目现有依赖。",
+    "不新增或修改 migration/schema。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不提交真实订单。",
+    "LIVE_TRADING=false 与 allow_external_order_submission=false 等安全门禁不得弱化。",
+    "不得伪造时间字段或用 Mock 数据冒充真实数据资格。",
+    "不得绕过授权、robots、证书、安全限制或 Author/News 数据门禁。",
+    "测试不得联网。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。",
+    "保持向后兼容；若迁移旧逻辑，必须用测试证明行为等价或明确记录有意变化。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "R2 遗留 .tmp_pytest* 临时产物已从仓库清理且 .gitignore 可防止再次提交。",
+    "独立 Processor Pipeline 已建立，职责边界清晰，不含 provider 网络/授权/调度逻辑。",
+    "normalize/timezone/effective_at/dedup/validation 的核心契约有确定性测试覆盖。",
+    "至少一个现有采集路径已通过最小接线使用 Processor，且无行为回归。",
+    "重复输入/重复运行不产生重复 processed 结果；坏数据可隔离并有诚实状态与审计摘要。",
+    "任何输出/异常摘要均不泄露 token/API key/Authorization/完整 source config。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖、migration/schema、实盘或 Phase 3.4 代码。",
+    "README/PROGRESS_LOG/TECH_DEBT 与实际实现一致；只有确实完成时 TD-11 才标记解除。"
+  ]
+}
