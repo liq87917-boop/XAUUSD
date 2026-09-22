@@ -1,0 +1,24 @@
+{
+  "task_id": "TEST-002",
+  "title": "验证 GitHub 远程任务自动执行",
+  "max_attempts": 3,
+  "goal": "验证 Orchestrator V2 能从远程 GitHub 自动获取、执行并回传任务结果。",
+  "requirements": [
+    "在项目根目录创建 ai_test_v2.txt",
+    "ai_test_v2.txt 的文件内容必须为 Orchestrator V2 working"
+  ],
+  "constraints": [
+    "不得修改任何其他业务代码",
+    "不得修改 .ai/tasks",
+    "不得修改 .ai/results",
+    "不得执行 git commit、git push、git reset、git rebase 或 git merge"
+  ],
+  "validation_commands": [
+    "py -c \"from pathlib import Path; p=Path('ai_test_v2.txt'); assert p.exists() and p.read_text(encoding='utf-8').strip() == 'Orchestrator V2 working'\""
+  ],
+  "acceptance": [
+    "ai_test_v2.txt 存在",
+    "ai_test_v2.txt 内容为 Orchestrator V2 working",
+    "validation_commands 返回退出码 0"
+  ]
+}
