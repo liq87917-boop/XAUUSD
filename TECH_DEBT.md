@@ -88,6 +88,7 @@
 | TD-48 | P0（证据就绪度 / 一键复核的剩余边界） | GOLD-006 已交付 operator 证据模板（`examples/evidence/`，示例行显式标记 `record_kind=example`、`is_mock=true`）+ 只读 preflight/readiness（`src/monitoring/evidence_readiness.py`）+ 一键 `recheck` CLI（`scripts/evidence_readiness.py`，证据见 `PROGRESS_LOG.md` 第七十轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47 未解除），工具只报告缺口、不放行；②模板 / 示例行判 `SYNTHETIC_EVIDENCE` 隔离，**不能**用于达标；③readiness 只覆盖证据入口台账口径（Author 可信 eligible 帖子数；News 条数 / 覆盖天数 / 单源占比），不含作者链落库与人工标注；④无告警推送（与 TD-46 同源） | 业务方按契约提交已授权数据 + 人工核验后重跑 `recheck`；若需自动作者链落库，另立任务评估复用 `import_real_posts.py` 口径 |
 | TD-49 | P0（证据 operator 工作流 / 作者链的剩余边界，仍 BLOCKED） | GOLD-007 已交付**单入口 operator workflow**（`scripts/evidence_operator.py` + `src/evidence/workflow.py`：`template → preflight → quarantine → intake → recheck`，默认 dry-run / 零网络 / 零写入，写入前二次完整 Evidence Gateway 校验 + 写入门禁与脱敏隔离摘要；证据见 `PROGRESS_LOG.md` 第七十一轮）与 **gateway-only 作者归属链**（`src/evidence/author_chain.py`：只消费 `raw_json.evidence` 带 `evidence-intake-v1` + `scope=author` + `oos_eligible=true` 的记录；普通 CSV / 历史样本没有证据块，**无法绕过** gateway；身份冲突跳过且不覆盖；新建 `author_accounts` 一律 `enabled=false`）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47/48 未解除），`blocker_active` / `human_gate_required` 恒为 true；②`scripts/import_real_posts.py` 仍是**历史 W0-4 / 演练用普通 CSV 入口**（`raw_json` 只写 `import_kind=manual_real_corpus`，无证据块），其口径**不**适用于 Phase 3.3 资格证据，作者链也不会消费它（未新增 migration，沿用既有 `authors` / `author_accounts` / `author_posts` schema）；③作者链只建立归属，不做观点抽取 / 人工标注，也未接入任何采集；④无告警推送（与 TD-46 同源） | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 + 人工核验后重跑 `scripts.evidence_operator workflow`；作者链落库后仍需真实标注才能产生可信标签 |
 | TD-50 | P0（人工交接包，仍 BLOCKED） | GOLD-008 已交付**只读 / 默认 dry-run 的 Evidence 人工交接包**（`scripts/evidence_handoff.py` + `src/evidence/handoff.py`：稳定 JSON + 人类可读 Markdown，量化 Author/News `eligible`/`required`/`remaining`、coverage gap、source-share 可评估性、主要隔离原因码；六类人工证据 checklist（authorization / provenance / published_at / collected_at / availability / identity）；模板 / Mock / 示例 / 历史 CSV 醒目标记为**不计资格**；证据见 `PROGRESS_LOG.md` 第七十二轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47/48/49 未解除），`blocker_active` / `human_gate_required` 恒为 true，`data_qualification_passed` / `phase_transition_allowed` 恒为 false；②交接包**只降低人工交接摩擦**，量化达标时最多 `ready_for_human_review=true`，Phase 切换仍须 `DEVELOPMENT_PROTOCOL` 的 L3 人工确认；③`blocker_active` 需要在**人工 Gate** 完成并留下可审计留痕后才可能变化（当前工具不具备该能力）；④无告警推送（与 TD-46 同源） | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 + 人工核验授权与历史可用性，再重跑 `scripts.evidence_operator workflow` 与 `scripts.evidence_handoff` |
+| TD-51 | P0（readiness 状态变更通知，仍 BLOCKED） | GOLD-009 已交付**只读 / 默认 dry-run 的 readiness 状态变更通知层**（`src/evidence/readiness_watch.py` + `scripts/evidence_readiness_watch.py`：确定性脱敏白名单快照 + SHA-256 指纹 + 幂等变化检测 `FIRST_SNAPSHOT` / `BLOCKER_GAP_CHANGED` / `REASON_CODES_CHANGED` / `READY_FOR_HUMAN_REVIEW_ENABLED` / `READY_FOR_HUMAN_REVIEW_REVOKED`；口径复用 `src.evidence.handoff` / `src.monitoring.evidence_readiness`，**不复制阈值算法**；证据见 `PROGRESS_LOG.md` 第七十三轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47/48/49/50 未解除），`blocker_active` / `human_gate_required` 恒为 true，`data_qualification_passed` / `phase_transition_allowed` 恒为 false；②通知层**只减少盯盘 / 轮询**，事件只落本地文件型安全出口（显式 `--out` / `--events` 原子写），**不接**邮件 / 短信 / Webhook / 第三方推送；`ready_for_human_review=true` 也仍须 L3 人工 Gate；③state 损坏（JSON / schema / 指纹校验失败 / 声称 blocker 已解除）一律**安全失败**退出 `4` 且不写任何输出；④事件只含脱敏白名单标量与稳定原因码，不含正文、凭据或完整 source config | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 + 人工核验授权与历史可用性后重跑 `workflow` / `handoff`，并以 `--state` + `--out` 让通知层只报**有意义变化**；Phase 切换仍须 L3 人工确认 |
 
 
 
@@ -669,6 +670,46 @@
 
 ---
 
+### TD-51 Evidence Readiness 状态变更通知的剩余边界（P0，2026-09-22，GOLD-009）
+
+- **已交付**：`src/evidence/readiness_watch.py`（只读通知核心：`ReadinessSnapshot` /
+  `ScopeSnapshot` / `WatchEvent` / `detect_changes` + 原子写
+  `write_snapshot_state` / `write_events` / `load_snapshot_state`）、
+  `scripts/evidence_readiness_watch.py`（默认只读、默认零写入、默认零网络的 CLI）。
+- **关键保证（已由测试锁定）**：
+  1. **复用唯一口径**：快照只消费 `EvidenceHandoffReport`（缺口 / 阈值同源于
+     `src.monitoring.evidence_readiness` 与 `src.alpha.evidence_gate`：30 / 200 / 90 天 /
+     单源 40%），**不复制第二套阈值算法**，也不修改任何阈值或人工 Gate；
+  2. **确定性指纹**：只基于脱敏白名单字段（`status` / `ready_for_human_review` /
+     各 scope `eligible` / `required` / `remaining` / coverage 缺口 /
+     `source_share_evaluable` / 稳定原因码）计算 SHA-256；scope 与原因码全部排序，
+     **`generated_at` 不参与指纹** → 完全相同状态重复运行产生 **0 事件**（幂等）；
+  3. **有意义变化才告警**：首次快照、BLOCKED 缺口变化、原因码集合变化、
+     `ready_for_human_review` false→true / true→false；事件顺序由 `EVENT_ORDER` 固定；
+  4. **默认只读 / 零网络 / 零写入**：`--state` 只读；只有显式 `--out` / `--events` 才写文件，
+     且均为**原子写**（同目录临时文件 + `fsync` + `os.replace`，无半写状态、无残留临时文件）；
+     `--input` 只做 dry-run（显式回滚，零落库），**没有** `--no-dry-run`；
+  5. **安全失败**：state 为空 / JSON 损坏 / schema 不符 / 指纹校验失败 / 声称 blocker 已解除
+     一律退出码 `4` 且**不写任何输出**（不把坏状态静默当作首次快照）；
+  6. **诚实与脱敏**：`blocker_active` / `human_gate_required` 恒为 true，
+     `data_qualification_passed` / `phase_transition_allowed` 恒为 false；
+     原因码与事件消息统一过 `src.common.redaction.safe_text`，不含正文、凭据或完整 source config。
+- **剩余边界（本条目跟踪）**：
+  1. **仍无真实授权证据**：库内 eligible 记录不足以达标 → `PHASE3_3_DATA` 保持
+     `active=true`（TD-43 / TD-44 / TD-45 / TD-47 / TD-48 / TD-49 / TD-50 未解除）；
+  2. **只减少盯盘 / 轮询**：通知层不是资格判定器，也不具备解除 blocker 的能力；
+     量化达标最多 `ready_for_human_review=true`，Phase 切换仍须 L3 人工确认；
+  3. **纯本地出口**：事件只落 stdout 或显式指定的本地 JSON 文件，
+     **不接**邮件 / 短信 / Webhook / 第三方推送，也不写数据库（无 migration / schema 变更）；
+  4. **不产生真实证据**：模板、示例、Mock、历史 CSV 都不能用于达标。
+- **解除条件**：业务方按 `evidence-intake-v1` 契约提交**已授权** Author / News 数据并经
+  人工核验落库，`workflow` / `handoff` / `recheck` 显示量化门槛达标，且完成 **L3 人工 Gate**；
+  届时才讨论解除 blocker（通知层届时只负责把状态变化如实上报）。
+- **不变量**：工具永不联网、永不抓取、永不绕过 robots / 条款 / 证书、永不自动解除 blocker；
+  永不因代码完成、模板或 Mock 测试解除 `PHASE3_3_DATA`。
+
+---
+
 ## 4. 已知限制（设计取舍，非缺陷）
 
 | 项 | 说明 | 依据 |
@@ -715,3 +756,4 @@
 | 全量重跑 + 最终对比报告（2026-09-13，人工二次裁决「路径 B」） | ①`opinion-prompt-v7 → v13` 共 7 次迭代（每次都**重跑并留档**，见 `docs/experiments/Phase2_LLM_Prompt迭代对比_v1-v6.md（v7~v13 的逐版结论见本行与 §3 TD-28）`）：补 **`L2.5` 消息→`NEWS`**、L3 增加「交易理由 vs 背景附注」两个例外与判别线、宏观驱动须为具体变量、horizon 规则经实测**回退**到 v6 版本；②`docs/10 §4.9` 规则 9 阶梯重写（L1 持仓 > L2 宏观 > L2.5 消息 > L4/L2.5 例外 > L3 操作价位 > L5 引用/复盘 > L6 兜底），`§4.5` 旧优先级标注**以 §4.9 为准**，`§4.2` 补「短线思路→15m」并注明**不可再细化**（实测回退经验）；③**全量 200 条定版结果**（`llm-deepseek-v13`，人工子集）：方向 100%、周期 100%、止损 100%、目标位 100%、**信息类型 91.9%**，相对正则 **+0/+100/+100/+75/+51.1 pp**，逐格**修复 380 格、回归 0 格**；成本 180 次调用 **$0.0353**（缓存命中 94.8%），失败 0；④`scripts/compare_extractor_baselines.py` 新增「**人工 ↔ 模型 对齐案例**」章节：5.1 模型纠正人工（`mock-post-0009`：`SENTIMENT→TECHNICAL`，已对齐）、5.2 人工纠正模型（11 格逐格原文）；⑤登记 **TD-29**（口径边界待真实语料复核）；测试 13 → **17 项**（对比脚本），全套 **1380 → 1891 passed / 1 skipped**，`ruff` / `mypy`（67 files）全绿 |
 | 证据 operator 工作流（2026-09-22，GOLD-007） | 新增 `src/evidence/workflow.py`（写入门禁 + 脱敏隔离摘要）+ `scripts/evidence_operator.py`（单入口 `workflow`：`template → preflight → quarantine → intake → recheck`；单步 `template/preflight/quarantine/intake/recheck/author-chain`；默认 dry-run / 零网络 / 零写入，写入前二次完整 Evidence Gateway 校验，隔离行永不进台账）+ `src/evidence/author_chain.py`（**gateway-only** 作者归属链：只消费 `evidence-intake-v1` + `scope=author` + `oos_eligible=true`，普通 CSV 无法绕过；身份冲突跳过不覆盖；账号 `enabled=false`）；新增 23 项测试（单元 9 + 集成 14）；登记 **TD-49**；**未解除** `PHASE3_3_DATA`（真实授权证据仍需业务方提供 + 人工核验） |
 | 证据人工交接包（2026-09-22，GOLD-008） | 新增 `src/evidence/handoff.py`（**只读**交接包：`ScopeGap` / `ChecklistItem` / `ExcludedEvidence` / `EvidenceHandoffReport`；稳定 JSON + 人类可读 Markdown；复用 `src.monitoring.evidence_readiness` 唯一口径，**不复制阈值算法**）+ `scripts/evidence_handoff.py`（默认只读 / 零网络 / 零写入；`--input` 仅 dry-run；唯一写文件开关为 `--out`；退出码 `5` 表示仍 BLOCKED）；量化 Author/News `eligible`/`required`/`remaining`、coverage gap、source-share 可评估性、主要隔离原因码；六类人工证据 checklist（authorization / provenance / published_at / collected_at / availability / identity）；模板 / Mock / 示例 / 历史 CSV 醒目标记为不计资格；新增 16 项测试（单元 10 + 集成 6）；登记 **TD-50**；**未解除** `PHASE3_3_DATA`（仅减少人工交接摩擦，Phase 切换仍须 L3 人工 Gate） |
+| readiness 状态变更通知（2026-09-22，GOLD-009） | 新增 `src/evidence/readiness_watch.py`（**只读**通知核心：`ReadinessSnapshot` / `WatchEvent` / `detect_changes` / 原子写 `write_snapshot_state` + `write_events`；确定性脱敏白名单快照 + SHA-256 指纹（`generated_at` 不参与指纹）+ 幂等变化检测 `FIRST_SNAPSHOT` / `BLOCKER_GAP_CHANGED` / `REASON_CODES_CHANGED` / `READY_FOR_HUMAN_REVIEW_ENABLED` / `REVOKED`；复用 `src.evidence.handoff` / `src.monitoring.evidence_readiness` 唯一口径，**不复制阈值算法**）+ `scripts/evidence_readiness_watch.py`（默认只读 / 零网络 / 零写入；`--state` 只读、损坏则安全失败退出 `4` 且不写任何输出；只有显式 `--out` / `--events` 才**原子**落盘快照与事件；不接邮件 / 短信 / Webhook / 第三方推送）；新增 19 项测试（单元 12 + 集成 7）；登记 **TD-51**；**未解除** `PHASE3_3_DATA`（通知层只减少盯盘 / 轮询，`ready_for_human_review=true` 仍须 L3 人工 Gate） |

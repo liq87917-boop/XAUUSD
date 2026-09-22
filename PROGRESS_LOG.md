@@ -2536,3 +2536,77 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   **人工核验**授权与历史可用性，再用 `scripts.evidence_operator workflow --no-dry-run`
   显式落库，并以 `scripts.evidence_handoff` / `recheck` 复核量化门槛；Phase 切换仍需 L3 人工确认。
 
+## 第七十三轮（2026-09-22）：GOLD-009 —— Evidence Readiness 状态变更通知闭环
+
+### 1. 交付内容
+
+- **只读通知核心**（`src/evidence/readiness_watch.py`）：
+  - `build_snapshot(handoff, *, generated_at)`：**复用** `src.evidence.handoff` 的
+    `EvidenceHandoffReport`（阈值来自 `src.alpha.evidence_gate`），只提取**脱敏白名单**字段
+    （`status` / `ready_for_human_review` / 各 scope `eligible` / `required` / `remaining` /
+    coverage 缺口 / `source_share_evaluable` / 稳定原因码），计算 **SHA-256 指纹**；
+    scope 名与原因码全部排序，且 **`generated_at` 不参与指纹**（时间戳变化不算状态变化）；
+  - `detect_changes(previous, current)`：首次快照（`FIRST_SNAPSHOT`）、BLOCKED 缺口变化
+    （`BLOCKER_GAP_CHANGED`，带逐字段 `scope_changes`）、原因码集合变化
+    （`REASON_CODES_CHANGED`，带 added / removed）、`ready_for_human_review` 双向变化
+    （`READY_FOR_HUMAN_REVIEW_ENABLED` / `READY_FOR_HUMAN_REVIEW_REVOKED`）；
+    事件顺序由 `EVENT_ORDER` 固定；**完全相同状态重复运行 → 0 事件**（幂等）；
+  - `WatchEvent.to_dict()` / `write_events()`：`blocker_active` / `human_gate_required` 恒为
+    true，`data_qualification_passed` / `phase_transition_allowed` 恒为 false（**硬编码**，
+    绝不被上游或被篡改的 state 透传影响）；
+  - `load_snapshot_state()` / `write_snapshot_state()`：**原子写**（同目录临时文件 +
+    `fsync` + `os.replace`）；state 为空 / JSON 损坏 / schema 不符 / **指纹校验失败** /
+    声称 blocker 已解除一律抛 `SnapshotStateError`（**安全失败**，绝不静默当作首次快照）。
+- **CLI** `scripts/evidence_readiness_watch.py`：
+  - **默认只读 / 零网络 / 零写入**：不传 `--state` / `--out` / `--events` 时只打印 stdout
+    （无历史可比，视为首次快照）；`--state` 只读，文件不存在 = 首次运行；
+  - 只有显式 `--out`（快照）/ `--events`（事件）才写文件，且都是原子写；
+    `--out` / `--events` / `--state` / `--input` 相互指向同一文件时参数错误退出 `2`；
+  - `--input` 只做 dry-run（`session.rollback()` 显式回滚，零落库），**没有** `--no-dry-run`；
+  - **不接邮件 / 短信 / Webhook / 第三方推送**；不写数据库、不新增 migration / schema；
+  - 退出码 `0`（量化达标，仍需人工 Gate）/ `2`（参数或输入错误）/ `3`（无数据行）/
+    `4`（state 损坏，安全失败且不写输出）/ `5`（仍未达标，诚实 BLOCKED）。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **20 项**测试（全部 Mock / 临时文件 / SQLite，零网络，未新增依赖）：
+  - `tests/unit/test_evidence_readiness_watch.py` **13**：首次事件诚实、完全相同状态 0 事件、
+    缺口变化、原因码双向变化、ready 双向变化（false→true 仍要求 L3 人工 Gate、
+    `phase_transition_allowed=false`）、事件顺序确定性、敏感值脱敏、白名单字段
+    （不含来源名 / notes / checklist）、序列化确定性、state 往返与原子替换、
+    缺失 / 损坏 / 篡改 / 声称解锁的 state 安全失败、**CLI 退出码必须在 `__main__` 守卫之前定义**
+    （回归：冒烟实测发现常量被放到守卫之后会导致直接运行 CLI 时 `NameError` 退出 1）；
+  - `tests/integration/test_evidence_readiness_watch_integration.py` **7**：默认只读零写入、
+    显式 `--out` / `--events` 才落盘且重复运行 0 事件（指纹稳定）、缺口变化事件、
+    ready 双向事件、损坏 state 退出 `4` 且不写任何输出、候选文件 dry-run 脱敏且零落库、
+    参数 / 输入错误退出码。
+- **真实 CLI 冒烟**（临时 SQLite + 派生 schema，`DATABASE_URL` 指向临时库）：
+  首轮 退出码 `5` / 1 个 `FIRST_SNAPSHOT` 事件 / `blocker_active=true`、
+  `human_gate_required=true`、`data_qualification_passed=false`、
+  `phase_transition_allowed=false`、author `0/30`、coverage remaining `90`；
+  第二轮 退出码 `5` / **0 事件** / `changed=false` 且指纹与 state 文件一致；
+  无残留 `.tmp`；损坏 state → 退出码 `4`、stdout 为空、不写任何输出、stderr 已脱敏；
+  数据库 `raw_items=0` / `sources=0`（零写入）。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **1871 passed / 1 skipped in 225.63s**
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 156 source files`
+
+### 3. 范围守规
+
+- 未新增依赖、未新增 / 修改 migration 与 schema、未联网、未抓取任何站点、未触碰 `.env`；
+- `src/alpha/**`（含阈值 `evidence_gate.py`）、`src/monitoring/**`、`src/scheduler/**`、
+  `src/collectors/**` 未改动（只**复用**其阈值与口径）；`scripts/import_real_posts.py` 未改造；
+- **未解除** `PHASE3_3_DATA`：所有输出持续显式 `blocker_active=true` /
+  `human_gate_required=true`，`data_qualification_passed=false`、
+  `phase_transition_allowed=false`；未进入 Phase 3.4，未生成任何交易信号或订单；
+  `LIVE_TRADING=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；
+- 同步 `README.md`（§1 交付表 + §7 新章节 + §10 说明）与 `TECH_DEBT.md`
+  （新增 TD-51 登记行 + 明细 + 变更日志行）。
+- **遗留 / 下一步**：仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 BLOCKED。通知层**只减少
+  盯盘 / 轮询**，不解除该 blocker；业务方仍须按 `evidence-intake-v1` 提供真实授权的
+  Author / News 数据并**人工核验**，用 `scripts.evidence_operator workflow --no-dry-run`
+  显式落库，再以 `handoff` / `recheck` 复核；Phase 切换仍需 L3 人工确认。
+
