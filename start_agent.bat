@@ -9,6 +9,6 @@ echo        Cline AI Orchestrator
 echo ========================================
 echo.
 
-python orchestrator\ai_orchestrator.py
+py -u orchestrator\ai_orchestrator.py
 
 pause
