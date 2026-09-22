@@ -116,10 +116,8 @@ def run_cline(task_file):
 """
 
     command = [
-        cline_exe,
-        prompt,
+        cline_exe, 
         "--json",
-        "--yolo",
         prompt
     ]
 
