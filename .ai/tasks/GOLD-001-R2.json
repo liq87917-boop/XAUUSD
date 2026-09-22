@@ -1,0 +1,78 @@
+{
+  "task_id": "GOLD-001-R2",
+  "supersedes": "GOLD-001-R1",
+  "type": "RECOVERY",
+  "title": "修复质量门禁并完成 30 分钟 Collector Scheduler",
+  "max_attempts": 3,
+  "goal": "在用户确认本机 start_agent.bat、Cline CLI headless 与当前模型均正常后，恢复 GOLD-001-R1。先消除已知 Ruff/mypy 基线门禁，再完成并验收 30 分钟 Collector Scheduler，解除 TD-09。",
+  "recovery_context": [
+    "用户已确认当前电脑 start_agent.bat 正在运行且全部正常，视为 Cline CLI headless preflight 已通过。",
+    "GOLD-001-R1 因模型 429、CLI 安装问题及基线质量门禁 blocked；不得覆盖既有 task/result。",
+    "项目 .venv 已验证可运行：pytest 1527 passed / 1 skipped。validation 固定使用 .venv\\\\Scripts\\\\python.exe。",
+    "已知基线：orchestrator/ai_orchestrator.py 有 5 个 Ruff 问题；scripts/collectors/smoke_collectors.py 与 dry_run_collectors.py 有 2 个 mypy 问题。",
+    "Phase 3.3 Author/News 数据资格仍 BLOCKED；本任务只完成工程质量门禁与采集调度基础设施，不进入 Phase 3.4。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-001/GOLD-001-R1 task/result、TECH_DEBT.md、PROGRESS_LOG.md 和最近 commits/diff。",
+    "先修复当前 Ruff 5 个与 mypy 2 个基线问题；仅做最小安全修复，不改变 Orchestrator 行为。",
+    "恢复/实现独立 Scheduler 核心模块，优先 src/scheduler/；不得包含具体 provider URL、解析逻辑或业务特例。",
+    "实现 timezone-aware UTC 对齐的 30 分钟确定性调度槽；同槽稳定 idempotency_key，重复触发只执行一次。",
+    "复用现有 JobRun，不新增 migration、不修改 schema；实现 stale RUNNING/RETRYING 恢复并增加 retry_count，非 stale 必须跳过。",
+    "读取 enabled=true 且 config_json.collector 的 Source，通过生产 collector registry/bootstrap 构造采集器并调用现有 run_collectors；bootstrap 与 Scheduler 核心分离。",
+    "单 source 构造或执行失败不得阻断其他 source；最终 JobRun 诚实记录 PARTIAL_FAILED 或 FAILED。",
+    "JobRun.output_json 记录 source/status/run_id/fetched/inserted/duplicate/failed/skipped/retry_count/warnings 等摘要，禁止 token/API key/Authorization/完整 source config。",
+    "新增 scripts/run_collector_scheduler.py，支持 --once、--interval-minutes 默认30和安全循环，Ctrl+C 正常退出；不新增第三方依赖。",
+    "测试 100% Mock 且禁止联网，覆盖同槽幂等、下一槽、构造/执行失败隔离、stale恢复、非stale不接管、敏感字段过滤、UTC槽边界。",
+    "保持 append-only、effective_at=max(published_at,collected_at)、Author/News 授权门禁、LIVE_TRADING=false。",
+    "全部验收通过后才解除 TECH_DEBT TD-09，并更新 PROGRESS_LOG.md 与必要 README 运维说明。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/ai_orchestrator.py",
+      "scripts/collectors/smoke_collectors.py",
+      "scripts/collectors/dry_run_collectors.py",
+      "src/scheduler/**",
+      "src/collectors/bootstrap.py",
+      "src/collectors/__init__.py",
+      "scripts/run_collector_scheduler.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**"
+    ],
+    "note": "前三个现有文件仅允许用于消除已知 Ruff/mypy 基线问题，不得借机重构行为。若需其他生产文件，最终报告必须说明原因。"
+  },
+  "constraints": [
+    "不新增第三方依赖。",
+    "不新增或修改 migration/schema。",
+    "不进入 Phase 3.4，不训练 Alpha。",
+    "不得伪造时间字段。",
+    "不得绕过授权、robots、证书或安全限制。",
+    "测试不得联网。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\\\Scripts\\\\python.exe -m pytest tests -q",
+    ".venv\\\\Scripts\\\\python.exe -m ruff check .",
+    ".venv\\\\Scripts\\\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "已知 Ruff/mypy 基线问题清零且无行为回归。",
+    "Scheduler 核心与 CLI 单轮/循环入口职责清晰。",
+    "同一 UTC 30 分钟槽重复触发不重复执行且不产生第二条 JobRun。",
+    "stale RUNNING/RETRYING 可安全恢复并增加 retry_count；非 stale 不接管。",
+    "collector 构造/执行失败均隔离，状态和 output_json 可审计且无敏感配置。",
+    "测试完全 Mock、无真实网络。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖/migration/schema/密钥/实盘/Phase 3.4 代码。",
+    "TD-09 与 PROGRESS_LOG 更新与验收证据一致。"
+  ]
+}
