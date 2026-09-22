@@ -1,0 +1,49 @@
+{
+  "task_id": "GOLD-012",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立 Evidence Inbox 人工复核决策与审计闭环",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 仍 BLOCKED 的前提下，为 GOLD-011 的本地 evidence inbox 增加纯本地、显式人工复核决策层：operator 可对 preflight 候选记录 approve/reject/needs_changes 决策及最小审计元数据，并生成可供后续显式 Evidence Operator intake 使用的批准清单；不得自动 intake、不得写研究数据库、不得自动解除 blocker 或进入 Phase 3.4。",
+  "recovery_context": [
+    "GOLD-011 已完成并通过工程验收：1970 passed / 1 skipped，ruff 全通过，mypy 160 source files 全通过。",
+    "GOLD-011 已提供只读 inbox discovery/preflight、SHA-256/fingerprint、幂等 pending register、symlink/path traversal 防护与 fail-closed；commit 937cf8bbbf2bbae3abfd9474311601f4d352d12f。",
+    "真实 PHASE3_3_DATA 仍 BLOCKED；授权法律效力、可信独立时间/availability/OOS 证据与 Phase 切换必须由人工 Gate 确认。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-011 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 和最近 commits/diff；只处理 PHASE3_3_DATA blocker-facing tooling。",
+    "复用 GOLD-011 package fingerprint、pending/preflight artifact、现有 redaction/reason codes；不得复制或降低 Evidence Gateway 资格口径。",
+    "提供纯本地人工 review CLI/API；决策仅允许 approve、reject、needs_changes，必须显式引用 package fingerprint，并记录 reviewer 标识的脱敏/非敏感表示、reviewed_at、decision reason code 与可选非敏感 note。",
+    "approve 必须要求当前 package fingerprint 仍与 inbox 实际内容一致且 preflight_pass；内容变化、候选消失、preflight 非通过、state 损坏或证据过期/不一致必须 fail-closed，旧批准不得继承到新 fingerprint。",
+    "决策 ledger 使用原子写、追加式审计语义和确定性 decision id；同一 fingerprint+相同决策重复提交幂等，不得静默覆盖相冲突决策；冲突必须要求显式新 revision/override 并保留历史。",
+    "生成脱敏 approved-for-explicit-intake 清单，但不得调用 Evidence Operator intake commit 路径、不得写数据库、不得移动/删除/修改原始 evidence。批准仅表示人工预审通过，不等于 data qualification PASS。",
+    "所有输出继续硬性保持 blocker_active=true、human_gate_required=true、data_qualification_passed=false、phase_transition_allowed=false；不得因 approve 数量达到阈值自动改变这些字段。",
+    "拒绝 Mock/模板/示例候选的 approve；不得把 reviewer note、文件名、mtime、review 时间或人工批准本身当作 published/collected/effective/availability 证据。",
+    "新增 unit/integration tests，使用临时目录/Mock/SQLite，禁止联网，覆盖 approve/reject/needs_changes、幂等、冲突 revision、内容变化导致批准失效、候选消失、损坏 ledger、敏感信息脱敏、并发/原子写与 fail-closed。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，给出 inbox scan → human review → approved list → 后续显式 evidence_operator intake 的最小操作路径，并明确 Phase 仍 BLOCKED。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/common/redaction.py", "scripts/evidence_*.py", "tests/unit/**", "tests/integration/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md", ".gitignore"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".env", "database/migrations/**", "src/alpha/**"]
+  },
+  "constraints": [
+    "不新增第三方依赖或 migration/schema。",
+    "不联网、不接第三方推送、不自动修改 OS 计划任务、不自动 intake/写数据库。",
+    "不新增或启用未授权数据源，不伪造 published_at/collected_at/effective_at/availability。",
+    "不用 Mock/模板/示例数据宣称真实数据资格，不降低资格阈值或 human gate。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不启用实盘；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在纯本地显式人工 review 决策入口，可针对 GOLD-011 package fingerprint 记录 approve/reject/needs_changes 并形成不可静默覆盖的审计历史。",
+    "只有当前内容 fingerprint 一致且 preflight_pass 的非合成候选可 approve；内容变化/消失/损坏状态全部 fail-closed。",
+    "可生成脱敏 approved-for-explicit-intake 清单，但绝不自动 intake、写数据库、修改原始 evidence 或解除 blocker。",
+    "重复决策幂等、冲突决策保留历史并要求显式 revision/override，ledger 原子写且并发安全。",
+    "所有安全字段始终保持 blocker/human gate，Mock/模板/示例永远不能被批准为真实资格证据。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过，README/TECH_DEBT/PROGRESS_LOG 同步且明确 PHASE3_3_DATA 仍 BLOCKED。"
+  ]
+}
