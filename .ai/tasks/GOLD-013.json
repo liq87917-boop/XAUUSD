@@ -1,0 +1,49 @@
+{
+  "task_id": "GOLD-013",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立 Approved Evidence 显式 Intake Plan 与最终写入前门禁",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 仍 BLOCKED 的前提下，把 GOLD-012 的 approved-for-explicit-intake 清单安全衔接到既有 Evidence Operator：生成确定性、脱敏、只读的 intake plan，并在任何真实数据库写入前重新核验 fingerprint、当前 preflight、review ledger revision、授权/时间/availability/OOS 证据与 synthetic 标记。默认只读，不自动 intake，不自动解除 blocker，不进入 Phase 3.4。",
+  "recovery_context": [
+    "GOLD-012 已完成并通过工程验收：2034 passed / 1 skipped，ruff 全通过，mypy 162 source files 全通过；commit 4e1832a4cd0eaa12e6ec1218620ab90b0c213b6e。",
+    "GOLD-012 已提供 append-only human review ledger 与 approved-for-explicit-intake 清单；approve 仅代表人工预审，不等于 data qualification PASS。",
+    "真实 PHASE3_3_DATA 仍 BLOCKED；仓库没有足量合法授权且具可信独立时间/availability/OOS 证据的 Author/News 数据，Phase 切换仍为 L3 人工 Gate。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-012 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 和最近 commits/diff；只处理 PHASE3_3_DATA blocker-facing tooling。",
+    "复用 GOLD-005~012 的 Evidence Gateway、Operator、Inbox、Review、redaction、reason codes 与 fingerprint 契约；不得复制或降低资格规则。",
+    "提供纯本地 intake-plan API/CLI：输入 inbox、review ledger、approved list，输出确定性脱敏计划；默认 dry-run/只读，禁止隐式数据库写入。",
+    "构建计划时必须重新扫描当前 inbox，并逐项验证内容 fingerprint、当前 PREFLIGHT_PASS、非 Mock/模板/示例、最新有效 review revision=APPROVE、approved list 与 ledger 一致；任一不一致 fail-closed。",
+    "计划必须明确区分 approved_for_explicit_intake 与 data_qualification_passed；后者在本任务中始终不得由 approve 数量或计划生成自动置 true。",
+    "若提供后续显式执行衔接，只允许调用既有 Evidence Operator 的显式 commit 路径，必须要求独立人工动作/显式参数；本任务自身不得自动执行、不得在默认路径写研究数据库。",
+    "intake plan 使用内容级 plan_id/hash，重复生成相同输入必须 byte-stable/幂等；输入内容或 review revision 变化必须产生新 plan，旧 plan 不得静默继承。",
+    "所有输出硬性保持 blocker_active=true、human_gate_required=true、phase_transition_allowed=false；不得伪造 published_at/collected_at/effective_at/availability，也不得把 review/intake-plan 时间当证据时间。",
+    "新增 unit/integration tests，使用临时目录/Mock/SQLite，禁止联网；覆盖 stale fingerprint、review override、approved-list tamper、候选消失、synthetic candidate、损坏 ledger/list、幂等、脱敏、并发/原子输出与 fail-closed。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，给出 inbox → review → approved list → intake plan → 人工显式 Evidence Operator intake → handoff/recheck 的最小路径，并明确真实 evidence 未提供时 PHASE3_3_DATA 仍 BLOCKED。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/common/redaction.py", "scripts/evidence_*.py", "tests/unit/**", "tests/integration/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md", ".gitignore"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".env", "database/migrations/**", "src/alpha/**"]
+  },
+  "constraints": [
+    "不新增第三方依赖或 migration/schema。",
+    "不联网、不接第三方推送、不自动修改 OS 计划任务；默认零数据库写入。",
+    "不新增或启用未授权数据源，不绕过授权、robots、证书或安全限制。",
+    "不用 Mock/模板/示例数据宣称真实数据资格，不降低资格阈值或 human gate。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不启用实盘；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在纯本地确定性 intake-plan 入口，能把 GOLD-012 approved list 与当前 inbox/review ledger 重新绑定核验。",
+    "stale fingerprint、候选消失、preflight 回退、review override、approved-list tamper、synthetic evidence 或损坏状态均 fail-closed。",
+    "相同输入重复生成计划幂等/byte-stable，内容或 review revision 变化生成新 plan，旧批准/旧计划不静默继承。",
+    "默认不写数据库、不自动 intake、不修改原始 evidence、不解除 blocker；任何后续真实 intake 必须是人工显式 Evidence Operator 动作。",
+    "安全字段始终保持 blocker/human gate，Mock/模板/示例不能获得真实数据资格，Phase 3.4 与交易功能保持禁止。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过，README/TECH_DEBT/PROGRESS_LOG 同步且明确 PHASE3_3_DATA 仍 BLOCKED。"
+  ]
+}
