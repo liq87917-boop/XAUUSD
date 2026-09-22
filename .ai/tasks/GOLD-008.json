@@ -1,0 +1,61 @@
+{
+  "task_id": "GOLD-008",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立 Phase 3.3 Evidence 人工交接包与可复核验收报告",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 仍为不可自动解除的人工作业 blocker 前提下，把 GOLD-007 的 Evidence Operator 输出整理为可交给业务/operator 的确定性人工交接包：明确 Author/News 剩余数量、授权/时间/availability 缺口、隔离原因、需要人工提供的证据字段以及 recheck 结果；不得采集未授权数据、不得降低资格门槛、不得进入 Phase 3.4。",
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-007 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 和最近 commits/diff；只处理 PHASE3_3_DATA blocker。",
+    "复用现有 evidence_readiness 与 evidence_operator 的唯一资格口径，不复制或重写阈值算法。",
+    "提供一个只读/默认 dry-run 的 handoff/report 入口，将当前真实数据库资格状态转换为稳定机器可读 JSON + 人类可读 Markdown 摘要；报告至少包含 blocker_code、blocker_active、human_gate_required、Author eligible/required/remaining、News eligible/required/remaining、coverage gap、source-share 可评估性、主要 quarantine/reason-code 计数。",
+    "生成明确的人工证据 checklist，区分 authorization、provenance、published_at、collected_at、availability/OOS、identity 字段；模板/Mock/示例必须醒目标记为不计资格。",
+    "报告不得包含正文、token/API key/Authorization、完整 source config 或其他敏感字段；沿用项目 redaction 规则并新增回归测试。",
+    "handoff 入口不得联网、不得自动 intake、不得修改数据库；任何写文件行为必须显式指定输出路径，且默认只打印 stdout。",
+    "如果当前库仍不达标，退出状态与 JSON 必须诚实保持 BLOCKED/ready=false；不得把工程工具完成解释为数据资格通过。",
+    "如果未来真实 evidence 已达标，报告只能显示 ready_for_human_review=true；Phase 3.4/模型任务仍需按 DEVELOPMENT_PROTOCOL 的 L3 人工确认，不能自动切 Phase。",
+    "新增 unit/integration tests，100% Mock 且禁止联网，覆盖空库、部分达标、隔离原因、敏感字段脱敏、稳定排序/确定性、输出文件显式开关以及达到阈值后仍要求 human review。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，说明该工具只减少人工交接摩擦，不解除 PHASE3_3_DATA。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/evidence/**",
+      "scripts/evidence_*.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**",
+      "src/alpha/**"
+    ]
+  },
+  "constraints": [
+    "不新增第三方依赖或 migration/schema。",
+    "不联网、不新增或启用未授权数据源、不实现绕过 robots/证书/授权的采集。",
+    "不伪造 published_at/collected_at/effective_at/availability。",
+    "不用 Mock/模板/示例数据宣称真实数据资格。",
+    "不降低 Author>=30、News>=200、90 天覆盖及既有 source-share 等资格门槛。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不启用实盘；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在确定性、只读、默认 dry-run 的 Evidence handoff/report 入口，复用现有资格计算而非第二套阈值。",
+    "报告可量化 Author/News 当前缺口、coverage/source-share 状态和主要隔离原因，并给出明确人工证据 checklist。",
+    "敏感字段/正文不会进入 handoff 输出；相关回归测试通过。",
+    "未达标时始终 BLOCKED/ready=false；达标时最多 ready_for_human_review=true，不自动切 Phase。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖、migration/schema、未授权采集、Phase 3.4 或实盘代码。",
+    "README/TECH_DEBT/PROGRESS_LOG 明确 PHASE3_3_DATA 仍需真实授权 evidence 与人工 Gate。"
+  ]
+}
