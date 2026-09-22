@@ -1,0 +1,53 @@
+{
+  "task_id": "GOLD-002-R1",
+  "type": "RECOVERY",
+  "title": "补齐 GOLD-002 验收记录并复核 Processor Pipeline",
+  "supersedes": "GOLD-002",
+  "max_attempts": 3,
+  "goal": "修复 GOLD-002 的验收缺口：PROGRESS_LOG.md 未按任务要求更新；同时对已提交 Processor Pipeline 做一次针对性复核，确认实现、文档与验收证据一致，不扩展功能范围。",
+  "recovery_context": [
+    "GOLD-002 已提交为 d7b0d423e043e44d2340b0217d6580cee83d5892。",
+    "GOLD-002 自动验证已通过：1663 passed / 1 skipped；ruff 全通过；mypy config database src scripts 全通过。",
+    "Review 发现 GOLD-002 changed_files 不包含 PROGRESS_LOG.md，但原任务 requirements/acceptance 明确要求完成后更新 PROGRESS_LOG，因此不能直接判定完整 PASS。",
+    "Phase 3.3 Author/News 数据资格仍 BLOCKED；不得进入 Phase 3.4。"
+  ],
+  "requirements": [
+    "先读取 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-002 task/result、commit d7b0d423e043e44d2340b0217d6580cee83d5892、README.md、TECH_DEBT.md、PROGRESS_LOG.md。",
+    "在 PROGRESS_LOG.md 增加 GOLD-002/第六十六轮的真实完成记录，准确记录 Processor Pipeline、RSS 最小接线、临时产物清理、测试数量与质量门禁结果；不得夸大 TD-12 完成范围。",
+    "针对 GOLD-002 已实现代码做聚焦复核：append-only、幂等键、effective_at、坏数据隔离、审计摘要脱敏、Scheduler/Processor 边界、RSS 接线。发现真实缺陷才修复，并补回归测试；不要为了改而改。",
+    "确认 README、TECH_DEBT、PROGRESS_LOG 三者对 TD-11/TD-12 的描述一致；TD-11 只有在实现证据成立时保持已解除，TD-12 继续按实际范围标记部分解除。",
+    "不得新增依赖、migration/schema，不进入 Phase 3.4，不训练 Alpha，不生成实盘交易信号。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "PROGRESS_LOG.md",
+      "README.md",
+      "TECH_DEBT.md",
+      "src/processors/**",
+      "src/common/redaction.py",
+      "src/collectors/**",
+      "src/scheduler/**",
+      "tests/unit/**",
+      "tests/integration/**"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**"
+    ]
+  },
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "PROGRESS_LOG.md 已补齐 GOLD-002 的真实实施与验收记录。",
+    "README、TECH_DEBT、PROGRESS_LOG 对 TD-11/TD-12 状态一致且无夸大。",
+    "Processor Pipeline 聚焦复核无未处理的 P0/P1 回归；若发现缺陷，已有测试锁定并修复。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖、migration/schema、Phase 3.4 或实盘代码。"
+  ]
+}
