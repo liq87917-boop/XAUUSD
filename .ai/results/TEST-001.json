@@ -1,0 +1,11 @@
+{
+  "task_id": "TEST-001",
+  "status": "failed",
+  "finished_at": "2026-09-22T10:20:18.638174",
+  "cline_exit_code": 1,
+  "changed_files": [],
+  "git_diff_stat": "",
+  "validations": [],
+  "cline_output_tail": "",
+  "cline_error_tail": "{\"ts\":\"2026-09-22T02:20:18.351Z\",\"type\":\"error\",\"message\":\"JSON output mode requires a prompt argument or piped stdin (interactive mode is unsupported)\"}\n"
+}
