@@ -92,6 +92,7 @@
 | TD-52 | P0（周期 tick runner，仍 BLOCKED） | GOLD-010 已交付**纯本地单次 tick runner**（`src/evidence/readiness_runner.py` + `scripts/evidence_readiness_runner.py`：只做**一次** tick、由**外部定时器**（Windows Task Scheduler / 现有本地 orchestrator）调用，不自带常驻循环、不新增第三方 scheduler 依赖、不自动修改 OS 计划任务；OS 级**单实例锁**（`msvcrt` / `fcntl`，owner / pid / acquired_at 可审计且不含敏感数据、**绝不删除 / 绝不改写**活动锁）与**陈旧锁安全接管**（`recovered_stale` + `previous_owner` 留痕）；工作目录内三类 artifact（`readiness_state.json` / `readiness_events.jsonl` / `readiness_status.json`）全部**原子写**，事件日志保留最新 200 条且**本次新事件永不丢弃**；写入顺序**事件优先**（宁可重复，绝不丢失）；无变化 → 0 重复事件；损坏 state / 事件日志 → 退出 `4`、锁冲突 → `6`、资格计算失败 → `7`、工作目录 / artifact 不可写 → `3`，全部 **fail-closed** 且保留旧 state、stdout 为空、错误脱敏；证据见 `PROGRESS_LOG.md` 第七十四轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47/48/49/50/51 未解除），`blocker_active` / `human_gate_required` 恒为 true、`data_qualification_passed` / `phase_transition_allowed` 恒为 false；②runner **只把盯盘自动化**，不是资格判定器，量化达标最多 `ready_for_human_review=true`，Phase 切换仍须 L3 人工确认；③只写显式 `--work-dir`，不联网 / 不写数据库 / 不接第三方推送 / 不自动配置计划任务；④退出码 `5` 是**预期 BLOCKED**，不是定时器故障（真正的故障只有 `2` / `3` / `4` / `6` / `7`） | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 + 人工核验授权与历史可用性后重跑 `workflow` / `handoff`；再由**人工**把 runner 挂到 Windows Task Scheduler / 本地 orchestrator（例如每 30 分钟一次；本工具不会替你配置），并以 `readiness_status.json` / `readiness_events.jsonl` 只看**有意义变化** |
 | TD-53 | P0（本地 inbox 发现与预检，仍 BLOCKED） |  Evidence Inbox 发现与预检**（`src/evidence/inbox.py` + `scripts/evidence_inbox.py`：只扫描显式 `--inbox-dir` 的**直接子目录**，候选包必须由 `manifest.json` 显式关联证据文件（`evidence_type` / `source`（或别名 `provider`）/ `authorization_reference` / `time_semantics` / `availability_semantics` / `historical_oos_applicable` / `files[].path` + `sha256`）；逐文件实测 SHA-256 并核对声明，不一致即隔离且**不再解析内容**；候选包指纹只由内容摘要与结构标记派生（**不含** 文件名 / mtime / 绝对路径 / 扫描时间）；pending 清单以指纹为键**幂等**（同内容不重复生成、内容变化 → 新条目、同指纹状态变化记入 `status_changed`）且**原子写**；路径穿越 / 绝对路径 / 符号链接 / 未声明文件 / 摘要不一致 / 凭据泄漏 / 示例模板一律 **fail-closed** + 稳定原因码；逐行预检复用 Evidence Gateway 的 `assess_row` 与 `valid_reference`（`evidence-intake-v1`），**不复制、不降低**任何阈值；**绝不移动 / 删除 / 改写原始证据、绝不自动 intake、零网络、零数据库写入**；`blocker_active` / `human_gate_required` 恒为 true、`data_qualification_passed` / `phase_transition_allowed` 恒为 false、`requires_human_action` 恒为 true（证据见 `PROGRESS_LOG.md` 第七十五轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47~52 未解除）；②`preflight_pass` 只进**人工确认 / 显式 intake** 队列，不证明授权法律效力、不解除 blocker，落库仍须 `evidence_operator workflow --no-dry-run` + `handoff`/`recheck` 与 L3 人工 Gate；③`files[].path` 只允许包内**单级文件名**，包内除 manifest 外的文件必须**全部**声明（否则整包隔离）；④pending 清单是当前 inbox 内容的镜像，不接邮件 / 短信 / Webhook / 第三方推送 | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据（放入 inbox 子目录 + `manifest.json`）→ `scripts.evidence_inbox --out` 预检 → 人工确认后 `scripts.evidence_operator workflow --no-dry-run` 显式落库 → `handoff` / `recheck` 复核；Phase 切换仍须 L3 人工确认 |
 | TD-54 | P0（人工复核决策与审计，仍 BLOCKED） | GOLD-012 已交付**纯本地的人工复核决策与审计闭环**（`src/evidence/review.py` + `scripts/evidence_review.py`：只对**显式内容级指纹**记录 `APPROVE` / `REJECT` / `NEEDS_CHANGES`（受控词表，原因码必须与决策匹配）；`APPROVE` 必须①该指纹**当前仍在** inbox 扫描结果中、②当前预检 `PREFLIGHT_PASS`、③**不是**模板 / 示例 / Mock，内容变化 → **新指纹**（旧批准绝不继承），候选消失 / 预检回退 / ledger 损坏 / 元数据含凭据一律 **fail-closed** 且零写入；**追加式** ledger（`kind=evidence_inbox_review_ledger`、确定性 `decision_id`、完全相同决策**幂等**不新增记录、任何差异必须显式 `--revision <既有+1>` + `--override` 且 `supersedes` 留痕、**绝不静默覆盖**、原子写 + 单实例锁）；`--out` 才写 ledger、`--ledger` 只读、`--approved-out` 才写**脱敏** approved-for-explicit-intake 清单，且清单在**当前**扫描结果上**重新验证**（失效批准进 `invalidated`：`CANDIDATE_MISSING` / `PREFLIGHT_NOT_PASSING` / `SYNTHETIC_EVIDENCE` / `EVIDENCE_INCONSISTENT`）；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除 / 改写原始 evidence、零网络、零新增依赖 / migration**；复核元数据（reviewer / note / 文件名 / mtime / 复核时间 / 人工批准本身）**不是**证据时间；四个安全字段恒为 true / true / false / false（与 approve 数量无关）。证据见 `PROGRESS_LOG.md` 第七十六轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47~53 未解除）；②人工 `APPROVE` **只表示人工预审通过**，不等于 data qualification PASS、不解除 blocker，落库仍须 `evidence_operator workflow --no-dry-run` + `handoff`/`recheck` 与 L3 人工 Gate；③复核元数据只接受**非敏感**最小字段，凭据类内容一律拒绝记录（不会落盘为 `***`）；④ledger 是唯一事实来源，批量 approve 不会改变任何安全字段，也不触发任何自动化 | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 → `scripts.evidence_inbox --out` 预检 → 本工具逐指纹 `--decision approve` 记录人工决策并生成批准清单 → 人工按清单**显式** `scripts.evidence_operator workflow --no-dry-run` 落库 → `handoff` / `recheck` 复核；Phase 切换仍须 L3 人工确认 |
+| TD-55 | P0（最终写入前 intake plan 门禁，仍 BLOCKED） | GOLD-013 已交付**纯本地只读**的 approved-for-explicit-intake **intake plan** 与最终写入前门禁（`src/evidence/intake_plan.py` + `scripts/evidence_intake_plan.py`：把 GOLD-012 批准清单与**当前** inbox / review ledger **重新绑定核验** —— ①清单结构自洽（文档标识 / schema / 契约版本 / `approved_count` / `invalidated_count` 与列表长度一致 / 四个安全字段与 `approval_scope` 不可被 state 削弱 / **不得**出现任何证据时间字段）；②每条批准必须**当前仍是** ledger 上该指纹的**最新有效**决策（`revision` / `decision_id` 完全一致，`review override` 后旧批准一律失效）；③该指纹**当前仍在** inbox 且仍 `PREFLIGHT_PASS`、非模板 / 示例 / Mock、摘要与复核时一致；④清单与"用当前 inbox + ledger 重新算出的批准集合"完全一致（条目 / 失效项 / 计数 / 决策计数）—— 任一不一致 → **fail-closed**（退出码 `4`、**零写入**）；输出**确定性脱敏**、**内容级** `plan_id`（不含 `generated_at`；同输入同 `plan_id`、同审计时点逐字节稳定）的只读计划（默认零写入，只有显式 `--out` 才**原子**落盘计划本身），`handoff` 只给**字符串**命令模板（必带 `--no-dry-run` 与显式 `--input`），`auto_intake_allowed` / `writes_database` 恒 false、`requires_explicit_operator_action` 恒 true；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除 / 改写原始 evidence、零网络、零新增依赖 / migration**。证据见 `PROGRESS_LOG.md` 第七十七轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47~54 未解除）；②计划**不是**资格判定器：`approved_for_explicit_intake` 与 `data_qualification_passed` 是两个独立字段，后者**恒为** false（`data_qualification_passed_count` 恒为 0），批准数量不改变任何安全字段；③真实落库必须由人工**显式**执行 `scripts.evidence_operator.py workflow --no-dry-run`（本工具不自动执行、不写研究数据库），随后 `handoff` / `recheck` + L3 人工 Gate；④计划只反映**当前** inbox / ledger 事实：内容或 review revision 变化必须重新生成（旧计划 / 旧批准不静默继承） | 业务方按 `evidence-intake-v1` 提供真实授权 Author / News 数据 → `scripts.evidence_inbox --out` 预检 → `scripts.evidence_review --decision approve ... --approved-out` 人工复核 → 本工具 `--out` 生成计划与显式 `handoff` 命令 → 人工**显式** `scripts.evidence_operator workflow --no-dry-run` 落库 → `handoff` / `recheck` 复核；Phase 切换仍须 L3 人工确认 |
 
 
 
@@ -882,6 +883,68 @@
 
 ---
 
+### TD-55 Evidence Approved-for-Explicit-Intake Intake Plan 与最终写入前门禁的剩余边界（P0，2026-09-23，GOLD-013）
+
+- **已交付**：`src/evidence/intake_plan.py`（`IntakePlanStatus` / `PlanVerificationCode` /
+  `PlanViolation` / `PlanEntry` / `OperatorHandoffStep` / `ApprovedListDocument` / `IntakePlan` /
+  `load_approved_intake_list` / `verify_intake_plan_inputs` / `build_intake_plan` /
+  `compute_plan_id` / `intake_plan_handoff` / `run_intake_plan` / `render_intake_plan_summary` /
+  `exit_code_for`）+ `scripts/evidence_intake_plan.py`（`--inbox-dir` / `--ledger` /
+  `--approved-list` 必填、`--out` 唯一写开关、`--lock` / `--as-of` / `--json`；
+  **没有**任何 intake / `--no-dry-run` 参数）。`src/evidence/__init__.py` 导出新 API。
+- **关键保证（已由测试锁定）**：
+  1. **复用而非复制**：批准清单的重新验证**直接复用** GOLD-012 的
+     `build_approved_intake_list`（同一 inbox 预检 + 同一 ledger 语义），不复制、不降低任何
+     资格规则；
+  2. **最终写入前逐项核验（fail-closed）**：①批准清单结构自洽（文档标识 / schema / 契约版本 /
+     `approved_count` / `invalidated_count` 与列表长度一致 / 四个安全字段与 `approval_scope`
+     不可被 state 削弱 / **不得**出现任何证据时间字段 → `IntakePlanStateError`）；②每条批准必须
+     **当前仍是** ledger 上该指纹的**最新有效**决策（`LEDGER_MISSING_APPROVAL` /
+     `LEDGER_DECISION_SUPERSEDED` / `LEDGER_REVISION_SUPERSEDED`，`review override` 后旧批准
+     一律失效）；③该指纹**当前仍在** inbox 且仍 `PREFLIGHT_PASS`、非合成、摘要与复核时一致
+     （`FINGERPRINT_MISSING` / `PREFLIGHT_NOT_PASSING` / `SYNTHETIC_EVIDENCE` /
+     `EVIDENCE_INCONSISTENT`）；④清单与"用当前 inbox + ledger 重新算出的批准集合"完全一致
+     （`APPROVED_LIST_STALE` / `APPROVED_LIST_TAMPERED` / `INVALIDATED_MISMATCH` /
+     `COUNT_MISMATCH`）；⑤计划审计时点不得早于清单生成时间（`PLAN_TIME_BEFORE_APPROVAL`）；
+     任一不一致 → `IntakePlanInconsistentError`（退出码 `4`、**零写入**）；
+  3. **内容级 `plan_id` 与幂等**：`plan_id` 只由（策略块 + 批准条目 + ledger 最新决策摘要）派生
+     （**不含** `generated_at`）；同一输入重复生成得到同一 `plan_id`，同一审计时点逐字节稳定；
+     输入内容或 review revision 变化必然产生新 `plan_id`（旧计划 / 旧批准不静默继承）；
+  4. **默认只读 / 原子写**：只有显式 `--out` 才写计划本身（复用 GOLD-009 的 `atomic_write_text`，
+     无残留 `.tmp`），写前先取 GOLD-010 的 `SingleInstanceLock`（锁冲突 → 退出码 `6`、零写入）；
+     所有输入 / 输出必须在 inbox **之外**；只读运行零写入；
+  5. **显式衔接、绝不自动执行**：`handoff` 只给**字符串**命令模板（必带 `--no-dry-run` 与显式
+     `--input`，并给出 `input_path`）；`auto_intake_allowed` / `writes_database` 恒为 false、
+     `requires_explicit_operator_action` 恒为 true；模块内**不存在** intake / commit 调用
+     （源码守卫：无 `aiohttp` / `httpx` / `requests` / `socket` / `urllib` / `sqlalchemy` /
+     `subprocess`，无 `unlink` / `rmtree` / `os.remove` / `os.rename` / `shutil.move`，无
+     `intake_evidence` / `evaluate_write_gate`，无 `while` 循环）；
+  6. **诚实**：`blocker_active` / `human_gate_required` 恒为 true、
+     `data_qualification_passed` / `phase_transition_allowed` / `auto_intake_allowed` /
+     `writes_database` 恒为 false（**硬编码**）；`approved_for_explicit_intake` 与
+     `data_qualification_passed` 是两个独立字段，`data_qualification_passed_count` 恒为 0，
+     批准数量（含全部候选被批准）不改变任何安全字段；
+  7. **脱敏 / 时间语义**：artifact 只含计数、稳定原因码、指纹、来源名、审计字段与已脱敏路径；
+     产出结构里根本没有证据时间键（测试对 `FORBIDDEN_EVIDENCE_FIELDS` 做全量递归断言，并断言
+     行内证据时间未被复制）。
+- **剩余边界（本条目跟踪）**：
+  1. **仍无真实授权证据**：计划层只是"最终写入前把清单与当前事实重新绑定"的门禁，
+     库内 eligible 记录不足 → `PHASE3_3_DATA` 保持 `active=true`（TD-43 / TD-44 / TD-45 /
+     TD-47 ~ TD-54 未解除）；
+  2. **计划 ≠ 资格**：`READY_FOR_EXPLICIT_INTAKE` 只表示"人工预审通过且当前仍一致"，落库仍须
+     人工**显式**执行 `scripts.evidence_operator.py workflow --no-dry-run`，随后以 `handoff` /
+     `recheck` 复核，Phase 切换仍是 **L3 人工确认**；
+  3. **计划不是"批准缓存"**：内容变化 → 新指纹、review revision 变化 → 旧批准失效，计划必须
+     重新生成；本工具不会把旧计划"升级"成新计划；
+  4. **无自动化**：不联网、不接第三方推送、不改 OS 计划任务、不写研究数据库。
+- **解除条件**：业务方按 `evidence-intake-v1` 提供真实授权 Author / News 数据并经人工核验落库，
+  `workflow` / `handoff` / `recheck` 显示量化门槛达标，且完成 **L3 人工 Gate**。
+- **不变量**：工具永不联网、永不抓取、永不绕过 robots / 条款 / 证书、永不移动 / 删除原始证据、
+  永不自动 intake、永不自动解除 blocker；永不因代码完成、模板、Mock 测试或人工批准数量解除
+  `PHASE3_3_DATA`。
+
+---
+
 ## 4. 已知限制（设计取舍，非缺陷）
 
 | 项 | 说明 | 依据 |
@@ -932,3 +995,5 @@
 | readiness 周期 tick runner（2026-09-23，GOLD-010） | 新增 `src/evidence/readiness_runner.py`（**纯本地单次 tick** 核心：`SingleInstanceLock`（OS 级独占文件锁 `msvcrt` / `fcntl`，owner / pid / acquired_at 可审计、**绝不删除 / 绝不改写**活动锁、陈旧锁安全接管并留 `recovered_stale` + `previous_owner` 审计痕迹）+ `TickPaths` / `TickReport` / `run_tick` + `build_snapshot_from_session`（**只读**台账，显式 `rollback`）+ `load_event_journal` / `write_event_journal`（**有界保留**最新 200 条且本次新事件永不丢弃）+ `write_status` / `render_tick_summary` / `exit_code_for`；写入顺序**事件优先** → state → status，全部**原子写**）+ `scripts/evidence_readiness_runner.py`（`--work-dir` 必填的单次 tick CLI；零网络、零数据库写入、**无常驻循环**、不接第三方推送、不自动修改 OS 计划任务；退出码 `0` 达标（仍需 L3 人工 Gate）/ `2` 参数 / `3` 不可写 / `4` state 或事件日志损坏 / `5` 预期 BLOCKED / `6` 锁冲突 / `7` 资格计算失败，失败路径零写入并保留旧 state）；复用 `src.evidence.readiness_watch.py` 的口径与原子写原语（`atomic_write_text` 改为公开导出，不各写一套）；新增 30 项测试（单元 23 + 集成 7，含真实 CLI 冒烟与源码守卫）；登记 **TD-52**；**未解除** `PHASE3_3_DATA`（runner 只把盯盘自动化，达标最多 `ready_for_human_review=true`，Phase 切换仍须 L3 人工 Gate） |
 | 本地 inbox 发现与预检（2026-09-23，GOLD-011） | 新增 `src/evidence/inbox.py`（**纯本地只读**的 Evidence Inbox 发现与预检核心：`InboxStatus` / `InboxReasonCode`（复用 `ReasonCode` 已有一致的字符串值）/ `ManifestFileRef` / `CandidatePackage` / `PendingEntry` / `PendingRegister` / `InboxPreflightReport`；`scan_inbox` 只读扫描**显式目录的直接子目录**，`run_inbox_scan` 仅在你显式给 `--out` 时先取**单实例锁**再原子落盘 pending；`_layout` 逐文件算 SHA-256 并**不跟随符号链接**，`_package_fingerprint` 只由内容摘要与结构标记派生（不含文件名 / mtime / 绝对路径 / 扫描时间）；`_check_files` 拒绝绝对路径 / `..` / 多级路径 / 未声明文件且**绝不越界读取**；`_preflight_rows` 直接调用 `src.evidence.validation.assess_row`（`evidence-intake-v1`）复用 gateway 的隔离 / 授权 / 时间 / availability 口径，再叠加"无可用行 / 存在隔离行 / 缺 OOS 证据 / 模板示例"整包 fail-closed；`_sensitive_reasons` 只记录凭据类**键名**、引用类字段用 `safe_url` 去 query）+ `scripts/evidence_inbox.py`（`--inbox-dir` 必填、`--state` 只读、`--out` 唯一写开关、`--lock` 可选、`--as-of` 必带时区、`--json`；退出码 `0` 有候选（仍需人工 + 显式 intake）/ `2` 参数 / `3` inbox 或输出不可用（含 `--out` 写进 inbox 的拒绝）/ `4` 既有 pending state 损坏 / `5` 无候选（预期 BLOCKED）/ `6` 锁冲突，失败路径 stdout 为空、stderr 脱敏、零写入）；`src/evidence/validation.py` 的引用校验公开为 `valid_reference` 供预检复用**同一**口径；`src/evidence/__init__.py` 导出新 API；新增 **65 项**测试（单元 55 + 集成 10：空 inbox / 合法 JSONL+CSV / 缺 manifest / manifest 损坏 / 缺必填声明 / 版本不符 / 摘要不一致 / 未声明文件 / 路径穿越 / 绝对路径 / 符号链接 / 示例模板 / 无可用行 / 部分隔离 / 重复扫描幂等 / 内容变更 / 状态变化 / mtime 与扫描时间不参与指纹 / 原子写 / 损坏 state / 锁冲突 / 防敏感信息泄漏 / 源码守卫 + 真实子进程 CLI 冒烟；全部临时目录、零网络、零数据库）；登记 **TD-53**；**未解除** `PHASE3_3_DATA`（inbox 只是"摆放 + 预检"入口，`preflight_pass` 仍须人工确认与显式 `evidence_operator workflow --no-dry-run`，Phase 切换仍须 L3 人工 Gate） |
 | 人工复核决策与审计（2026-09-23，GOLD-012） | 新增 `src/evidence/review.py`（**纯本地**人工复核决策与审计核心：`ReviewDecision`（`APPROVE` / `REJECT` / `NEEDS_CHANGES`）/ `ReviewReasonCode`（受控词表，`REASON_CODES_BY_DECISION` 按决策分组）/ `InvalidationReason` / `ReviewRecord`（最小审计元数据：reviewer 非敏感标识、reviewed_at 带时区、reason_code、可选非敏感 note、supersedes、override、脱敏候选包摘要）/ `ReviewLedger`（**追加式**、`decision_id` 确定性派生、严格校验 `decision_id` / revision 连续性 / `supersedes` 链 / 安全字段不可被改写）/ `DecidedReview` / `ApprovedEntry` / `InvalidatedApproval` / `ApprovedIntakeList` / `ReviewReport`；`record_review_decision` 对**显式内容级指纹**记录决策：`APPROVE` 必须①指纹当前仍在扫描结果中、②`PREFLIGHT_PASS`、③非模板 / 示例 / Mock，完全相同的重复提交**幂等**，任何差异必须显式 `revision = 既有 + 1` + `override`（否则 fail-closed，**绝不静默覆盖**，历史全部保留）；`build_approved_intake_list` 在**当前**扫描结果上**重新验证**每条批准（失效 → `CANDIDATE_MISSING` / `PREFLIGHT_NOT_PASSING` / `SYNTHETIC_EVIDENCE` / `EVIDENCE_INCONSISTENT`）；`run_review` 默认只读，只有显式 `out_path` 才先取 GOLD-010 的**单实例锁**再原子落盘 ledger（复用 GOLD-009 的 `atomic_write_text`），`approved_out_path` 才写批准清单）+ `scripts/evidence_review.py`（`--inbox-dir` 必填、`--ledger` 只读、`--out` 唯一 ledger 写开关、`--approved-out` 批准清单、`--decision` / `--fingerprint` / `--reviewer` / `--reason-code` / `--note` / `--reviewed-at` / `--revision` / `--override` / `--lock` / `--as-of` / `--json`；退出码 `0` 决策已记录（或幂等重复）/ `2` 参数或词表错误 / `3` inbox 或输出不可用（含 `--out` 写进 inbox 的拒绝）/ `4` ledger 损坏、决策冲突或目标不满足门禁（fail-closed，零写入）/ `5` 只读运行且无仍成立的批准（预期 BLOCKED）/ `6` 锁冲突，失败路径 stdout 为空、stderr 脱敏）；`src/evidence/inbox.py` 的路径守护公开为 `ensure_outside_inbox` 供复核层复用**同一**口径（行为不变）；`src/evidence/__init__.py` 导出新 API；新增 **62 项**测试（单元 52 + 集成 10，含真实子进程 CLI 冒烟；全部临时目录、零网络、零数据库；覆盖 approve / reject / needs_changes 门禁、受控词表、幂等、冲突必须显式 revision + override、内容变化 / 候选消失 / 预检回退导致批准失效、ledger 篡改与断链、原子写与多线程并发、锁冲突、脱敏、复核元数据不得冒充证据时间、源码守卫）；登记 **TD-54**；**未解除** `PHASE3_3_DATA`（人工批准只是预审，落库仍须 `evidence_operator workflow --no-dry-run`，Phase 切换仍须 L3 人工 Gate） |
+| 最终写入前 intake plan 门禁（2026-09-23，GOLD-013） | 新增 `src/evidence/intake_plan.py`（**纯本地只读**的 approved-for-explicit-intake **intake plan** 与最终写入前门禁：`IntakePlanStatus` / `PlanVerificationCode`（14 个稳定原因码）/ `PlanViolation` / `PlanEntry` / `OperatorHandoffStep` / `ApprovedListDocument`（批准清单严格只读视图：结构自洽 + 安全字段与 `approval_scope` 不可被削弱 + 拒绝任何证据时间字段）/ `IntakePlan`（内容级 `plan_id`、`handoff` 字符串模板、四个安全字段 + `auto_intake_allowed` / `writes_database` 恒为 false 硬编码）；`load_approved_intake_list` / `verify_intake_plan_inputs` / `build_intake_plan`（**复用** GOLD-012 的 `build_approved_intake_list` 做重新验证，**不复制、不降低**任何资格规则）/ `compute_plan_id`（只由策略块 + 批准条目 + ledger 最新决策摘要派生，**不含** `generated_at`）/ `intake_plan_handoff`（每个证据文件一条显式命令模板，必带 `--no-dry-run` 与显式 `--input`）/ `run_intake_plan`（默认只读；只有显式 `out_path` 才先取 GOLD-010 单实例锁再原子落盘计划）/ `render_intake_plan_summary` / `exit_code_for`）+ `scripts/evidence_intake_plan.py`（`--inbox-dir` / `--ledger` / `--approved-list` 必填、`--out` 唯一写开关、`--lock` / `--as-of` / `--json`；**没有**任何 intake / `--no-dry-run` 参数；退出码 `0` 有仍成立的批准 / `2` 参数 / `3` inbox 或输出不可用（含写进 inbox 的拒绝）/ `4` 清单或 ledger 损坏被篡改或核验不通过（fail-closed，零写入）/ `5` 无仍成立的批准（预期 BLOCKED）/ `6` 锁冲突）；fail-closed 覆盖 stale 指纹 / 候选消失 / preflight 回退 / review override / approved-list tamper / synthetic evidence / 计数与失效集合不一致 / 计划时间早于批准 / 损坏 state；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除 / 改写原始 evidence、零网络、零新增依赖 / migration**；`src/evidence/__init__.py` 导出新 API；新增 **57 项**测试（单元 47 + 集成 10，含真实子进程 CLI 冒烟，全部临时目录 / 零网络 / 零数据库）；登记 **TD-55**；**未解除** `PHASE3_3_DATA`（计划 ≠ 资格，落库仍须人工**显式** `evidence_operator workflow --no-dry-run` + `handoff` / `recheck` + L3 人工 Gate） |
+
