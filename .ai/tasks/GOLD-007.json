@@ -1,0 +1,48 @@
+{
+  "task_id": "GOLD-007",
+  "type": "BLOCKER_TOOLING",
+  "title": "完善授权 Evidence Operator 工作流与安全导入闭环",
+  "max_attempts": 3,
+  "goal": "PHASE3_3_DATA 仍为外部/人工证据 blocker。不得进入 Phase 3.4。本任务只完善该 blocker 的最后一段工程自动化：把 GOLD-005/006 的 evidence template、preflight、explicit intake、quarantine inspection、qualification recheck 串成可重复且默认安全的 operator workflow，并评估/复用现有 import_real_posts 作者归属链，减少真实授权证据到达后的人工操作错误。没有真实授权数据时必须保持 BLOCKED。",
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-006 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 与最近 commits/diff。",
+    "复用现有 src/evidence 与 scripts/evidence_readiness.py，不复制第二套资格规则，不修改 src/alpha/evidence_gate.py 阈值。",
+    "提供一个 operator-safe workflow/CLI，将 template/preflight/quarantine summary/explicit intake/recheck 串联；默认 dry-run、零网络、零写入，真实写入必须显式 opt-in。",
+    "写入前必须再次验证 authorization、published_at/collected_at/availability 与 permits_* 证据；任何缺失、synthetic/example/mock、身份冲突记录只能隔离，不得进入 qualification ledger。",
+    "评估现有 scripts/import_real_posts.py 的作者归属链是否可安全复用；若复用，仅允许已通过 Evidence Gateway 的 Author evidence 进入后续作者链，不得从普通 CSV 或历史样本绕过 gateway。若现有 schema/接口不适合，记录明确技术债而非新增 migration。",
+    "operator 输出应给出 accepted/quarantined/duplicate/conflict/not_oos_eligible、reason codes、Author/News remaining gap，并生成可人工复核的隔离摘要；不得输出正文、token/API key/Authorization/完整 source config 等敏感信息。",
+    "保证重复 dry-run 与重复显式 intake 幂等；同一 evidence identity 不得重复计入资格，冲突不得静默覆盖。",
+    "增加端到端测试：模板/示例永不入库、未授权/时间证据不足隔离、重复导入幂等、identity conflict、Author 归属链安全边界、News coverage/source-share 报告、敏感字段脱敏。测试 100% Mock/临时数据库/临时文件且禁止联网。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，清晰写明真实数据仍需业务方提供和人工核验；无真实合格 evidence 时 PHASE3_3_DATA 必须保持 BLOCKED。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/monitoring/**", "src/processors/**", "scripts/evidence_*.py", "scripts/intake_evidence.py", "scripts/import_real_posts.py", "tests/unit/**", "tests/integration/**", "examples/evidence/**", "docs/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".env", "database/migrations/**", "src/alpha/**"]
+  },
+  "constraints": [
+    "不新增第三方依赖，不新增或修改 migration/schema。",
+    "不联网抓取 Author/News，不主动获取任何未确认授权来源。",
+    "不伪造 published_at、collected_at、effective_at、availability 或授权证据。",
+    "不使用 Mock/模板/示例/普通历史 CSV 解除 PHASE3_3_DATA。",
+    "不降低 Author>=30、News>=200、coverage>=90 天、单源<=40% 等既有资格阈值。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成或提交真实交易订单。",
+    "保持 LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "测试不得联网。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在默认 dry-run 的单入口 operator workflow，可安全串联 preflight/intake/quarantine/recheck。",
+    "显式写入前重复执行完整 Evidence Gateway 校验，未授权/合成/时间或 availability 不合格记录无法进入 qualification ledger。",
+    "重复导入幂等，identity conflict 不覆盖历史并有稳定 reason code。",
+    "若接入 Author 归属链，只能消费已通过 gateway 的 evidence；普通 CSV 不可绕过。",
+    "输出可量化 Author/News remaining gap 和隔离原因，且敏感字段不泄漏。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖、migration/schema、未授权采集、Phase 3.4 或实盘代码。",
+    "没有真实合格 evidence 时 PHASE3_3_DATA 仍为 BLOCKED，文档不得宣称数据资格已通过。"
+  ]
+}
