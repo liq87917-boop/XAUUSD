@@ -1,0 +1,11 @@
+{
+  "task_id": "TEST-001",
+  "status": "failed",
+  "finished_at": "2026-09-22T09:50:56.576587",
+  "cline_exit_code": 1,
+  "changed_files": [],
+  "git_diff_stat": "",
+  "validations": [],
+  "cline_output_tail": "",
+  "cline_error_tail": "\u001b[31merror:\u001b[0m interactive mode requires a TTY (stdin/stdout must both be terminals)\n"
+}
