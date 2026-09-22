@@ -3,28 +3,28 @@
   "project": "XAUUSD",
   "branch": "cline-agent",
   "phase": "Phase 3",
-  "status": "BLOCKED",
-  "current_task": "GOLD-001",
+  "status": "DEVELOPING",
+  "current_task": "GOLD-001-R1",
   "last_completed_task": "TEST-002",
   "last_reviewed_task": "TEST-002",
   "blockers": [
-    {
-      "code": "CLINE_MODEL_QUOTA",
-      "detail": "Cline 当前模型 deepseek-v4.1-flash 触发每日免费额度限制",
-      "retryable": true
-    },
-    {
-      "code": "VALIDATION_PYTHON_ENV",
-      "detail": "任务 validation 使用 py，实际解析到未安装 pytest/ruff/mypy 的 Python 3.13",
-      "retryable": true
-    },
     {
       "code": "PHASE3_3_DATA",
       "detail": "Author/News 真实数据资格仍未达标，Phase 3.3 保持 BLOCKED",
       "retryable": false
     }
   ],
-  "next_action": "先解决 Cline 模型额度与项目 Python 解释器，再创建 GOLD-001-R1 恢复任务",
+  "resolved_blockers": [
+    {
+      "code": "CLINE_MODEL_QUOTA",
+      "resolved_by": "user_confirmed_model_available"
+    },
+    {
+      "code": "VALIDATION_PYTHON_ENV",
+      "resolved_by": "user_confirmed_project_venv_available"
+    }
+  ],
+  "next_action": "等待 GOLD-001-R1 由 Orchestrator 执行；完成后 Review task/result/commit/diff/tests",
   "human_gates": [],
   "invariants": [
     "LIVE_TRADING=false",
