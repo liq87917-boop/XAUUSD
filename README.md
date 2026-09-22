@@ -55,8 +55,8 @@ Strategy 事实，不进入实盘。
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
 采集时间不可信而隔离；新闻侧只有 30 条 / 56 天，最大单源占比 66.67%。详见
-`docs/experiments/Phase3_3_数据资格门禁报告.md` 与 TD-43。微博采集器仍须合规前提，Scheduler
-也尚未实现。
+`docs/experiments/Phase3_3_数据资格门禁报告.md` 与 TD-43。微博采集器仍须合规前提；
+Scheduler（30 分钟框架，TD-09）已交付，但**不改变**上述数据资格门禁结论。
 
 Phase 2 四张表由 migration 0005 建立，宏观 vintage 由 0006 建立，Phase 3 特征与 Regime
 四张表由 0007 建立。由于 Phase 3.2 / 3.3 门禁未通过，`alpha_models`、`alpha_signals`、
@@ -288,6 +288,32 @@ python scripts/collect_rss.py --to-db --no-dry-run --cache-mode readonly `
 3. 重跑幂等（零新增、行数不变）；
 4. **单源失败隔离**：新闻源 500 → 仅新闻 `FAILED`（`retry_count=3`），行情与宏观照常落库。
 
+### 30 分钟调度（`scripts/run_collector_scheduler.py`，TD-09）
+
+> 这是**研究数据采集服务**，不是实盘服务（`LIVE_TRADING=false` 仍是硬门禁）。
+
+调度核心在 `src/scheduler/`（只做调度：UTC 对齐确定性槽 + `job_runs` 幂等 +
+stale RUNNING/RETRYING 接管 + 单源构造/执行故障隔离），采集器注册与构造在
+`src/collectors/bootstrap.py`，两者严格解耦（核心无 provider URL / 解析逻辑）。
+
+```bash
+# 单轮：只执行"当前 UTC 30 分钟槽"一次（同槽重复执行不会重复采集）
+python -m scripts.run_collector_scheduler --once
+
+# 常驻：每个 30 分钟槽执行一次，Ctrl+C 正常退出
+python -m scripts.run_collector_scheduler --interval-minutes 30
+
+# 自定义"在途多久可接管"（默认 = 3 倍调度间隔，30 分钟 → 90 分钟）
+python -m scripts.run_collector_scheduler --stale-after-minutes 45
+```
+
+- 只读取 `sources`（`enabled=true` 且配置 `config_json["collector"]`）；各采集器仍自行强制
+  授权 / robots / 证书门禁，本 CLI **不做任何绕过**；
+- `job_runs.output_json` 只写白名单摘要（source / status / run_id / fetched / inserted /
+  duplicate / failed / skipped / retry_count / warnings），**不写** token / API key /
+  Authorization / 完整 source 配置；
+- 无新增依赖（仅标准库 `asyncio` / `time`）、无新增 migration / schema。
+
 ## 8. 数据模型
 
 ### 8.1 Phase 1（15 张表，migration 0001 ~ 0004）
@@ -403,7 +429,7 @@ python scripts/collect_rss.py --to-db --no-dry-run --cache-mode readonly `
 
 - TD-02：PostgreSQL 上跑通采集写路径（`python -m scripts.phase1_pipeline_report --db-url ... --migrate`）；
 - TD-01：本地配置 `FRED_API_KEY` 后做一次单 series 真实冒烟；
-- TD-09 / TD-11：Scheduler（30 分钟框架）与独立 Processor 层（含 TD-03 的 4h 聚合）；
+- TD-11：独立 Processor 层（含 TD-03 的 4h 聚合）；TD-09 已解除（见 §7「30 分钟调度」）；
 - TD-05 / TD-07：`econ_calendar_collector` 与宏观预期值补全；TD-10：API 与 Dashboard。
 
 ## 11. 强制约束速查（团队决定）

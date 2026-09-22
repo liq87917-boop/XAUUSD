@@ -1,4 +1,5 @@
 import atexit
+import contextlib
 import json
 import logging
 import os
@@ -6,11 +7,9 @@ import shutil
 import subprocess
 import sys
 import time
-
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-
 
 # ============================================================
 # 基础目录
@@ -221,7 +220,6 @@ def read_json(
 
         with open(
             path,
-            "r",
             encoding="utf-8"
         ) as f:
 
@@ -562,11 +560,7 @@ def sync_repository():
 
         return False
 
-    if not push_pending_commits():
-
-        return False
-
-    return True
+    return push_pending_commits()
 
 
 # ============================================================
@@ -635,13 +629,9 @@ def clear_task_state(
 
     if path.exists():
 
-        try:
+        with contextlib.suppress(OSError):
 
             path.unlink()
-
-        except OSError:
-
-            pass
 
 
 # ============================================================
@@ -693,7 +683,6 @@ def load_task(
 
     with open(
         task_file,
-        "r",
         encoding="utf-8"
     ) as f:
 

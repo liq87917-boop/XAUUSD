@@ -46,10 +46,10 @@
 | TD-06 | P1 | `weibo_collector` 未实现（Phase 2 主体） | Phase 2 |
 | TD-07 | P2 | `macro_events.forecast_value` / `previous_value` 恒为 NULL | 随 TD-05 |
 | TD-08 | P1 | 生产 RSS / 行情备用源未配置（`feeds` 为空、Stooq 关闭） | 上线前运维配置 |
-| TD-09 | P0 | Scheduler（每 30 分钟任务框架）未实现 | Phase 1 收尾轮 |
+| TD-09 | ✅ 已解除（2026-09-22） | ~~Scheduler（每 30 分钟任务框架）未实现~~ → `src/scheduler/`（UTC 对齐确定性 30 分钟槽 + `job_runs` 幂等 + stale RUNNING/RETRYING 接管 + 单源构造/执行故障隔离）+ `scripts/run_collector_scheduler.py`（`--once` / 常驻循环，Ctrl+C 正常退出）；复用现有 `job_runs`，无新 migration/schema；证据见 `PROGRESS_LOG.md` 第六十五轮（新增 60 项 Mock 测试，全量 pytest / ruff / mypy 通过） | 已修 |
 | TD-10 | P1 | Dashboard / API 未实现（Phase 1 交付物中的监控与查询页面） | Phase 1 收尾轮 / Phase 2 |
 | TD-11 | P1 | Processor 层未独立建立（normalize/dedup/timezone 目前内嵌在采集器内） | Phase 1 收尾轮 |
-| TD-12 | P2 | `processed_items` / `job_runs` / `data_versions` / `audit_logs` 表已建但无写入路径 | 随 TD-09 / TD-11 |
+| TD-12 | P2（部分解除） | `job_runs` 已由 30 分钟 Scheduler 写入（TD-09）；`processed_items` / `data_versions` / `audit_logs` 仍无写入路径 | 随 TD-11 |
 | TD-13 | P2 | `raw_media` 无下载器（图片二进制未落地，`storage_uri` 写入路径未验证） | Phase 2（微博图片） |
 | TD-14 | P2 | 依赖仅声明下界，无 lock 文件（可复现构建依赖 pip 解析） | 择期 |
 | TD-15 | ✅ 已解除 | 仓库已初始化 Git；2026-09-17 已在 W0-5 前创建本地数据库快照，代码检查点待本轮全量门禁通过后建立 | 本轮收尾 |

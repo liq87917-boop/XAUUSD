@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -30,7 +31,7 @@ def _load_env() -> None:
                 os.environ.setdefault(key.strip(), value.strip())
 
 
-def _rows(frame):
+def _rows(frame: Any) -> list[Any]:
     return frame.to_dict("records") if hasattr(frame, "to_dict") else list(frame)
 
 

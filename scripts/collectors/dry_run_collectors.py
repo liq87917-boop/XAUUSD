@@ -18,6 +18,7 @@ from database.models.enums import SourceType
 from database.seeds import seed_instruments
 from database.session import session_scope
 from src.collectors.akshare_gold import AkshareGoldCollector
+from src.collectors.base import BaseCollector
 from src.collectors.dbnomics_macro import DbnomicsMacroCollector
 from src.collectors.opennews import OpenNewsCollector
 from src.collectors.transport import AiohttpTransport
@@ -28,7 +29,7 @@ WINDOW = CollectWindow(
 )
 
 
-def _plan() -> list[tuple[str, Source, object]]:
+def _plan() -> list[tuple[str, Source, BaseCollector]]:
     akshare = Source(
         name="smoke_akshare", source_type=SourceType.MARKET, base_url="",
         config_json={"collector": "akshare_gold"},
