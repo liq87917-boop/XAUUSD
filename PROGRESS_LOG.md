@@ -2471,3 +2471,68 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 
 
 
+## 第七十二轮（2026-09-22）：GOLD-008 —— Evidence 人工交接包与可复核验收报告
+
+### 1. 交付内容
+
+- **只读交接包**（`src/evidence/handoff.py`）：
+  - `build_handoff_report(readiness, *, batch=None, quarantine_reason_counts=None)`：
+    **复用** `src.monitoring.evidence_readiness.EvidenceReadinessReport`
+    （阈值来自 `src.alpha.evidence_gate`），把当前真实库内资格状态重排为确定性交接包，
+    **不新造第二套阈值算法**；
+  - `ScopeGap`：Author / News 的 `eligible` / `required` / `remaining`、`certified` /
+    `not_oos_eligible`、`coverage_days` 缺口、`source_share_evaluable` 与 `remaining_checks`；
+  - `ChecklistItem`：六类人工证据 checklist（authorization / provenance / published_at /
+    collected_at / availability / identity），逐项给出契约字段、机械校验范围与
+    `human_review_required=true`（机械校验 ≠ 法律效力核验）；
+  - `ExcludedEvidence`：模板 / 示例（`SYNTHETIC_EVIDENCE`）、Mock / 演练语料、
+    普通历史 CSV（`NOT_CERTIFIED`）、缺独立 `available_at`（`AVAILABILITY_UNPROVEN`）
+    一律 `counts_toward_eligibility=false`（醒目标记不计资格）；
+  - 稳定 JSON（`sort_keys`）+ 人类可读 Markdown（状态 / 缺口 / 隔离原因码 / checklist /
+    不计资格 / 口径边界）。
+- **CLI** `scripts/evidence_handoff.py`：
+  - **默认只读 / 零网络 / 零写入**：不传 `--out` 只打印 stdout；`--input` 只做 dry-run
+    （`session.rollback()` 显式回滚，零落库），**没有** `--no-dry-run`，不存在自动 intake；
+  - 唯一写文件开关为 `--out`（显式路径），并拒绝把报告写到输入文件上；
+  - **诚实 blocker 状态**：`blocker_active` / `human_gate_required` 恒 true，
+    `data_qualification_passed` / `phase_transition_allowed` 恒 false；
+    未达标 → `status=BLOCKED` / `ready_for_human_review=false` / 退出码 `5`；
+    量化达标 → 最多 `status=BLOCKED_PENDING_HUMAN_REVIEW` / `ready_for_human_review=true` /
+    退出码 `0`，**仍不**自动切 Phase（L3 人工确认）；
+  - 退出码 `0` / `2`（参数或输入错误）/ `3`（无数据行）/ `5`（仍 BLOCKED）；
+  - **脱敏**：只输出计数 / 阈值 / 缺口 / 稳定原因码 / 已脱敏来源名 / 时间，
+    正文与输入额外列值不进入输出。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **16 项**测试（全部 Mock / 临时文件 / SQLite，零网络，未新增依赖）：
+  - `tests/unit/test_evidence_handoff.py` **10**：空库诚实 BLOCKED 与缺口量化、
+    部分达标（News PASS / Author BLOCKED）仍 BLOCKED、达阈值仅 `ready_for_human_review=true`、
+    checklist 六类齐全且契约字段不漂移、不计资格项一律 false、稳定排序 / 确定性 JSON、
+    敏感字段脱敏、Markdown 章节完整；
+  - `tests/integration/test_evidence_handoff_integration.py` **6**：空库退出码 BLOCKED + 零写入、
+    `--out` 是唯一写文件开关（默认不落盘）、候选文件 dry-run 给出隔离原因码且零落库、
+    达标（Mock 证据块入库）仍要求人工复核、敏感值不泄漏、参数 / 输入错误退出码。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **1849 passed / 1 skipped in 228.51s**
+    （唯一 skip 为 `tests/unit/test_text_similarity.py` 的「本环境已安装 jieba」分支）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 154 source files`。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增 / 修改 migration 与 schema、未联网、未抓取任何站点、未触碰 `.env`；
+- `src/alpha/**`（含阈值 `evidence_gate.py`）、`src/monitoring/**`、`src/scheduler/**`、
+  `src/collectors/**` 未改动（只**复用**其阈值与口径）；`scripts/import_real_posts.py` 未改造；
+- **未解除** `PHASE3_3_DATA`：所有输出持续显式 `blocker_active=true` /
+  `human_gate_required=true`，`data_qualification_passed=false`，未进入 Phase 3.4，
+  未生成任何交易信号或订单；`LIVE_TRADING=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；
+- 同步 `README.md`（§1 交付表 + §7 新章节 + §10 说明）与 `TECH_DEBT.md`
+  （新增 TD-50 登记行 + 明细 + 变更日志行）。
+- **遗留 / 下一步**：仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 BLOCKED。本工具**只减少
+  人工交接摩擦**，业务方仍须按 `evidence-intake-v1` 提供真实授权的 Author / News 数据并
+  **人工核验**授权与历史可用性，再用 `scripts.evidence_operator workflow --no-dry-run`
+  显式落库，并以 `scripts.evidence_handoff` / `recheck` 复核量化门槛；Phase 切换仍需 L3 人工确认。
+

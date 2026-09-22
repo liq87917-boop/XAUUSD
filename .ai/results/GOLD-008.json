@@ -1,0 +1,75 @@
+{
+  "task_id": "GOLD-008",
+  "title": "建立 Phase 3.3 Evidence 人工交接包与可复核验收报告",
+  "status": "completed",
+  "finished_at": "2026-09-22T22:33:02+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    "?? scripts/evidence_handoff.py",
+    "?? src/evidence/handoff.py",
+    "?? tests/integration/test_evidence_handoff_integration.py",
+    "?? tests/unit/test_evidence_handoff.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md          | 65 ++++++++++++++++++++++++++++++++++++++++++++++++\n README.md                | 55 +++++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md             | 44 ++++++++++++++++++++++++++++++++\n src/evidence/__init__.py | 30 ++++++++++++++++++++++\n 4 files changed, 191 insertions(+), 3 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-22T22:18:47+08:00",
+      "finished_at": "2026-09-22T22:33:02+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 95,
+      "duration_ms": 631070,
+      "usage": {
+        "inputTokens": 15835550,
+        "outputTokens": 90467,
+        "cacheReadTokens": 15682944,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.124219932
+      },
+      "cline_final_text": "Submission recorded (verified): GOLD-008 已完成并通过全部验证。\n\n完成内容：\n- 新增只读交接包 `src/evidence/handoff.py`：`build_handoff_report()` 只消费现有 `EvidenceReadinessReport`（阈值同源于 `src.alpha.evidence_gate`），不新造第二套阈值算法；提供 `ScopeGap`（Author/News eligible/required/remaining、coverage gap、source_share_evaluable、remaining_checks）、六类人工证据 checklist（authorization/provenance/published_at/collected_at/availability/identity，含契约字段与 human_review_required=true）、`ExcludedEvidence`（模板/Mock/历史 CSV/缺 available_at 一律 counts_toward_eligibility=false）、稳定 JSON（sort_keys）+ 人类可读 Markdown。\n- 新增 CLI `scripts/evidence_handoff.py`：默认只读/零网络/零写入（不传 --out 仅打印 stdout）；--input 仅 dry-run 且显式 rollback（无 --no-dry-run，不自动 intake）；--out 为唯一写文件开关并拒绝写入输入文件；blocker_active/human_gate_required 恒 true，data_qualification_passed/phase_transition_allowed 恒 false；未达标 status=BLOCKED/ready_for_human_review=false 且退出码 5，量化达标最多 BLOCKED_PENDING_HUMAN_REVIEW/ready_for_human_review=true 且退出码 0，绝不自动切 Phase。\n- 修改 src/evidence/__init__.py 导出；更新 README（§1 交付表 + §7 新章节 + §10）、TECH_DEBT（TD-50 登记行 + 明细 + 变更日志）、PROGRESS_LOG（第七十二轮）。\n- 新增测试：tests/unit/test_evidence_handoff.py（10 项）+ tests/integration/test_evidence_handoff_integration.py（6 项），100% Mock/临时 SQLite/临时文件、零网络。\n\n验证证据（项目 .venv 实测）：\n- pytest tests -q → 1849 passed / 1 skipped in 228.51s\n- ruff check . → All checks passed!\n- mypy config database src scripts → Success: no issues found in 154 source files\n- 真实 CLI 冒烟（临时 SQLite + 派生 schema，DATABASE_URL 指向临时库）：退出码 5，JSON 显示 status=BLOCKED、blocker_active/human_gate_required=True、data_qualification_passed/phase_transition_allowed=False、author 0/30/30、news 0/200/200、coverage remaining 90、source_share_evaluable=False、checklist 14 项、excluded 4 项；数据库 raw_items=0 / sources=0（零写入）；默认仅打印 stdout，加 --out 才落盘（文件已生成）。\n- git status --porcelain 仅列出允许路径（M PROGRESS_LOG.md/README.md/TECH_DEBT.md/src/evidence/__init__.py；?? scripts/evidence_handoff.py/src/evidence/handoff.py/两个测试文件），未触碰 .ai/tasks、.ai/results、.ai/PROJECT_STATE.json、.env、migrations、src/alpha。\n\nAcceptance：全部满足（只读默认 dry-run 入口复用现有口径；可量化缺口/coverage/source-share/隔离原因 + 明确 checklist；敏感字段与正文不入输出且有回归测试；未达标恒 BLOCKED/ready=false、达标最多 ready_for_human_review=true 不自动切 Phase；全量 pytest/ruff/mypy 全绿；无新增依赖/migration/schema/未授权采集/Phase 3.4/实盘代码；文档明确 PHASE3_3_DATA 仍需真实授权 evidence 与人工 Gate）。\n\n遗留：PHASE3_3_DATA 仍 BLOCKED（真实授权证据需业务方提供 + 人工核验），本工具只减少人工交接摩擦；无阈值告警推送（与 TD-46 同源）。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        "?? scripts/evidence_handoff.py",
+        "?? src/evidence/handoff.py",
+        "?? tests/integration/test_evidence_handoff_integration.py",
+        "?? tests/unit/test_evidence_handoff.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md          | 65 ++++++++++++++++++++++++++++++++++++++++++++++++\n README.md                | 55 +++++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md             | 44 ++++++++++++++++++++++++++++++++\n src/evidence/__init__.py | 30 ++++++++++++++++++++++\n 4 files changed, 191 insertions(+), 3 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  3%]\n........................................................................ [  7%]\n........................................................................ [ 11%]\n........................................................................ [ 15%]\n........................................................................ [ 19%]\n........................................................................ [ 23%]\n........................................................................ [ 27%]\n........................................................................ [ 31%]\n........................................................................ [ 35%]\n........................................................................ [ 38%]\n........................................................................ [ 42%]\n........................................................................ [ 46%]\n........................................................................ [ 50%]\n........................................................................ [ 54%]\n........................................................................ [ 58%]\n........................................................................ [ 62%]\n........................................................................ [ 66%]\n........................................................................ [ 70%]\n........................................................................ [ 73%]\n........................................................................ [ 77%]\n........................................................................ [ 81%]\n........................................................................ [ 85%]\n........................................................................ [ 89%]\n........................................................................ [ 93%]\n........................................................................ [ 97%]\n.....s............................................                       [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n1849 passed, 1 skipped in 218.98s (0:03:38)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 154 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

@@ -58,6 +58,8 @@ Strategy 事实，不进入实盘。
 | **证据就绪度 / 一键资格复核入口**（Author / News operator 模板，示例行显式标记 `record_kind=example`、`is_mock=true`，导入判 `SYNTHETIC_EVIDENCE` 隔离、永不计入台账；默认只读 preflight 量化 `accepted/quarantined/duplicate/conflict/not_oos_eligible` 与 Author/News 的 remaining gap；`recheck` 一键串联只读台账与 Phase 3.3 qualification report，**不解除** `PHASE3_3_DATA`） | `src/evidence/templates.py`、`src/monitoring/evidence_readiness.py`、`scripts/evidence_readiness.py`、`examples/evidence/` |
 | **单入口 Evidence Operator 工作流**（GOLD-007：`template → preflight → quarantine → intake → recheck` 串联；默认 dry-run / 零网络 / 零写入，写入前二次完整 Evidence Gateway 校验 + 写入门禁，隔离行永不进台账；输出 Author/News remaining gap 与稳定原因码） | `src/evidence/workflow.py`、`scripts/evidence_operator.py` |
 | **gateway-only 作者归属链**（GOLD-007：只消费 `evidence-intake-v1` + `scope=author` + `oos_eligible=true` 的记录；普通 CSV / 历史样本无证据块，**无法绕过** gateway；身份冲突跳过且不覆盖；新建 `author_accounts` 一律 `enabled=false`） | `src/evidence/author_chain.py`、`scripts/evidence_operator.py` |
+| **Evidence 人工交接包**（GOLD-008：只读 / 默认 dry-run 的 `scripts/evidence_handoff.py`；机器可读 JSON + 人类可读 Markdown，量化 Author/News `eligible`/`required`/`remaining`、coverage gap、source-share 可评估性与主要隔离原因码；明确人工证据 checklist（authorization / provenance / published_at / collected_at / availability / identity），模板 / Mock / 示例醒目标记为不计资格；`data_qualification_passed` / `phase_transition_allowed` 恒为 false，**只减少人工交接摩擦、不解除** `PHASE3_3_DATA`） | `src/evidence/handoff.py`、`scripts/evidence_handoff.py` |
+
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
 采集时间不可信而隔离；新闻侧只有 30 条 / 56 天，最大单源占比 66.67%。详见
@@ -589,6 +591,50 @@ Operator 工作流（全部默认只读、默认零网络）：
   `active=true`；本工具只列出缺口与隔离原因，不修改阈值、不放宽授权 / 时间 / availability 规则。
   真实数据仍需**业务方提供**并**人工核验**。
 
+### Evidence 人工交接包（`scripts/evidence_handoff.py`，GOLD-008）
+
+> **合规红线**：本入口只**只读**地把当前资格状态与人工证据口径交给 operator；不抓取站点、
+> 不自动 intake、不修改数据库、不降低任何门槛。`blocker_active` / `human_gate_required`
+> 恒为 true，`data_qualification_passed` / `phase_transition_allowed` 恒为 false；
+> 无真实合格授权证据时 `PHASE3_3_DATA` 保持 **BLOCKED**。
+
+```powershell
+# 默认：只读台账 + 只打印 stdout（零写入、零网络）
+.\.venv\Scripts\python.exe -m scripts.evidence_handoff --json
+.\.venv\Scripts\python.exe -m scripts.evidence_handoff --as-of 2026-09-22T12:00:00+00:00
+
+# 追加候选文件 dry-run 隔离原因计数（仍零写入）
+.\.venv\Scripts\python.exe -m scripts.evidence_handoff --scope news `
+  --input logs/evidence/news.csv --json
+
+# 唯一写文件路径：必须显式给出 --out
+.\.venv\Scripts\python.exe -m scripts.evidence_handoff --json `
+  --out logs/evidence/handoff.json
+```
+
+- **机器可读 JSON**：含 `blocker_code` / `blocker_active` / `human_gate_required` / `status` /
+  `quantified_thresholds_met` / `ready_for_human_review` / `thresholds` / `author` / `news` /
+  `checklist` / `excluded_evidence` / `quarantine_reason_counts` / `batch` / `notes`；
+- **缺口量化**：Author / News 的 `eligible` / `required` / `remaining`、`coverage_days` 缺口与
+  `source_share_evaluable`（无 OOS eligible 记录时**不得判 PASS**）；口径完全复用
+  `src.monitoring.evidence_readiness`（阈值来自 `src.alpha.evidence_gate`），**不复制第二套算法**；
+- **人工证据 checklist**：六大类 authorization / provenance / published_at / collected_at /
+  availability / identity，逐项给出契约字段与机械校验范围，且每项 `human_review_required=true`
+  （机械校验**不等于**法律效力核验）；
+- **明确不计资格**：模板 / 示例（`SYNTHETIC_EVIDENCE`）、Mock / 演练语料、普通历史 CSV
+  （`NOT_CERTIFIED`）、缺独立 `available_at`（`AVAILABILITY_UNPROVEN`）一律
+  `counts_toward_eligibility=false`，醒目标记**不得**用于达标；
+- **默认零写入**：不传 `--out` 时只打印 stdout；`--input` 只做 dry-run（显式回滚，零落库），
+  本命令**没有** `--no-dry-run`，不存在自动 intake；
+- **退出码**：`0` 量化门槛达标（**仍需人工 Gate**，不代表数据资格通过）/ `2` 参数或输入错误 /
+  `3` 输入没有数据行 / `5` 仍未达标（诚实保持 BLOCKED）；
+- **脱敏**：只输出计数 / 阈值 / 缺口 / 稳定原因码 / 已脱敏来源名 / 时间，绝不输出正文、
+  token / API key / Authorization 或完整 source config；
+- **测试**：`tests/unit/test_evidence_handoff.py`、
+  `tests/integration/test_evidence_handoff_integration.py`（全部 Mock / 临时文件 / SQLite，零网络）；
+- **仍未解决（保持 BLOCKED）**：本工具**只减少人工交接摩擦**，不解除 `PHASE3_3_DATA`；
+  真实授权证据仍需业务方提供 + 人工核验。
+
 ## 8. 数据模型
 
 
@@ -713,10 +759,13 @@ Operator 工作流（全部默认只读、默认零网络）：
   （其只读前置观测层已由 GOLD-004 交付，见 §7「运行健康度与 Phase 3.3 数据资格观测」与
   `TECH_DEBT.md` TD-46 的剩余边界）。
 - **TD-43 / TD-44 / TD-45 仍未解除**：证据接收入口已由 GOLD-005 交付并可用，
-  就绪度 / 一键复核工具已由 GOLD-006 交付（见 §7「授权证据接收入口」与
-  §7「证据就绪度与一键资格复核」），但**仓库内没有任何经该入口认证的真实授权证据**，
+  就绪度 / 一键复核工具已由 GOLD-006 交付，单入口 operator workflow 与 gateway-only
+  作者链已由 GOLD-007 交付，人工交接包已由 GOLD-008 交付（见 §7「授权证据接收入口」、
+  §7「证据就绪度与一键资格复核」、§7「单入口 Evidence Operator 工作流」与
+  §7「Evidence 人工交接包」），但**仓库内没有任何经该入口认证的真实授权证据**，
   因此 `PHASE3_3_DATA` 保持 `active=true`；下一步是业务方按 `evidence-intake-v1` 契约
-  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 与 TD-48）。
+  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 / TD-48 / TD-49 / TD-50）。
+  GOLD-007 / GOLD-008 的工具**只减少人工交接摩擦**，不解除该 blocker。
 
 ## 11. 强制约束速查（团队决定）
 

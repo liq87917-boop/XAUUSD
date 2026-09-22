@@ -87,6 +87,8 @@
 | TD-47 | P0（证据入口边界，仍 BLOCKED） | GOLD-005 已交付**合规授权数据 Evidence Intake Gateway**（`src/evidence/` + `scripts/intake_evidence.py`，契约 `evidence-intake-v1`；证据见 `PROGRESS_LOG.md` 第六十九轮）。**剩余**：①仓库内**没有任何**经该入口认证的真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45 未解除）；②入口只写 `raw_items` + `processed_items`，**不**创建 `authors` / `author_accounts` / `author_posts`（作者链接入仍走既有授权门禁 + 导入流程），Author Alpha 的可信标签仍需真实数据 + 标注；③`available_at` 证据的**法律/提供方真实性**由人工核验，程序只校验字段齐全与时间自洽；④`evidence_intake` 子报告只在资格报告里展示，尚未做告警 | 业务方按契约提交已授权数据 + 人工核验授权后，再看是否达标；若需自动化的作者链落库，另立任务并评估是否复用 `import_real_posts.py` 口径 |
 | TD-48 | P0（证据就绪度 / 一键复核的剩余边界） | GOLD-006 已交付 operator 证据模板（`examples/evidence/`，示例行显式标记 `record_kind=example`、`is_mock=true`）+ 只读 preflight/readiness（`src/monitoring/evidence_readiness.py`）+ 一键 `recheck` CLI（`scripts/evidence_readiness.py`，证据见 `PROGRESS_LOG.md` 第七十轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47 未解除），工具只报告缺口、不放行；②模板 / 示例行判 `SYNTHETIC_EVIDENCE` 隔离，**不能**用于达标；③readiness 只覆盖证据入口台账口径（Author 可信 eligible 帖子数；News 条数 / 覆盖天数 / 单源占比），不含作者链落库与人工标注；④无告警推送（与 TD-46 同源） | 业务方按契约提交已授权数据 + 人工核验后重跑 `recheck`；若需自动作者链落库，另立任务评估复用 `import_real_posts.py` 口径 |
 | TD-49 | P0（证据 operator 工作流 / 作者链的剩余边界，仍 BLOCKED） | GOLD-007 已交付**单入口 operator workflow**（`scripts/evidence_operator.py` + `src/evidence/workflow.py`：`template → preflight → quarantine → intake → recheck`，默认 dry-run / 零网络 / 零写入，写入前二次完整 Evidence Gateway 校验 + 写入门禁与脱敏隔离摘要；证据见 `PROGRESS_LOG.md` 第七十一轮）与 **gateway-only 作者归属链**（`src/evidence/author_chain.py`：只消费 `raw_json.evidence` 带 `evidence-intake-v1` + `scope=author` + `oos_eligible=true` 的记录；普通 CSV / 历史样本没有证据块，**无法绕过** gateway；身份冲突跳过且不覆盖；新建 `author_accounts` 一律 `enabled=false`）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47/48 未解除），`blocker_active` / `human_gate_required` 恒为 true；②`scripts/import_real_posts.py` 仍是**历史 W0-4 / 演练用普通 CSV 入口**（`raw_json` 只写 `import_kind=manual_real_corpus`，无证据块），其口径**不**适用于 Phase 3.3 资格证据，作者链也不会消费它（未新增 migration，沿用既有 `authors` / `author_accounts` / `author_posts` schema）；③作者链只建立归属，不做观点抽取 / 人工标注，也未接入任何采集；④无告警推送（与 TD-46 同源） | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 + 人工核验后重跑 `scripts.evidence_operator workflow`；作者链落库后仍需真实标注才能产生可信标签 |
+| TD-50 | P0（人工交接包，仍 BLOCKED） | GOLD-008 已交付**只读 / 默认 dry-run 的 Evidence 人工交接包**（`scripts/evidence_handoff.py` + `src/evidence/handoff.py`：稳定 JSON + 人类可读 Markdown，量化 Author/News `eligible`/`required`/`remaining`、coverage gap、source-share 可评估性、主要隔离原因码；六类人工证据 checklist（authorization / provenance / published_at / collected_at / availability / identity）；模板 / Mock / 示例 / 历史 CSV 醒目标记为**不计资格**；证据见 `PROGRESS_LOG.md` 第七十二轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47/48/49 未解除），`blocker_active` / `human_gate_required` 恒为 true，`data_qualification_passed` / `phase_transition_allowed` 恒为 false；②交接包**只降低人工交接摩擦**，量化达标时最多 `ready_for_human_review=true`，Phase 切换仍须 `DEVELOPMENT_PROTOCOL` 的 L3 人工确认；③`blocker_active` 需要在**人工 Gate** 完成并留下可审计留痕后才可能变化（当前工具不具备该能力）；④无告警推送（与 TD-46 同源） | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 + 人工核验授权与历史可用性，再重跑 `scripts.evidence_operator workflow` 与 `scripts.evidence_handoff` |
+
 
 
 
@@ -626,6 +628,47 @@
 
 ---
 
+### TD-50 Evidence 人工交接包的剩余边界（P0，2026-09-22，GOLD-008）
+
+- **已交付**：`src/evidence/handoff.py`（只读交接包：`ScopeGap` / `ChecklistItem` /
+  `ExcludedEvidence` / `EvidenceHandoffReport` + 稳定 JSON + Markdown 渲染）、
+  `scripts/evidence_handoff.py`（默认只读、默认零写入、默认零网络的 CLI）。
+- **关键保证（已由测试锁定）**：
+  1. **复用唯一口径**：缺口 / 阈值完全来自现有 `src.monitoring.evidence_readiness`
+     （阈值来自 `src.alpha.evidence_gate`：30 / 200 / 90 天 / 单源 40%），
+     **不复制第二套阈值算法**，也不修改任何阈值；
+  2. **只读 / 零网络 / 零写入**：CLI 不抓取站点、不绕过 robots / 条款 / 证书；
+     `--input` 只做 dry-run（显式回滚，零落库），**没有** `--no-dry-run`，不存在自动 intake；
+     不传 `--out` 时只打印 stdout；`--out` 拒绝指向输入文件；
+  3. **诚实 blocker 状态**：`blocker_active` / `human_gate_required` 恒为 true，
+     `data_qualification_passed` / `phase_transition_allowed` 恒为 false；
+     未达标时 `status=BLOCKED` / `ready_for_human_review=false`，
+     退出码为 `5`（BLOCKED）；量化达标时最多 `status=BLOCKED_PENDING_HUMAN_REVIEW` /
+     `ready_for_human_review=true`，退出码 `0`，**仍不**自动切 Phase；
+  4. **可量化交接**：Author / News 的 `eligible` / `required` / `remaining`、coverage gap、
+     `source_share_evaluable`（无 OOS eligible 记录时不得判 PASS）与主要隔离原因码计数
+     （候选文件 dry-run 时给出）；
+  5. **明确不计资格**：模板 / 示例（`SYNTHETIC_EVIDENCE`）、Mock / 演练语料、
+     普通历史 CSV（`NOT_CERTIFIED`）、缺独立 `available_at`（`AVAILABILITY_UNPROVEN`）
+     一律 `counts_toward_eligibility=false`；
+  6. **脱敏**：只输出计数 / 阈值 / 缺口 / 稳定原因码 / 已脱敏来源名 / 时间，
+     token / API key / Authorization 一律 `***`，正文与输入额外列值不进入输出。
+- **剩余边界（本条目跟踪）**：
+  1. **仍无真实授权证据**：库内 eligible 记录不足以达标 → `PHASE3_3_DATA` 保持
+     `active=true`（TD-43 / TD-44 / TD-45 / TD-47 / TD-48 / TD-49 未解除）；
+  2. **只减少人工交接摩擦**：本工具是**交接包**，不是资格判定器；量化达标也必须经
+     `.ai/DEVELOPMENT_PROTOCOL.md` 的 L3 人工确认才能改变 blocker / Phase；
+  3. **不产生真实证据**：模板、示例、Mock、历史 CSV 都不能用于达标；
+  4. **无告警**：没有缺口阈值告警推送（与 TD-46 同源）。
+- **解除条件**：业务方按 `evidence-intake-v1` 契约提交**已授权** Author / News 数据并经
+  人工核验落库（可用 `scripts.evidence_operator workflow --no-dry-run`），再由
+  `scripts.evidence_handoff` / `scripts.evidence_readiness.py recheck` 显示量化门槛达标，
+  且完成 **L3 人工 Gate**；届时才讨论解除 blocker。
+- **不变量**：工具永不联网、永不抓取、永不绕过 robots / 条款 / 证书；
+  永不因代码完成、模板或 Mock 测试解除 `PHASE3_3_DATA`。
+
+---
+
 ## 4. 已知限制（设计取舍，非缺陷）
 
 | 项 | 说明 | 依据 |
@@ -671,3 +714,4 @@
 | 最终交付（2026-09-13，全量 200 + 基线对比 + git 初始化） | ①**全量 200 条真实 API 运行**（`llm-deepseek-v6`）：人工子集核心四字段 **27.8% → 100%**（方向 100%、周期 0%→100%、止损 0%→100%、目标位 25%→100%）、信息类型 **40.7% → 87.4%**；逐格**修复 385 / 回归 14**；成本 **$0.0346**（180 次调用、缓存命中 93.8%），API 失败 0、解析失败 0、confidence 非法 0；②新增 `scripts/compare_extractor_baselines.py` + `tests/unit/test_baseline_comparison.py`（13 项）→《Phase 2 基线对比报告.md》（1000 格对齐、0 口径问题、含修复/回归逐格清单与 `docs/08 §5` PASS/FAIL）；③按人工最终裁决改判 `mock-post-0009` 金标准为 `TECHNICAL`（`provenance/reviewer` 留痕 + 改前版本归档）并把「短线思路 → `15m`」写入 `docs/10 §4.2`（**TD-27 关闭**）；④**登记 TD-28**（信息类型残余 17 格 = 驱动型文本 + 操作价位 + 阶梯缺 `NEWS` 级；路径 A/B 待一句话裁决）；⑤`git init` + 首次提交（`.gitignore` 覆盖 `.env`/`logs/`/`*.db`，提交前用 `git status --porcelain` 核对**无密钥、无数据、无缓存**入库）；测试 1099 → **1380 passed / 1 skipped**，`ruff` / `mypy`（67 files）全绿；未新增迁移、未改 schema、未新增依赖 |
 | 全量重跑 + 最终对比报告（2026-09-13，人工二次裁决「路径 B」） | ①`opinion-prompt-v7 → v13` 共 7 次迭代（每次都**重跑并留档**，见 `docs/experiments/Phase2_LLM_Prompt迭代对比_v1-v6.md（v7~v13 的逐版结论见本行与 §3 TD-28）`）：补 **`L2.5` 消息→`NEWS`**、L3 增加「交易理由 vs 背景附注」两个例外与判别线、宏观驱动须为具体变量、horizon 规则经实测**回退**到 v6 版本；②`docs/10 §4.9` 规则 9 阶梯重写（L1 持仓 > L2 宏观 > L2.5 消息 > L4/L2.5 例外 > L3 操作价位 > L5 引用/复盘 > L6 兜底），`§4.5` 旧优先级标注**以 §4.9 为准**，`§4.2` 补「短线思路→15m」并注明**不可再细化**（实测回退经验）；③**全量 200 条定版结果**（`llm-deepseek-v13`，人工子集）：方向 100%、周期 100%、止损 100%、目标位 100%、**信息类型 91.9%**，相对正则 **+0/+100/+100/+75/+51.1 pp**，逐格**修复 380 格、回归 0 格**；成本 180 次调用 **$0.0353**（缓存命中 94.8%），失败 0；④`scripts/compare_extractor_baselines.py` 新增「**人工 ↔ 模型 对齐案例**」章节：5.1 模型纠正人工（`mock-post-0009`：`SENTIMENT→TECHNICAL`，已对齐）、5.2 人工纠正模型（11 格逐格原文）；⑤登记 **TD-29**（口径边界待真实语料复核）；测试 13 → **17 项**（对比脚本），全套 **1380 → 1891 passed / 1 skipped**，`ruff` / `mypy`（67 files）全绿 |
 | 证据 operator 工作流（2026-09-22，GOLD-007） | 新增 `src/evidence/workflow.py`（写入门禁 + 脱敏隔离摘要）+ `scripts/evidence_operator.py`（单入口 `workflow`：`template → preflight → quarantine → intake → recheck`；单步 `template/preflight/quarantine/intake/recheck/author-chain`；默认 dry-run / 零网络 / 零写入，写入前二次完整 Evidence Gateway 校验，隔离行永不进台账）+ `src/evidence/author_chain.py`（**gateway-only** 作者归属链：只消费 `evidence-intake-v1` + `scope=author` + `oos_eligible=true`，普通 CSV 无法绕过；身份冲突跳过不覆盖；账号 `enabled=false`）；新增 23 项测试（单元 9 + 集成 14）；登记 **TD-49**；**未解除** `PHASE3_3_DATA`（真实授权证据仍需业务方提供 + 人工核验） |
+| 证据人工交接包（2026-09-22，GOLD-008） | 新增 `src/evidence/handoff.py`（**只读**交接包：`ScopeGap` / `ChecklistItem` / `ExcludedEvidence` / `EvidenceHandoffReport`；稳定 JSON + 人类可读 Markdown；复用 `src.monitoring.evidence_readiness` 唯一口径，**不复制阈值算法**）+ `scripts/evidence_handoff.py`（默认只读 / 零网络 / 零写入；`--input` 仅 dry-run；唯一写文件开关为 `--out`；退出码 `5` 表示仍 BLOCKED）；量化 Author/News `eligible`/`required`/`remaining`、coverage gap、source-share 可评估性、主要隔离原因码；六类人工证据 checklist（authorization / provenance / published_at / collected_at / availability / identity）；模板 / Mock / 示例 / 历史 CSV 醒目标记为不计资格；新增 16 项测试（单元 10 + 集成 6）；登记 **TD-50**；**未解除** `PHASE3_3_DATA`（仅减少人工交接摩擦，Phase 切换仍须 L3 人工 Gate） |
