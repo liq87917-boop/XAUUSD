@@ -47,3 +47,5 @@ logs/llm_cache/
 .pytest-cache*/
 **/.pytest_cache/
 **/.pytest-cache*/
+.ai/runtime/
+.ai/logs/
