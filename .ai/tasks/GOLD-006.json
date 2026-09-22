@@ -1,0 +1,47 @@
+{
+  "task_id": "GOLD-006",
+  "type": "FEATURE",
+  "title": "完成 Phase 3.3 Evidence Readiness 与资格复核入口",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 仍 BLOCKED 且 GOLD-005 Evidence Intake Gateway 已完成的前提下，只处理该 blocker 的工程可自动化部分：提供 Author/News 证据模板、preflight/readiness 报告、缺口量化和一键 qualification recheck。不得寻找、抓取、补造或模拟真实授权数据，工具只能诚实报告证据是否足够。",
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-005 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 与最近 commits/diff。",
+    "复用 GOLD-005 src/evidence 契约，提供 Author 与 News 的 operator-ready 输入模板；示例必须明确标记 synthetic/example，且不得被 qualification ledger 计数。",
+    "实现 evidence preflight/readiness 报告：量化 accepted、quarantined、not_oos_eligible、duplicate、conflict，并按 Author/News 显示距离资格阈值的 remaining gap。",
+    "实现一键 qualification recheck CLI 或等价入口，串联只读 evidence ledger 与现有 Phase 3.3 qualification report；输出稳定 JSON 和人类可读摘要，包含 blocker_active、gate 状态、实际计数、阈值和 remaining gap。",
+    "News readiness 至少报告 eligible_count、coverage_days、max_source_share；Author readiness 至少报告可信 eligible post count。",
+    "报告不得回显 token、API key、Authorization 或完整敏感 source config。",
+    "提供 operator workflow：prepare template -> dry-run/preflight -> inspect quarantine -> explicit intake -> qualification recheck；默认 dry-run/只读，不联网。",
+    "若真实数据库仍无足够 evidence，最终报告必须保持 BLOCKED 并准确列出缺口；不得修改阈值、放宽授权、时间或 availability 规则来获得 PASS。",
+    "测试 100% Mock/临时 SQLite/临时文件，禁止联网；覆盖空库、部分达标、授权或 availability 不达标、News 单源集中度超限、覆盖天数不足、模板不计入真实证据、敏感字段脱敏和稳定 JSON 输出。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG；只记录工程工具完成。真实数据未实际满足全部门槛时不得解除 PHASE3_3_DATA。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/monitoring/**", "scripts/**", "tests/unit/**", "tests/integration/**", "examples/**", "docs/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".env", "database/migrations/**", "src/alpha/**"]
+  },
+  "constraints": [
+    "不新增第三方依赖，不新增或修改 migration/schema。",
+    "不主动抓取任何未确认授权来源，不绕过 robots、条款、证书或认证限制。",
+    "不伪造 published_at、collected_at、effective_at、availability 或授权证据。",
+    "不使用 Mock/模板/合成数据解除 PHASE3_3_DATA，不修改资格阈值来追求 PASS。",
+    "保持现有安全边界，不进入下一研究阶段。",
+    "测试不得联网。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "Author/News 均有可填写的 evidence 模板，且模板/示例不被真实 qualification ledger 计数。",
+    "存在默认只读/无网络的 preflight/readiness 工具，可量化证据状态与资格缺口。",
+    "存在一键 qualification recheck，输出 blocker_active、gate 状态、实际值、阈值和 remaining gap。",
+    "News 的 count/coverage/source-share 与 Author eligible count 有独立测试覆盖。",
+    "敏感字段不会进入报告、日志或异常摘要。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖、migration/schema 或未授权采集。",
+    "真实证据未达标时 PHASE3_3_DATA 保持 BLOCKED。"
+  ]
+}
