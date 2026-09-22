@@ -3,26 +3,11 @@
   "project": "XAUUSD",
   "branch": "cline-agent",
   "phase": "Phase 3",
-  "status": "BLOCKED",
-  "current_task": "GOLD-001-R1",
+  "status": "RUNNING",
+  "current_task": "GOLD-001-R2",
   "last_completed_task": "TEST-002",
   "last_reviewed_task": "GOLD-001-R1",
   "blockers": [
-    {
-      "code": "CLINE_MODEL_QUOTA_OR_CONFIG",
-      "detail": "GOLD-001-R1 attempt 1 仍实际使用 cline-free/deepseek-v4.1-flash，并返回 429 Daily free limit；说明模型切换未作用到 headless CLI 会话或该模型额度仍未恢复。",
-      "retryable": true
-    },
-    {
-      "code": "CLINE_CLI_INSTALLATION",
-      "detail": "attempt 2/3 的 Cline wrapper 报 Could not find @cline/cli-windows-x64，需要本机确认/修复全局 Cline CLI 安装。",
-      "retryable": true
-    },
-    {
-      "code": "BASELINE_QUALITY_GATE",
-      "detail": "项目 .venv 已正常：pytest 1527 passed / 1 skipped；但 ruff 仍有 orchestrator/ai_orchestrator.py 的 5 个既有问题，mypy 仍有 smoke_collectors.py / dry_run_collectors.py 的 2 个既有问题。下一恢复任务必须先消除或明确调整这些基线门禁。",
-      "retryable": true
-    },
     {
       "code": "PHASE3_3_DATA",
       "detail": "Author/News 真实数据资格仍未达标，Phase 3.3 保持 BLOCKED。",
@@ -33,9 +18,17 @@
     {
       "code": "VALIDATION_PYTHON_ENV",
       "resolved_by": "project .venv validation confirmed: pytest runs successfully"
+    },
+    {
+      "code": "CLINE_MODEL_QUOTA_OR_CONFIG",
+      "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"
+    },
+    {
+      "code": "CLINE_CLI_INSTALLATION",
+      "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
     }
   ],
-  "next_action": "先由用户完成一次本机 Cline CLI headless preflight；通过后创建 GOLD-001-R2，先修复基线质量门禁，再恢复 Scheduler。",
+  "next_action": "Orchestrator should pick up GOLD-001-R2: clear Ruff/mypy baseline gates, restore Scheduler, run full validation, and record result.",
   "human_gates": [],
   "invariants": [
     "LIVE_TRADING=false",
