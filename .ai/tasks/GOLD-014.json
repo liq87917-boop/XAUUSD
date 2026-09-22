@@ -1,0 +1,49 @@
+{
+  "task_id": "GOLD-014",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立 Evidence 显式 Intake Receipt 与资格复核审计闭环",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 继续 BLOCKED 的前提下，为 GOLD-013 生成的 approved Evidence 显式人工 intake 建立纯本地、可复核、fail-closed 的 post-intake receipt/verification 层：把 plan_id、approved evidence fingerprint、人工显式 Evidence Operator 执行结果和随后 qualification recheck 结果绑定为确定性脱敏审计记录。该记录只证明执行与复核发生，不得把 intake/review/receipt 时间当作证据时间，不得自动把 data qualification 置为 PASS，不得自动切换 Phase。",
+  "recovery_context": [
+    "GOLD-013 已 completed 并通过工程验收：2093 passed / 1 skipped，ruff 全通过，mypy 164 source files 全通过；完成提交 d1d7696298503bcd68e8b935b0dd342a980edef2。",
+    "GOLD-013 已提供 deterministic read-only intake plan 与最终写入前门禁；任何真实 intake 仍要求人工显式 Evidence Operator --no-dry-run。",
+    "真实 PHASE3_3_DATA 仍 BLOCKED；仓库没有足量合法授权且具可信独立时间/availability/OOS 证据的 Author/News 数据，Phase 切换仍为 L3 人工 Gate。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-013 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 和最近 commits/diff；只处理 PHASE3_3_DATA blocker-facing tooling。",
+    "复用 GOLD-005~013 的 Evidence Gateway、Operator、Inbox、Review、intake plan、redaction、reason codes 与 fingerprint 契约；不得复制或降低资格规则。",
+    "提供纯本地 receipt verifier API/CLI：输入 GOLD-013 intake plan、当前 inbox/review 状态、人工显式 Evidence Operator 的结构化执行结果或既有审计产物，以及 qualification recheck 结果；输出确定性、脱敏、内容寻址的 receipt。",
+    "receipt 必须重新绑定 plan_id、批准条目 fingerprint/review revision 与当前状态；plan stale、fingerprint 改变、review 被推翻、执行结果缺失/失败/损坏、recheck 缺失/损坏或不匹配时 fail-closed。",
+    "明确区分 intake_executed、receipt_verified、data_qualification_passed、phase_transition_allowed；前两者为 true 绝不蕴含后两者为 true。Phase transition 始终要求独立 L3 human gate。",
+    "不得把 executed_at/reviewed_at/receipt_at/file mtime 等操作时间当 published_at/collected_at/effective_at/availability/OOS 证据；不得补造证据时间。",
+    "默认只读；只有显式 --out 才可原子写 receipt 文件。不得自动执行 Evidence Operator、不得自动写研究数据库、不得联网、不得自动修改 PROJECT_STATE 或解除 blocker。",
+    "相同输入重复生成 receipt 必须 byte-stable/幂等；plan、review revision、evidence fingerprint、operator result 或 qualification recheck 任一变化必须产生新 receipt 或拒绝旧 receipt 静默继承。",
+    "新增 unit/integration tests，使用临时目录/Mock/SQLite，禁止联网；覆盖成功绑定、stale plan、review override、fingerprint drift、operator failure、tamper、损坏输入、recheck mismatch、幂等、脱敏、并发/原子输出与 fail-closed。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，明确完整人工路径：inbox → review → approved list → intake plan → 人工显式 intake → receipt verify → qualification recheck → L3 human gate；真实 evidence 不足时仍保持 BLOCKED。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/common/redaction.py", "scripts/evidence_*.py", "tests/unit/**", "tests/integration/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md", ".gitignore"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".env", "database/migrations/**", "src/alpha/**"]
+  },
+  "constraints": [
+    "不新增第三方依赖或 migration/schema。",
+    "不联网、不接第三方推送、不自动修改 OS 计划任务；默认零数据库写入。",
+    "不新增或启用未授权数据源，不绕过授权、robots、证书或安全限制。",
+    "不用 Mock/模板/示例数据宣称真实数据资格，不降低资格阈值或 human gate。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不启用实盘；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在纯本地确定性 receipt verifier，能把 GOLD-013 plan、当前 evidence/review、人工 operator 执行结果与 qualification recheck 绑定成可复核审计记录。",
+    "stale plan、fingerprint drift、review override、operator failure/tamper、recheck mismatch 或损坏输入均 fail-closed。",
+    "相同输入 receipt 幂等/byte-stable，关键输入变化不会静默继承旧 receipt。",
+    "receipt 不把操作时间冒充证据时间，且 intake_executed/receipt_verified 不自动等于 data qualification PASS。",
+    "默认不执行 intake、不写数据库、不联网、不解除 blocker、不修改 Phase；Phase transition 仍要求 L3 human gate。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过，README/TECH_DEBT/PROGRESS_LOG 同步且明确 PHASE3_3_DATA 仍 BLOCKED。"
+  ]
+}
