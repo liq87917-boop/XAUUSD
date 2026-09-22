@@ -20,6 +20,8 @@ from src.alpha.evidence_gate import (
     NewsReadiness,
     Phase33Readiness,
 )
+from src.evidence.contracts import EVIDENCE_CONTRACT_VERSION
+from src.evidence.ledger import EvidenceLedger, ScopeLedger
 from src.monitoring.phase33_qualification import (
     HUMAN_GATE_COMPARATOR,
     PHASE3_3_BLOCKER_CODE,
@@ -196,6 +198,7 @@ def test_machine_readable_payload_is_stable_and_json_serializable() -> None:
         "pass_count",
         "blocked_count",
         "hf_weak_supervision_rows",
+        "evidence_intake",
     }
     assert payload["schema_version"] == QUALIFICATION_SCHEMA_VERSION
     assert payload["as_of"] == MOMENT.isoformat()
@@ -216,3 +219,89 @@ def test_render_keeps_blocker_visible() -> None:
     assert "blocker" in text
     assert "BLOCKED" in text
     assert "PASS=0" in text
+
+
+def _ledger(author_oos: int, news_oos: int, *, news_unproven: int = 0) -> EvidenceLedger:
+    return EvidenceLedger(
+        contract_version=EVIDENCE_CONTRACT_VERSION,
+        scopes=(
+            ScopeLedger(
+                "author",
+                certified_records=author_oos,
+                oos_eligible_records=author_oos,
+                not_oos_eligible_records=0,
+            ),
+            ScopeLedger(
+                "news",
+                certified_records=news_oos + news_unproven,
+                oos_eligible_records=news_oos,
+                not_oos_eligible_records=news_unproven,
+                evidence_start=MOMENT - timedelta(days=120),
+                evidence_end=MOMENT - timedelta(days=1),
+            ),
+        ),
+    )
+
+
+def test_evidence_intake_section_defaults_to_blocked_empty_ledger() -> None:
+    section = build_qualification_report(_readiness()).evidence_intake
+    assert section.blocker_code == PHASE3_3_BLOCKER_CODE
+    assert section.blocker_active is True
+    assert section.contract_version == EVIDENCE_CONTRACT_VERSION
+    assert len(section.checks) == 2
+    assert all(check.status is CheckStatus.BLOCKED for check in section.checks)
+    assert all(check.current == 0 for check in section.checks)
+    assert all(check.comparator == ">=" for check in section.checks)
+
+
+def test_evidence_intake_section_pass_never_unblocks_the_blocker() -> None:
+    author = AuthorReadiness(
+        author_id="author-1",
+        display_name="作者甲",
+        opinions=MIN_AUTHOR_SAMPLES,
+        trusted_posts=MIN_AUTHOR_SAMPLES,
+        ready=True,
+        account_counts=(("source_a/account-1", MIN_AUTHOR_SAMPLES),),
+    )
+    report = build_qualification_report(
+        _readiness(authors=(author,), news=_ready_news(), author_ready=True),
+        evidence_intake=_ledger(MIN_AUTHOR_SAMPLES, MIN_NEWS_EVENTS, news_unproven=50),
+    )
+    section = report.evidence_intake
+    by_key = {check.key: check for check in section.checks}
+    assert by_key["author.evidence_intake_oos_eligible"].status is CheckStatus.PASS
+    assert by_key["news.evidence_intake_oos_eligible"].status is CheckStatus.PASS
+    assert by_key["news.evidence_intake_oos_eligible"].current == MIN_NEWS_EVENTS
+    assert by_key["news.evidence_intake_oos_eligible"].required == MIN_NEWS_EVENTS
+    assert by_key["news.evidence_intake_oos_eligible"].evidence_end is not None
+    # 子报告 PASS 不改变主检查、不解除 blocker
+    assert report.pass_count == 5
+    assert report.blocked_count == 2
+    assert report.ready is False
+    assert report.blocker_active is True
+    payload = section.to_dict()
+    assert set(payload) == {
+        "schema_version",
+        "contract_version",
+        "blocker_code",
+        "blocker_active",
+        "note",
+        "checks",
+    }
+    assert payload["blocker_active"] is True
+    assert "PHASE3_3_DATA" in payload["note"]
+    for check in payload["checks"]:
+        assert set(check) == _CHECK_KEYS
+
+
+def test_evidence_intake_section_requires_independent_availability_evidence() -> None:
+    """认证但缺历史可用证据的记录（NOT_OOS_ELIGIBLE）不得计入 OOS 资格。"""
+    report = build_qualification_report(
+        _readiness(), evidence_intake=_ledger(0, 0, news_unproven=500)
+    )
+    by_key = {check.key: check for check in report.evidence_intake.checks}
+    news = by_key["news.evidence_intake_oos_eligible"]
+    assert news.current == 0
+    assert news.status is CheckStatus.BLOCKED
+    assert "NOT_OOS_ELIGIBLE" in news.reason
+

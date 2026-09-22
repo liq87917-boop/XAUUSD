@@ -8,7 +8,11 @@
   人工 Gate 完成，本模块一律输出 ``BLOCKED``，**不得**用 Mock 或缺失数据判 PASS；
 - ``PHASE3_3_DATA`` blocker 由本模块持续显式输出（``blocker_code`` / ``blocker_active``），
   观测层不具备解除 blocker 的能力；
-- 输出结构包含：当前值、要求值、比较方式、PASS/BLOCKED、原因、证据时间范围。
+- 输出结构包含：当前值、要求值、比较方式、PASS/BLOCKED、原因、证据时间范围；
+- **证据入口子报告**（GOLD-005）：``evidence_intake`` 只统计**经**
+  ``evidence-intake-v1`` 入口认证、且具备独立历史可用证据（``available_at``）的记录；
+  普通导入 / 历史 CSV / Mock 不会计入；该子报告的 PASS **也不解除** blocker
+  （``ready`` 仍由"人工 Gate 项必须全 PASS"决定，人工 Gate 项恒为 BLOCKED）。
 """
 
 from __future__ import annotations
@@ -32,14 +36,19 @@ from src.alpha.evidence_gate import (
     Phase33Readiness,
     load_phase33_readiness,
 )
+from src.evidence.contracts import EvidenceScope
+from src.evidence.ledger import EvidenceLedger, ScopeLedger, load_evidence_ledger
 from src.processors.timeline import ensure_utc_from_database
 
 __all__ = [
+    "EVIDENCE_INTAKE_NOTE",
+    "EVIDENCE_INTAKE_SCHEMA_VERSION",
     "HUMAN_GATE_COMPARATOR",
     "PHASE3_3_BLOCKER_CODE",
     "QUALIFICATION_SCHEMA_VERSION",
     "AuthorGap",
     "CheckStatus",
+    "EvidenceIntakeSection",
     "QualificationGap",
     "QualificationReport",
     "build_qualification_report",
@@ -49,10 +58,19 @@ __all__ = [
 
 #: 保持诚实的 blocker 代码（与 ``.ai/PROJECT_STATE.json`` 一致）
 PHASE3_3_BLOCKER_CODE: Final[str] = "PHASE3_3_DATA"
-#: 机器可读 schema 版本：字段增删必须同步升版本 + 更新测试
-QUALIFICATION_SCHEMA_VERSION: Final[int] = 1
+#: 机器可读 schema 版本：字段增删必须同步升版本 + 更新测试（v2 新增 evidence_intake 子报告）
+QUALIFICATION_SCHEMA_VERSION: Final[int] = 2
+#: 证据入口子报告的 schema 版本（GOLD-005）
+EVIDENCE_INTAKE_SCHEMA_VERSION: Final[int] = 1
 #: 需要人工 Gate 的比较方式（观测层无法自动判定）
 HUMAN_GATE_COMPARATOR: Final[str] = "requires_human_gate"
+#: 证据入口子报告的固定说明（每次输出都带上，防止"代码完成即解除"的误读）
+EVIDENCE_INTAKE_NOTE: Final[str] = (
+    "证据入口只做字段级机械校验：授权声明的法律效力、许可范围与历史可用时间证据"
+    "仍需人工核验；仅完成代码或 Mock 测试**不会**解除 "
+    f"{PHASE3_3_BLOCKER_CODE}。"
+)
+
 
 
 class CheckStatus(StrEnum):
@@ -121,6 +139,74 @@ class AuthorGap:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidenceIntakeSection:
+    """证据入口子报告（GOLD-005）：只统计经证据入口认证的记录，**不解除** blocker。"""
+
+    schema_version: int
+    contract_version: str
+    blocker_code: str
+    blocker_active: bool
+    note: str
+    checks: tuple[QualificationGap, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "contract_version": self.contract_version,
+            "blocker_code": self.blocker_code,
+            "blocker_active": self.blocker_active,
+            "note": self.note,
+            "checks": [item.to_dict() for item in self.checks],
+        }
+
+
+def _evidence_intake_check(
+    scope: EvidenceScope, ledger: ScopeLedger, *, required: int
+) -> QualificationGap:
+    """把证据入口台账转成一条机器可读检查（只有满足全部证据契约才 PASS）。"""
+    current = ledger.oos_eligible_records
+    reason = (
+        f"证据入口认证 {ledger.certified_records} 条，其中具备独立历史可用证据 "
+        f"{ledger.oos_eligible_records} 条；仅认证但缺历史可用证据 "
+        f"{ledger.not_oos_eligible_records} 条（NOT_OOS_ELIGIBLE）。"
+        "普通导入 / 历史 CSV / Mock 不计入；该检查 PASS 也不解除 blocker。"
+    )
+    return QualificationGap(
+        key=f"{scope.value}.evidence_intake_oos_eligible",
+        scope=scope.value,
+        metric="经证据入口认证且具备独立历史可用证据的记录数",
+        current=current,
+        required=required,
+        comparator=">=",
+        status=CheckStatus.PASS if current >= required else CheckStatus.BLOCKED,
+        reason=reason,
+        evidence_start=ledger.evidence_start.isoformat() if ledger.evidence_start else None,
+        evidence_end=ledger.evidence_end.isoformat() if ledger.evidence_end else None,
+    )
+
+
+def build_evidence_intake_section(ledger: EvidenceLedger) -> EvidenceIntakeSection:
+    """构造证据入口子报告（Author 复用 30 条阈值；News 复用 200 条阈值）。"""
+    return EvidenceIntakeSection(
+        schema_version=EVIDENCE_INTAKE_SCHEMA_VERSION,
+        contract_version=ledger.contract_version,
+        blocker_code=PHASE3_3_BLOCKER_CODE,
+        blocker_active=True,  # 子报告不具备解除 blocker 的能力
+        note=EVIDENCE_INTAKE_NOTE,
+        checks=(
+            _evidence_intake_check(
+                EvidenceScope.AUTHOR,
+                ledger.scope(EvidenceScope.AUTHOR),
+                required=MIN_AUTHOR_SAMPLES,
+            ),
+            _evidence_intake_check(
+                EvidenceScope.NEWS, ledger.scope(EvidenceScope.NEWS), required=MIN_NEWS_EVENTS
+            ),
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class QualificationReport:
     """Phase 3.3 数据资格缺口报告（只读；blocker 保持显式）。"""
 
@@ -136,6 +222,7 @@ class QualificationReport:
     pass_count: int
     blocked_count: int
     hf_weak_supervision_rows: int
+    evidence_intake: EvidenceIntakeSection
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,7 +243,9 @@ class QualificationReport:
             "pass_count": self.pass_count,
             "blocked_count": self.blocked_count,
             "hf_weak_supervision_rows": self.hf_weak_supervision_rows,
+            "evidence_intake": self.evidence_intake.to_dict(),
         }
+
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -323,8 +412,16 @@ def build_qualification_report(
     author_evidence: tuple[datetime | None, datetime | None] = (None, None),
     news_evidence: tuple[datetime | None, datetime | None] = (None, None),
     hf_weak_supervision_rows: int = 0,
+    evidence_intake: EvidenceLedger | None = None,
 ) -> QualificationReport:
-    """纯函数：把 evidence_gate 结果 + 证据时间范围转成机器可读缺口报告。"""
+    """纯函数：把 evidence_gate 结果 + 证据时间范围转成机器可读缺口报告。
+
+    Args:
+        readiness: ``src.alpha.evidence_gate`` 的只读资格事实。
+        author_evidence / news_evidence: 证据时间范围（可为空）。
+        hf_weak_supervision_rows: HF 标题弱监督行数（仅记录，不参与判定）。
+        evidence_intake: 证据入口台账（缺省 = 空台账：0 条认证记录，仍保持 BLOCKED）。
+    """
     authors = tuple(_author_gap(item) for item in readiness.authors)
     author_window = (_iso(author_evidence[0]), _iso(author_evidence[1]))
     news_window = (_iso(news_evidence[0]), _iso(news_evidence[1]))
@@ -346,6 +443,7 @@ def build_qualification_report(
         pass_count=len(checks) - blocked,
         blocked_count=blocked,
         hf_weak_supervision_rows=hf_weak_supervision_rows,
+        evidence_intake=build_evidence_intake_section(evidence_intake or EvidenceLedger.empty()),
     )
 
 
@@ -432,6 +530,7 @@ def load_qualification_report(
         author_evidence=_author_evidence_window(session),
         news_evidence=_news_evidence_window(session, moment),
         hf_weak_supervision_rows=hf_weak_supervision_rows,
+        evidence_intake=load_evidence_ledger(session),
     )
 
 
@@ -479,6 +578,22 @@ def render_qualification_report(report: QualificationReport) -> str:
             f"| {author.display_name} | {author.opinions} | {author.trusted_posts} | "
             f"{author.min_account_samples} | {str(author.identity_consistent).lower()} | "
             f"{author.status.value} |"
+        )
+    lines += [
+        "",
+        "### 证据入口子报告（只统计经证据入口认证的记录，不解除 blocker）",
+        "",
+        f"- 契约版本：`{report.evidence_intake.contract_version}`",
+        f"- 说明：{report.evidence_intake.note}",
+        "",
+        "| 检查 | 范围 | 指标 | 当前 | 要求 | 比较 | 状态 | 证据范围 | 原因 |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for check in report.evidence_intake.checks:
+        lines.append(
+            f"| {check.key} | {check.scope} | {check.metric} | {check.current} | "
+            f"{check.required} | {check.comparator} | {check.status.value} | "
+            f"{check.evidence_start or '—'} → {check.evidence_end or '—'} | {check.reason} |"
         )
     lines += [
         "",

@@ -84,6 +84,7 @@
 | TD-44 | P0（新闻历史时间语义） | `raw_items` 强制 `effective_at >= collected_at`；今天下载的历史新闻只能从今天起使用，不能把旧 `published_at` 冒充历史可用时间。因此普通历史 CSV 即使补到 200 条也不能用于历史 OOS | 先确认具备授权且可审计历史可用时刻的数据源，再设计 append-only 的历史可用性契约与泄漏测试；在此之前禁止手工回填 News Alpha 历史事实 |
 | TD-45 | P0（作者内容采集授权） | 公开可访问不等于允许自动采集或训练。Kitco 条款明确禁止机器人/自动设备检索、数据挖掘及未经授权存储或复制内容；中金在线候选页又存在证书域名不匹配 | 不绕过证书警告，不对 Kitco 启动自动采集。用户需提供具备自动采集/研究使用授权的数据源、官方 API 或书面许可；授权确认前只保留合规审查，不保存正文样本、不写数据库 |
 | TD-46 | P2（可观测性剩余） | GOLD-004 已交付**只读**健康度 / 资格观测（`src/monitoring/` + `scripts/report_collector_health.py`，证据见 `PROGRESS_LOG.md` 第六十八轮）；**剩余**：仅有报告、无告警推送与时间序列趋势，且 `processed_items.status` 的 `SKIPPED` 无法在 SQL 层区分 `DUPLICATE` / `REJECTED`（口径见 TD-19 与 `src/monitoring/collector_health.py` 模块 docstring，需要时读 `structured_json.outcome` 抽样或新列） | 有运维/巡检需求时（TD-10 前置） |
+| TD-47 | P0（证据入口边界，仍 BLOCKED） | GOLD-005 已交付**合规授权数据 Evidence Intake Gateway**（`src/evidence/` + `scripts/intake_evidence.py`，契约 `evidence-intake-v1`；证据见 `PROGRESS_LOG.md` 第六十九轮）。**剩余**：①仓库内**没有任何**经该入口认证的真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45 未解除）；②入口只写 `raw_items` + `processed_items`，**不**创建 `authors` / `author_accounts` / `author_posts`（作者链接入仍走既有授权门禁 + 导入流程），Author Alpha 的可信标签仍需真实数据 + 标注；③`available_at` 证据的**法律/提供方真实性**由人工核验，程序只校验字段齐全与时间自洽；④`evidence_intake` 子报告只在资格报告里展示，尚未做告警 | 业务方按契约提交已授权数据 + 人工核验授权后，再看是否达标；若需自动化的作者链落库，另立任务并评估是否复用 `import_real_posts.py` 口径 |
 
 
 ---
@@ -511,6 +512,40 @@
 - **解除条件**：出现明确运维 / 巡检需求（或 Dashboard 落地）时，设计告警与趋势存储，
   并同步 `docs/03` / `docs/04`。
 - **不变量**：观测层永远只读；不得因观测结果 PASS 而解除 `PHASE3_3_DATA`。
+
+---
+
+### TD-47 授权证据接收入口的剩余边界（P0，2026-09-22，GOLD-005）
+
+- **已交付**：`src/evidence/`（`contracts` / `validation` / `intake` / `report` / `ledger`）
+  与 CLI `scripts/intake_evidence.py`，输入契约 `evidence-intake-v1`
+  （Author / News 两类；字段组：来源身份、内容/内容引用、`published_at` / `collected_at`、
+  出处引用、授权声明 + 三项许可 + 人工签认、可选历史可用证据 `available_at`）。
+- **关键保证（已由测试锁定）**：
+  1. 默认 dry-run：不写库、不建 `sources`、不落 manifest / quarantine；
+  2. 授权不可推断：缺失 / `UNKNOWN` / `DENIED` 一律 `AUTHORIZATION_MISSING` 隔离；
+  3. 时间不可伪造：naive / 未来 / `collected_at <= published_at` 一律隔离，
+     `ingested_at` 由系统赋值（输入值忽略）；
+  4. 历史 CSV 不具 OOS 资格：无独立 `available_at` 证据 → `AVAILABILITY_UNPROVEN`
+     → `NOT_OOS_ELIGIBLE`（记录仍落库，但不计入 OOS 证据）；
+  5. 幂等且不覆盖：同 `(source, source_record_id)` 同内容 → `DUPLICATE`；
+     内容不同 → `IDENTITY_CONFLICT` 隔离（绝不 UPDATE 历史事实）；
+  6. 凭据防护：凭据类列/值整行隔离（`SENSITIVE_VALUE_DETECTED`），
+     报告 / manifest / quarantine / `raw_json` 都不含凭据值。
+- **剩余边界（本条目跟踪）**：
+  1. **仍无真实授权证据**：库内 0 条经入口认证的记录 → `PHASE3_3_DATA` 保持 `active=true`；
+     TD-43 / TD-44 / TD-45 未解除，任何代码或 Mock 完成都不会解除；
+  2. **不接通作者链**：入口只写 `raw_items`（`item_type=POST`）+ `processed_items`，
+     不创建 `authors` / `author_accounts` / `author_posts`；因此 Author Alpha 的可信标签
+     仍依赖真实数据 + 人工标注 + 既有 `check_phase3_3_author_input.py` 门禁；
+  3. **证据真实性属人工**：程序只校验声明与证据字段是否齐全、时间是否自洽，
+     不判断许可 URL 的法律效力、提供方档案的真实性或签认人身份；
+  4. **无告警**：`evidence_intake` 只在 `report_collector_health` 报告里展示，
+     没有阈值告警通道（与 TD-46 同源）。
+- **解除条件**：业务方按契约提交**已授权**数据，经人工核验后由入口提交落库，
+  且达到 `src/alpha/evidence_gate.py` 的数量/跨度/集中度门槛；届时才讨论解除 blocker。
+- **不变量**：入口永不联网、永不抓取、永不绕过 robots / 条款 / 证书；
+  永不因代码完成或 Mock 测试解除 `PHASE3_3_DATA`。
 
 ---
 

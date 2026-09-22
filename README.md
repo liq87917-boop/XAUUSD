@@ -54,6 +54,7 @@ Strategy 事实，不进入实盘。
 | CLI 脚本**双通道**（`python scripts/x.py` 与 `python -m scripts.x` 都可运行）+ **真实进程**冒烟测试 + CSV 编码 `utf-8-sig`（Excel 中文不乱码） | `scripts/__init__.py`、`tests/integration/test_cli_scripts.py` |
 | **采集后处理 Processor Pipeline**（normalize → timezone/effective_at → identity/dedup → validation/audit → `processed_items`，append-only + 幂等 + 坏数据隔离 + 摘要脱敏；RSS 采集路径已最小接线） | `src/processors/collection/`、`src/common/redaction.py`、`src/collectors/base.py`（`post_processor` 钩子） |
 | **只读运行健康度 / 数据资格观测层**（窗口内 source 级运行与加工状态 + Phase 3.3 资格缺口机器可读输出；`--json` 稳定结构、默认 dry-run、输出脱敏，**不解除** `PHASE3_3_DATA`） | `src/monitoring/`、`scripts/report_collector_health.py` |
+| **授权证据接收入口 Evidence Intake Gateway**（版本化契约 `evidence-intake-v1`：来源身份 / 时间语义 / 出处 / 授权声明 / 历史可用证据；默认 dry-run 与零网络、坏行隔离 + 稳定原因码、幂等且不覆盖历史事实，**不解除** `PHASE3_3_DATA`） | `src/evidence/`、`scripts/intake_evidence.py` |
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
 采集时间不可信而隔离；新闻侧只有 30 条 / 56 天，最大单源占比 66.67%。详见
@@ -406,6 +407,74 @@ ProcessorInput
   `tests/integration/test_monitoring_health_integration.py`（29 项，全部 Mock / SQLite、零网络）；
 - 无新增依赖、无新增 migration / schema、不进入 Phase 3.4、不生成交易信号。
 
+### 授权证据接收入口（`scripts/intake_evidence.py`，GOLD-005）
+
+> **合规红线**：本入口只做**字段级机械校验**。授权声明（`APPROVED`、三项 `permits_*`、
+> 许可引用、人工签认人）是**人工签认的事实**，程序不证明其法律效力；
+> 命令**不联网**、不抓取站点、不绕过 robots / 条款 / 证书限制；
+> 任何记录都不能凭代码或 Mock 测试解除 `PHASE3_3_DATA`。
+
+```powershell
+# 默认 dry-run：只校验并打印报告（不写库、不落文件、不联网）
+.\.venv\Scripts\python.exe -m scripts.intake_evidence --scope author --input logs/evidence/authors.jsonl
+
+# 稳定 JSON（--json 时提示信息走 stderr，stdout 是纯 JSON）
+.\.venv\Scripts\python.exe -m scripts.intake_evidence --scope news --input logs/evidence/news.csv --json
+
+# 显式提交：append-only 写入 raw_items + processed_items，并落 manifest / quarantine
+.\.venv\Scripts\python.exe -m scripts.intake_evidence --scope news --input logs/evidence/news.csv `
+  --no-dry-run --manifest logs/evidence/news_manifest.json --quarantine logs/evidence/news_quarantine.jsonl
+```
+
+- **退出码**：`0` 全部通过 / `2` 参数或输入文件错误 / `3` 输入没有数据行 /
+  `4` 存在被隔离的行（数据已隔离，未计入可信证据）；
+- **输入格式**：JSONL（`.jsonl` / `.ndjson` / `.json`）或 CSV（UTF-8 / UTF-8-BOM），
+  `--format auto` 按后缀识别；不使用任何第三方解析依赖；
+- **可复现**：`--as-of`（必须带时区）同时决定"未来时间"判定与系统 `ingested_at`；
+- **脱敏**：报告 / manifest / quarantine 只含白名单字段（来源、记录 ID、指纹、原因码、时间），
+  **绝不输出正文与凭据**；输入行含凭据类列或凭据值（`api_key` / `Bearer` / `sk-` / `token=`）
+  时整行隔离（`SENSITIVE_VALUE_DETECTED`，只记录列名）。
+
+#### 证据契约 `evidence-intake-v1`（`src/evidence/contracts.py` 为唯一来源）
+
+| 组 | 列（别名见 `alias_map()`） | 要求 |
+|---|---|---|
+| 来源身份 | `source`（`source_name`）、`source_record_id`（`id` / `post_id`）；Author 追加 `author_name`（`author`）、`external_account_id`（`account_id`） | 必填 |
+| 内容 | `content`（`text_content` / `content_text` / `text`）或 `content_ref`（可核验引用） | 至少一项非空 |
+| 时间 | `published_at`（`published`）、`collected_at`（`collected`） | 必填；必须带时区、不得未来、`collected_at` 必须**晚于** `published_at` |
+| 出处 | `provenance_reference`（`provenance`） | 必填；`https` URL 或 `docs/legal/` 内相对路径 |
+| 授权 | `authorization_status`（必须显式 `APPROVED`）、`authorization_basis`（四项白名单）、`authorization_reference`、`authorization_reviewed_by`、`authorization_reviewed_at`、`permits_automated_collection` / `permits_local_storage` / `permits_research_use`（均为 `true`） | 必填；`authorization_valid_from` / `authorization_expires_at` 可选，`collected_at` 必须落在授权有效期内 |
+| 历史可用证据 | `available_at`、`availability_provenance`、`availability_reference` | 可选；**缺失或不自洽**（不满足 `published_at ≤ available_at ≤ collected_at`）时标记 `AVAILABILITY_UNPROVEN` → `NOT_OOS_ELIGIBLE` |
+| 系统赋值 | `ingested_at`（`fingerprint` 由系统计算） | 输入提供的值一律**忽略**（防伪造审计时间） |
+
+#### 关键行为
+
+- **授权不可推断**：`authorization_status` 为缺失 / `UNKNOWN` / `DENIED` 一律
+  `AUTHORIZATION_MISSING` 隔离，绝不因为"网页可公开访问"而放行；
+- **不伪造时间**：naive / 未来 / 因果颠倒的时间一律隔离；`effective_at` 只按
+  `max(published_at, collected_at)` 派生，`ingested_at` 由系统赋值；
+- **历史 CSV 不具 OOS 资格**：`published_at` 早于 `collected_at` 只说明"当时已发布"，
+  没有独立 `available_at` 证据的记录**明确** `NOT_OOS_ELIGIBLE`（仍可作为有效原始事实）；
+- **幂等且不覆盖**：同一 `(source, source_record_id)` 内容一致 → `DUPLICATE`（不重复落库）；
+  内容不同 → `IDENTITY_CONFLICT` 隔离，**绝不** UPDATE 历史事实；
+- **坏行隔离**：无法解析的 JSONL 行 `ROW_UNREADABLE`、空内容 `CONTENT_EMPTY`、
+  范围不符 `SCOPE_MISMATCH` 等都有稳定原因码，逐行隔离且不中断整批；
+- **不新增采集能力**：自动创建的 `sources` 行 `enabled=false` 且不写 `config_json`
+  （不注册采集器），不会被 Scheduler 采集；来源启用仍需人工 Gate；
+- **只写既有 append-only 路径**：`raw_items`（证据元数据写入 `raw_json.evidence`）
+  + `processed_items`（经现有 `CollectionProcessor`，processor 版本留痕）；
+  本层**不**创建 `authors` / `author_posts`（作者链接入仍走既有授权门禁与导入流程）；
+- **与 GOLD-004 观测集成**：`report_collector_health` 的资格报告新增
+  `evidence_intake` 子报告（只统计经本入口认证、且有独立历史可用证据的记录），
+  但**不会**解除 blocker——`ready` 仍由恒为 `BLOCKED` 的人工 Gate 项决定；
+- **测试**：`tests/unit/test_evidence_contracts.py`、`tests/unit/test_evidence_validation.py`、
+  `tests/unit/test_evidence_intake.py`、`tests/integration/test_evidence_intake_integration.py`
+  （全部 Mock / 临时文件 / SQLite，零网络）；
+- 无新增依赖、无新增 migration / schema、不进入 Phase 3.4、不生成交易信号或订单。
+- **仍未解决（保持 BLOCKED）**：目前仓库内**没有**任何经本入口认证的真实授权证据，
+  `PHASE3_3_DATA` 继续 `active=true`；业务方需按上述契约提供已授权 Author / News 数据，
+  并由人工核验授权后才能产生可信证据。
+
 ## 8. 数据模型
 
 
@@ -529,6 +598,10 @@ ProcessorInput
 - TD-05 / TD-07：`econ_calendar_collector` 与宏观预期值补全；TD-10：API 与 Dashboard
   （其只读前置观测层已由 GOLD-004 交付，见 §7「运行健康度与 Phase 3.3 数据资格观测」与
   `TECH_DEBT.md` TD-46 的剩余边界）。
+- **TD-43 / TD-44 / TD-45 仍未解除**：证据接收入口已由 GOLD-005 交付并可用
+  （见 §7「授权证据接收入口」），但**仓库内没有任何经该入口认证的真实授权证据**，
+  因此 `PHASE3_3_DATA` 保持 `active=true`；下一步是业务方按 `evidence-intake-v1` 契约
+  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47）。
 
 ## 11. 强制约束速查（团队决定）
 

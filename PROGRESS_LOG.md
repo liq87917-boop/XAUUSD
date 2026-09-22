@@ -2252,3 +2252,86 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   （新增 TD-46：观测层剩余边界——无告警推送/无时间序列/`SKIPPED` 无法区分
   `DUPLICATE` 与 `REJECTED`）。
 
+
+## 第六十九轮（2026-09-22）：GOLD-005 —— 建立合规授权数据 Evidence Intake Gateway
+
+### 1. 交付内容
+
+- **独立证据接收入口**（`src/evidence/`，与 Collector / Scheduler / Alpha 解耦；
+  `src/scheduler/**`、`src/alpha/**` 零改动）：
+  - `contracts.py`：版本化输入契约 `evidence-intake-v1`（字段注册表 + 别名 +
+    Author / News 必填差异 + 原因码分组 + 授权依据白名单，与
+    `src/alpha/source_authorization.py` **同一词汇表**）；
+  - `validation.py`：逐行机械校验（授权声明 / 来源身份 / 时间语义 / 内容完整性 /
+    历史可用证据 / 凭据防护），**纯函数、零 I/O**；输出脱敏原因与可选证据记录；
+  - `intake.py`：validate-first / dry-run-first 的导入引擎（格式识别 JSONL / CSV、
+    坏行隔离、批次内 + 跨批幂等判定、`IDENTITY_CONFLICT` 保护、append-only 落库、
+    manifest / quarantine 载荷）；`report.py`：Markdown 渲染；
+  - `ledger.py`：**只读**台账（只统计带 `raw_json["evidence"]` 标记的 `POST` / `NEWS`，
+    普通导入 / Mock / 其它 item_type 一律不计）。
+- **CLI** `scripts/intake_evidence.py`：`--scope author|news`、`--input`、`--format auto|jsonl|csv`、
+  `--as-of`（必须带时区）、`--json`（stdout 纯 JSON，提示走 stderr）、
+  `--manifest` / `--quarantine`（仅在 `--no-dry-run` 时落盘）、`--dry-run` / `--no-dry-run`；
+  退出码 `0` 全部通过 / `2` 输入或参数错误 / `3` 无数据行 / `4` 有隔离行；
+  拒绝 `--manifest` / `--quarantine` 与 `--input` 同一文件（含硬链接）。
+- **时间与授权语义（本轮核心防泄漏/防伪造）**：
+  - `published_at` / `collected_at` / `available_at` 必须带时区、不得未来、
+    `collected_at` 必须晚于 `published_at`；`effective_at = max(published_at, collected_at)`；
+  - `ingested_at` 由系统赋值，输入提供的值一律忽略（防止伪造审计时间）；
+  - `published_at` 早于 `collected_at` **不等于**历史可用：必须有独立
+    `available_at` + `availability_provenance` + `availability_reference`，
+    且满足 `published_at ≤ available_at ≤ collected_at`；否则
+    `AVAILABILITY_UNPROVEN` → `NOT_OOS_ELIGIBLE`（记录仍落库，但不计入 OOS 证据）；
+  - 授权只有显式 `APPROVED` + 白名单依据 + 可核验引用 + 三项许可 + 人工签认人/时间，
+    且 `collected_at` 落在授权有效期内才放行；缺失 / `UNKNOWN` / `DENIED` 一律隔离。
+- **落库路径**：只写既有 append-only 路径——`raw_items`（证据元数据写入
+  `raw_json.evidence`，另有扁平键供加工层审计）+ `processed_items`
+  （复用 `CollectionProcessor`，processor 版本留痕）；**不**创建
+  `authors` / `author_accounts` / `author_posts`（作者链接入仍走既有门禁）。
+  自动创建的 `sources` 行一律 `enabled=false` 且不写 `config_json`（不注册采集器）。
+- **与 GOLD-004 资格报告的最小集成**：`QualificationReport` 新增
+  `evidence_intake` 子报告（Author / News 各一条 `>=` 检查，阈值复用
+  `evidence_gate` 的 30 / 200），`QUALIFICATION_SCHEMA_VERSION` 升为 **2**；
+  子报告 PASS **不改变**主检查，人工 Gate 项恒为 `BLOCKED`，`blocker_active` 恒 `true`。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **54 项**测试（全部 Mock / 临时文件 / SQLite，零网络，未新增依赖）：
+  - `tests/unit/test_evidence_contracts.py` **6**：契约版本 / 必填分组 / 别名映射 /
+    原因码分组 / 授权词汇表 / 系统赋值字段；
+  - `tests/unit/test_evidence_validation.py` **19**：合规行通过、授权缺失/未知/拒绝/无效引用、
+    授权窗口（事后授权 / 过期）、出处缺失、naive/未来时间、`collected_at <= published_at`、
+    空内容 / 仅内容引用、来源身份缺失、历史 CSV `NOT_OOS_ELIGIBLE`、可用性证据不自洽、
+    `SCOPE_MISMATCH`、别名列映射、凭据隔离（值不回声）、`ingested_at` 忽略、
+    News/Author 两类 scope、指纹确定性与内容敏感、标识列长度截断、`moment` 时区守卫；
+  - `tests/unit/test_evidence_intake.py` **9**：格式识别、JSONL 坏行隔离、CSV 行号、
+    文件 SHA-256 / 空输入、报告 JSON 结构稳定、quarantine 载荷、Markdown 渲染
+    （含 `NOT_OOS_ELIGIBLE` 与 `PHASE3_3_DATA` 说明）、凭据不出现在报告/载荷；
+  - `tests/unit/test_phase33_qualification_report.py` 新增 **3**（原 7 项保留，现共 10 项）：
+    空台账恒 BLOCKED、子报告 PASS 也不解除 blocker（主检查 `PASS=5/BLOCKED=2` 不变）、
+    认证但缺历史可用证据不得计入 OOS；
+  - `tests/integration/test_evidence_intake_integration.py` **17**：dry-run 零写入
+    （表计数 0）、提交写入 raw+processed（证据元数据 / 加工层扁平键）、重复导入幂等、
+    内容冲突隔离且不覆盖历史、坏行原因码稳定、无法解析行 `ROW_UNREADABLE`、
+    新建来源 `enabled=false` 且无 `config_json`、既有来源不被改写、凭据不入库不入报告、
+    无可用证据记录落库但不计入 OOS、台账只计认证记录（普通导入 / `MACRO` 不计）、
+    资格报告集成（计数可见但 blocker 不解除 / 空台账恒 BLOCKED）、
+    CLI dry-run 零写入 + 提交落 manifest/quarantine、隔离清单原因码、
+    退出码与参数校验（含 `--manifest` 覆盖输入、同目标）、CSV 别名列端到端。
+- **全量门禁（本轮实测，项目 `.venv`）**：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **1764 passed / 1 skipped in 211.83s**
+    （唯一 skip 为 `jieba` 已安装分支）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 146 source files`。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增/修改 migration 与 schema、未训练 Alpha、未生成交易信号或订单；
+- `src/scheduler/**`、`src/alpha/**` 未改动（只**复用**其阈值与词汇表）；
+- **未解除** `PHASE3_3_DATA`（资格报告持续显式输出，`ready` 恒为 false）；
+- 未联网、未抓取微博 / Kitco / 任何站点，未触碰 `.env`；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；
+- 同步 `README.md`（§1 交付表 + §7 新章节 + §10 阻塞说明）与 `TECH_DEBT.md`（新增 TD-47）。
+
+
