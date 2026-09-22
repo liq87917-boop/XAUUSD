@@ -86,6 +86,7 @@
 | TD-46 | P2（可观测性剩余） | GOLD-004 已交付**只读**健康度 / 资格观测（`src/monitoring/` + `scripts/report_collector_health.py`，证据见 `PROGRESS_LOG.md` 第六十八轮）；**剩余**：仅有报告、无告警推送与时间序列趋势，且 `processed_items.status` 的 `SKIPPED` 无法在 SQL 层区分 `DUPLICATE` / `REJECTED`（口径见 TD-19 与 `src/monitoring/collector_health.py` 模块 docstring，需要时读 `structured_json.outcome` 抽样或新列） | 有运维/巡检需求时（TD-10 前置） |
 | TD-47 | P0（证据入口边界，仍 BLOCKED） | GOLD-005 已交付**合规授权数据 Evidence Intake Gateway**（`src/evidence/` + `scripts/intake_evidence.py`，契约 `evidence-intake-v1`；证据见 `PROGRESS_LOG.md` 第六十九轮）。**剩余**：①仓库内**没有任何**经该入口认证的真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45 未解除）；②入口只写 `raw_items` + `processed_items`，**不**创建 `authors` / `author_accounts` / `author_posts`（作者链接入仍走既有授权门禁 + 导入流程），Author Alpha 的可信标签仍需真实数据 + 标注；③`available_at` 证据的**法律/提供方真实性**由人工核验，程序只校验字段齐全与时间自洽；④`evidence_intake` 子报告只在资格报告里展示，尚未做告警 | 业务方按契约提交已授权数据 + 人工核验授权后，再看是否达标；若需自动化的作者链落库，另立任务并评估是否复用 `import_real_posts.py` 口径 |
 | TD-48 | P0（证据就绪度 / 一键复核的剩余边界） | GOLD-006 已交付 operator 证据模板（`examples/evidence/`，示例行显式标记 `record_kind=example`、`is_mock=true`）+ 只读 preflight/readiness（`src/monitoring/evidence_readiness.py`）+ 一键 `recheck` CLI（`scripts/evidence_readiness.py`，证据见 `PROGRESS_LOG.md` 第七十轮）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47 未解除），工具只报告缺口、不放行；②模板 / 示例行判 `SYNTHETIC_EVIDENCE` 隔离，**不能**用于达标；③readiness 只覆盖证据入口台账口径（Author 可信 eligible 帖子数；News 条数 / 覆盖天数 / 单源占比），不含作者链落库与人工标注；④无告警推送（与 TD-46 同源） | 业务方按契约提交已授权数据 + 人工核验后重跑 `recheck`；若需自动作者链落库，另立任务评估复用 `import_real_posts.py` 口径 |
+| TD-49 | P0（证据 operator 工作流 / 作者链的剩余边界，仍 BLOCKED） | GOLD-007 已交付**单入口 operator workflow**（`scripts/evidence_operator.py` + `src/evidence/workflow.py`：`template → preflight → quarantine → intake → recheck`，默认 dry-run / 零网络 / 零写入，写入前二次完整 Evidence Gateway 校验 + 写入门禁与脱敏隔离摘要；证据见 `PROGRESS_LOG.md` 第七十一轮）与 **gateway-only 作者归属链**（`src/evidence/author_chain.py`：只消费 `raw_json.evidence` 带 `evidence-intake-v1` + `scope=author` + `oos_eligible=true` 的记录；普通 CSV / 历史样本没有证据块，**无法绕过** gateway；身份冲突跳过且不覆盖；新建 `author_accounts` 一律 `enabled=false`）。**剩余**：①库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`（TD-43/44/45/47/48 未解除），`blocker_active` / `human_gate_required` 恒为 true；②`scripts/import_real_posts.py` 仍是**历史 W0-4 / 演练用普通 CSV 入口**（`raw_json` 只写 `import_kind=manual_real_corpus`，无证据块），其口径**不**适用于 Phase 3.3 资格证据，作者链也不会消费它（未新增 migration，沿用既有 `authors` / `author_accounts` / `author_posts` schema）；③作者链只建立归属，不做观点抽取 / 人工标注，也未接入任何采集；④无告警推送（与 TD-46 同源） | 业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 + 人工核验后重跑 `scripts.evidence_operator workflow`；作者链落库后仍需真实标注才能产生可信标签 |
 
 
 
@@ -583,6 +584,48 @@
 
 ---
 
+### TD-49 单入口 Evidence Operator 工作流与 gateway-only 作者归属链的剩余边界（P0，2026-09-22，GOLD-007）
+
+- **已交付**：`src/evidence/workflow.py`（写入门禁 + 脱敏隔离摘要，纯函数）、
+  `scripts/evidence_operator.py`（单入口 `workflow` + `template` / `preflight` /
+  `quarantine` / `intake` / `recheck` / `author-chain`）、
+  `src/evidence/author_chain.py`（gateway-only 作者归属链）。
+- **关键保证（已由测试锁定）**：
+  1. 单入口 `workflow` 一次串联 `template → preflight → quarantine → intake → recheck`，
+     默认 dry-run、零网络、零写入；`--report` / `--manifest` / `--quarantine` 必须显式配
+     `--no-dry-run`；
+  2. **写入前二次验证**：`intake` / `workflow --no-dry-run` 先跑一次完整 dry-run
+     Evidence Gateway 校验并汇总写入门禁（`accepted` / `quarantined` / `duplicate` /
+     `conflict` / `not_oos_eligible` / `synthetic` / `authorization_incomplete` /
+     `time_invalid` / `identity_issues` / `sensitive_detected` / `availability_unproven`），
+     只有 `ACCEPTED` 行 append-only 落库；未授权 / 合成示例 / 时间非法 / 身份冲突 / 凭据 /
+     坏行一律隔离，**绝不**进入 qualification ledger；
+  3. `IDENTITY_CONFLICT` 拒绝覆盖历史事实（稳定原因码，不静默改写），重复显式 intake 只产
+     `DUPLICATE`（原始层与台账不增长）；
+  4. **作者链 gateway-only**：只消费 `raw_json.evidence` 带 `evidence-intake-v1` +
+     `scope=author` + `oos_eligible=true` + 作者身份齐全的记录；`import_real_posts.py`
+     的普通 CSV 载荷没有证据块 → 恒不是候选，**无法绕过** gateway；新建
+     `author_accounts` 一律 `enabled=false`（不启用采集）；同一 `raw_item` 只归属一次；
+     身份冲突（账号已归属其他作者）跳过且不覆盖；
+  5. 阈值仍完全复用 `src/alpha/evidence_gate.py`（30 / 200 / 90 天 / 单源 40%），
+     `blocker_active` 与 `human_gate_required` 恒为 `true`。
+- **剩余边界（本条目跟踪）**：
+  1. **仍无真实授权证据**：库内 eligible 记录不足以达标 → `PHASE3_3_DATA` 保持
+     `active=true`（TD-43 / TD-44 / TD-45 / TD-47 / TD-48 未解除）；
+  2. **历史 CSV 口径不复用**：`scripts/import_real_posts.py` 仍是 W0-4 / 演练用普通 CSV 入口，
+     其 `raw_json` 只写 `import_kind=manual_real_corpus`，既不计入资格台账、也不会被作者链消费；
+     未新增 migration（沿用既有 `authors` / `author_accounts` / `author_posts` schema）；
+  3. **只建立归属**：作者链不做观点抽取 / 人工标注，也未接入任何采集；
+  4. **无告警**：没有缺口阈值告警推送（与 TD-46 同源）。
+- **解除条件**：业务方按 `evidence-intake-v1` 契约提交**已授权** Author / News 数据并经
+  人工核验落库（可用 `scripts.evidence_operator workflow --no-dry-run`），再由
+  `scripts.evidence_operator recheck` / `scripts.evidence_readiness.py recheck` 显示量化门槛达标；
+  届时才讨论解除 blocker。
+- **不变量**：工作流永不联网、永不抓取、永不绕过 robots / 条款 / 证书；
+  永不因代码完成、模板或 Mock 测试解除 `PHASE3_3_DATA`。
+
+---
+
 ## 4. 已知限制（设计取舍，非缺陷）
 
 | 项 | 说明 | 依据 |
@@ -627,3 +670,4 @@
 | Prompt 迭代 v2→v5（2026-09-13，人工裁决落地） | 按用户二次裁决完成 `opinion-prompt` 四次迭代并**用同一批 20 条真实 API 逐版验证**（合计 ≈ $0.023）：①**TD-24 修掉**：12 条 few-shot 全部换成语料外自造句，实测最长公共子串 **≤ 9 字符**，新增 LCS 回归测试机械拦截数据泄漏；②**TD-25 修掉**：`docs/10 §4.9` 新增规则 9「information_type 决策阶梯」（**操作优先，驱动决定分类**：L1 持仓→POSITIONING、L2 宏观→MACRO、L3 情绪→SENTIMENT、L4 引用/复盘→OTHER、L5 无驱动时的操作/纯图表→TECHNICAL；L1~L4 优先于 L5），人工子集信息类型准确率 **46.2% → 92.3%**、100 格 `wrong_value` **8 → 1**；③**TD-26 修掉**：`no_opinion` 语义二次裁决（宏观播报 = `UNKNOWN` + `MACRO` + `no_opinion=true`，`opinions=[]` 只留给"连信息类型线索都没有"的帖子），试点**无观点率 10% → 0%**；④v3 补「观望→FLAT、情绪≠FLAT」（`§4.1`），v5 补 L3 判别线（情绪须为主旨或**语句带方向含义**）；⑤新增对比交付文档 `docs/experiments/Phase2_LLM试点_v1-v5对比.md`（逐字段五版对比 + 条件句/引用句/多目标逐帖原文与原始 JSON）；⑥登记 **TD-27**（残余 1 格 `mock-post-0009` 判别线 + `mock-post-0028` 的 `15M` 与 `§4.2`「短线→1H」冲突，需一句话裁决）；新增测试 22 项（prompt 模块），全套 **1099 passed / 1 skipped**；`ruff` / `mypy`（66 files）全绿 |
 | 最终交付（2026-09-13，全量 200 + 基线对比 + git 初始化） | ①**全量 200 条真实 API 运行**（`llm-deepseek-v6`）：人工子集核心四字段 **27.8% → 100%**（方向 100%、周期 0%→100%、止损 0%→100%、目标位 25%→100%）、信息类型 **40.7% → 87.4%**；逐格**修复 385 / 回归 14**；成本 **$0.0346**（180 次调用、缓存命中 93.8%），API 失败 0、解析失败 0、confidence 非法 0；②新增 `scripts/compare_extractor_baselines.py` + `tests/unit/test_baseline_comparison.py`（13 项）→《Phase 2 基线对比报告.md》（1000 格对齐、0 口径问题、含修复/回归逐格清单与 `docs/08 §5` PASS/FAIL）；③按人工最终裁决改判 `mock-post-0009` 金标准为 `TECHNICAL`（`provenance/reviewer` 留痕 + 改前版本归档）并把「短线思路 → `15m`」写入 `docs/10 §4.2`（**TD-27 关闭**）；④**登记 TD-28**（信息类型残余 17 格 = 驱动型文本 + 操作价位 + 阶梯缺 `NEWS` 级；路径 A/B 待一句话裁决）；⑤`git init` + 首次提交（`.gitignore` 覆盖 `.env`/`logs/`/`*.db`，提交前用 `git status --porcelain` 核对**无密钥、无数据、无缓存**入库）；测试 1099 → **1380 passed / 1 skipped**，`ruff` / `mypy`（67 files）全绿；未新增迁移、未改 schema、未新增依赖 |
 | 全量重跑 + 最终对比报告（2026-09-13，人工二次裁决「路径 B」） | ①`opinion-prompt-v7 → v13` 共 7 次迭代（每次都**重跑并留档**，见 `docs/experiments/Phase2_LLM_Prompt迭代对比_v1-v6.md（v7~v13 的逐版结论见本行与 §3 TD-28）`）：补 **`L2.5` 消息→`NEWS`**、L3 增加「交易理由 vs 背景附注」两个例外与判别线、宏观驱动须为具体变量、horizon 规则经实测**回退**到 v6 版本；②`docs/10 §4.9` 规则 9 阶梯重写（L1 持仓 > L2 宏观 > L2.5 消息 > L4/L2.5 例外 > L3 操作价位 > L5 引用/复盘 > L6 兜底），`§4.5` 旧优先级标注**以 §4.9 为准**，`§4.2` 补「短线思路→15m」并注明**不可再细化**（实测回退经验）；③**全量 200 条定版结果**（`llm-deepseek-v13`，人工子集）：方向 100%、周期 100%、止损 100%、目标位 100%、**信息类型 91.9%**，相对正则 **+0/+100/+100/+75/+51.1 pp**，逐格**修复 380 格、回归 0 格**；成本 180 次调用 **$0.0353**（缓存命中 94.8%），失败 0；④`scripts/compare_extractor_baselines.py` 新增「**人工 ↔ 模型 对齐案例**」章节：5.1 模型纠正人工（`mock-post-0009`：`SENTIMENT→TECHNICAL`，已对齐）、5.2 人工纠正模型（11 格逐格原文）；⑤登记 **TD-29**（口径边界待真实语料复核）；测试 13 → **17 项**（对比脚本），全套 **1380 → 1891 passed / 1 skipped**，`ruff` / `mypy`（67 files）全绿 |
+| 证据 operator 工作流（2026-09-22，GOLD-007） | 新增 `src/evidence/workflow.py`（写入门禁 + 脱敏隔离摘要）+ `scripts/evidence_operator.py`（单入口 `workflow`：`template → preflight → quarantine → intake → recheck`；单步 `template/preflight/quarantine/intake/recheck/author-chain`；默认 dry-run / 零网络 / 零写入，写入前二次完整 Evidence Gateway 校验，隔离行永不进台账）+ `src/evidence/author_chain.py`（**gateway-only** 作者归属链：只消费 `evidence-intake-v1` + `scope=author` + `oos_eligible=true`，普通 CSV 无法绕过；身份冲突跳过不覆盖；账号 `enabled=false`）；新增 23 项测试（单元 9 + 集成 14）；登记 **TD-49**；**未解除** `PHASE3_3_DATA`（真实授权证据仍需业务方提供 + 人工核验） |

@@ -10,7 +10,11 @@
 - :mod:`src.evidence.templates`：Author / News 的 operator-ready 输入模板（GOLD-006），
   模板行带显式 synthetic/example 标记，导入时判 ``SYNTHETIC_EVIDENCE`` 隔离、绝不计入；
 - :mod:`src.evidence.ledger`：只读台账，供 GOLD-004 资格观测层统计
-  "经证据入口认证且具备独立历史可用证据"的记录。
+  "经证据入口认证且具备独立历史可用证据"的记录；
+- :mod:`src.evidence.workflow`：operator 工作流的写入门禁与隔离摘要（GOLD-007），
+  显式写入前二次验证；只允许 ``ACCEPTED`` 行 append-only 落库；
+- :mod:`src.evidence.author_chain`：**gateway-only** 作者归属链（GOLD-007），
+  只消费已通过证据入口的 Author 证据，普通 CSV / 历史样本无法绕过。
 
 红线（与 `.clinerules` 一致）：
 
@@ -19,11 +23,21 @@
 - 不覆盖历史事实（只 append-only；内容冲突判 ``IDENTITY_CONFLICT`` 并隔离）；
 - 不因代码完成或 Mock 测试解除 ``PHASE3_3_DATA``。
 
-入口：``scripts/intake_evidence.py``（默认 dry-run、默认零写入、默认零网络）。
+入口：``scripts/intake_evidence.py``（单步 intake）与 ``scripts/evidence_operator.py``
+（GOLD-007 单入口 operator workflow；两者均默认 dry-run、默认零写入、默认零网络）。
 """
 
 from __future__ import annotations
 
+from src.evidence.author_chain import (
+    AUTHOR_CHAIN_NOTE,
+    AUTHOR_CHAIN_SCHEMA_VERSION,
+    AuthorChainReport,
+    GatewayAuthorEvidence,
+    attribute_gateway_author_evidence,
+    gateway_author_evidence,
+    load_gateway_author_evidence,
+)
 from src.evidence.contracts import (
     ALLOWED_AUTHORIZATION_BASES,
     COMMON_REQUIRED_FIELDS,
@@ -76,9 +90,23 @@ from src.evidence.validation import (
     assess_row,
     normalize_input_row,
 )
+from src.evidence.workflow import (
+    OPERATOR_STEPS,
+    OPERATOR_WORKFLOW_SCHEMA_VERSION,
+    WRITE_GATE_NOTE,
+    QuarantineEntry,
+    QuarantineSummary,
+    WriteGateDecision,
+    build_quarantine_summary,
+    evaluate_write_gate,
+    render_quarantine_summary,
+    render_write_gate,
+)
 
 __all__ = [
     "ALLOWED_AUTHORIZATION_BASES",
+    "AUTHOR_CHAIN_NOTE",
+    "AUTHOR_CHAIN_SCHEMA_VERSION",
     "COMMON_REQUIRED_FIELDS",
     "EVIDENCE_CONTRACT_VERSION",
     "EVIDENCE_SCHEMA_VERSION",
@@ -86,35 +114,50 @@ __all__ = [
     "EXAMPLE_MARKER_FLAG_FIELDS",
     "EXAMPLE_MARKER_KIND_FIELDS",
     "EXAMPLE_MARKER_VALUES",
+    "OPERATOR_STEPS",
+    "OPERATOR_WORKFLOW_SCHEMA_VERSION",
     "QUARANTINE_REASON_CODES",
     "TEMPLATE_FORMATS",
     "TEMPLATE_ROOT",
     "TEMPLATE_SCHEMA_VERSION",
+    "WRITE_GATE_NOTE",
     "AuthorizationDeclaration",
+    "AuthorChainReport",
     "EvidenceIntakeReport",
     "EvidenceLedger",
     "EvidenceRecord",
     "EvidenceScope",
+    "GatewayAuthorEvidence",
     "InputFile",
     "InputRow",
     "IntakeCounts",
     "NormalizedRow",
+    "QuarantineEntry",
+    "QuarantineSummary",
     "ReasonCode",
     "RowAssessment",
     "RowOutcome",
     "RowStatus",
     "ScopeLedger",
+    "WriteGateDecision",
     "assess_row",
+    "attribute_gateway_author_evidence",
+    "build_quarantine_summary",
+    "evaluate_write_gate",
     "example_rows",
+    "gateway_author_evidence",
     "intake_evidence",
     "ledger_from_raw_json",
     "load_evidence_ledger",
+    "load_gateway_author_evidence",
     "load_input_rows",
     "normalize_input_row",
     "quarantine_payload",
     "read_input_file",
     "render_intake_report",
+    "render_quarantine_summary",
     "render_template",
+    "render_write_gate",
     "required_field_names",
     "resolve_format",
     "synthetic_marker_fields",

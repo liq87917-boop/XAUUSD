@@ -2399,5 +2399,75 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - 同步 `README.md`（§1 交付表 + §7 新章节 + §10 阻塞说明）、`TECH_DEBT.md`（新增 TD-48）与
   `examples/evidence/README.md`。
 
+## 第七十一轮（2026-09-22）：GOLD-007 —— 单入口 Evidence Operator 工作流与 gateway-only 作者归属链
+
+### 1. 交付内容
+
+- **单入口 operator workflow**（`scripts/evidence_operator.py`；`workflow` 子命令一次串联
+  `template → preflight → quarantine → intake → recheck`，另有 `template` / `preflight` /
+  `quarantine` / `intake` / `recheck` / `author-chain` 单步命令）：
+  - **默认 dry-run / 零网络 / 零写入**：`--report` / `--manifest` / `--quarantine` 必须显式配
+    `--no-dry-run`；`recheck` 直接**复用** `scripts.evidence_readiness.py`（不另造第二套资格口径）；
+  - **写入前二次验证**（`src/evidence/workflow.py::evaluate_write_gate`）：先跑一次完整 dry-run
+    Evidence Gateway 校验并汇总写入门禁（`accepted` / `quarantined` / `duplicate` / `conflict` /
+    `not_oos_eligible` / `synthetic` / `authorization_incomplete` / `time_invalid` /
+    `identity_issues` / `sensitive_detected` / `availability_unproven`），只有 `ACCEPTED` 行
+    append-only 落库；未授权 / 合成示例 / 时间非法 / 身份冲突 / 凭据 / 坏行一律隔离；
+  - **隔离摘要**（`build_quarantine_summary`）：逐行给出状态 / 稳定原因码 / 已脱敏来源名 /
+    记录 ID / 指纹前缀，供 operator 人工复核；不含正文与输入额外列值；
+  - **稳定 JSON**：`workflow` 输出 `steps` / `preflight.readiness` / `write_gate` / `quarantine` /
+    `intake` / `author_chain` / `qualification`，并显式带 `blocker_code` / `blocker_active=true` /
+    `human_gate_required=true`；退出码 `0` / `2` / `3` /（`intake` 有隔离行时）`4`。
+- **gateway-only 作者归属链**（`src/evidence/author_chain.py`）：
+  - **唯一合法来源**：`raw_json.evidence` 带 `evidence-intake-v1` + `scope=author` +
+    `oos_eligible=true` + 作者身份齐全的记录；`scripts/import_real_posts.py` 的普通 CSV 载荷
+    只写 `import_kind=manual_real_corpus`（无证据块）→ **恒非候选**，无法绕过 gateway；
+  - 幂等：同一 `raw_item` 只归属一次（`author_posts.raw_item_id` 唯一）；重复运行为 `duplicate`；
+  - **不启用采集**：新建 `author_accounts` 一律 `enabled=false`（只建立归属）；
+  - **身份冲突不覆盖**：同一 `(source, external_account_id)` 已归属其他作者时**跳过并上报**
+    （`identity_conflicts`），绝不静默改写历史归属；
+  - 沿用既有 `authors` / `author_accounts` / `author_posts` schema：**未新增 migration**。
+- **`scripts/import_real_posts.py` 复用评估结论**：其作者归属链读取**普通 CSV**（无证据块），
+  不可安全复用于 Phase 3.3 资格证据；因此**不改造**该脚本，而是新增 gateway-only 归属链，
+  并把「历史 CSV 口径不适用于资格证据」写入 `TECH_DEBT.md` TD-49（记录技术债，未新增 schema）。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **23 项**测试（全部 Mock / 临时文件 / SQLite，零网络，未新增依赖）：
+  - `tests/unit/test_evidence_workflow.py` **5**：步骤名 / schema 版本；写入门禁对
+    accepted / quarantined / duplicate / conflict / not_oos_eligible / synthetic /
+    authorization / time / identity / sensitive / availability 的分类计数；无可写行时
+    `write_allowed=false`；隔离摘要脱敏（`token=***` / `bearer ***`，指纹只留前缀）与空批次渲染；
+  - `tests/unit/test_evidence_author_chain.py` **4**：普通 CSV / 历史样本 / Mock / 缺证据块
+    **恒非候选**；只有契约 Author + OOS 证据才算候选；候选字段脱敏；报告 JSON 结构稳定且脱敏；
+  - `tests/integration/test_evidence_operator_integration.py` **14**：单入口默认 dry-run 零写入 +
+    blocker 恒 active；`--report` 默认不落盘、显式 `--no-dry-run` 才写；模板示例文件全部
+    `SYNTHETIC_EVIDENCE` 隔离且台账 / DB 为 0；未授权 / 时间不足只隔离；显式 intake 落库 +
+    manifest / quarantine + 台账只计 accepted；**重复显式 intake 幂等**（只产 DUPLICATE，不增长）；
+    **身份冲突拒绝覆盖**（`raw_items.content_hash` 不变）；作者链忽略普通 CSV；作者链消费
+    gateway 证据且幂等（账号 `enabled=false`）；作者链身份冲突跳过不覆盖；
+    `workflow --author-chain` 只归属 gateway 证据；News `eligible_count` / `coverage_days` /
+    `max_source_share` 缺口量化；单步 `quarantine` / `preflight` / `recheck` 与单入口同一套加固且零写入；
+    凭据不出现在 JSON 与 Markdown；参数 / 输入错误退出码。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **1831 passed / 1 skipped in 224.04s**
+    （唯一 skip 为 `jieba` 已安装分支）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 152 source files`。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增 / 修改 migration 与 schema、未联网、未抓取任何站点、未触碰 `.env`；
+- `src/alpha/**`（含阈值 `evidence_gate.py`）、`src/scheduler/**`、`src/collectors/**` 未改动
+  （只**复用**其阈值与口径）；`scripts/import_real_posts.py` 未改造（改为登记技术债）；
+- **未解除** `PHASE3_3_DATA`：所有输出持续显式 `blocker_active=true` / `human_gate_required=true`，
+  未进入 Phase 3.4，未生成任何交易信号或订单；`LIVE_TRADING=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；
+- 同步 `README.md`（§1 交付表 + §7 新章节）与 `TECH_DEBT.md`（新增 TD-49 + 变更日志行）。
+- **遗留 / 下一步**：仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 BLOCKED。业务方须按
+  `evidence-intake-v1` 提供真实授权的 Author / News 数据并**人工核验**授权与历史可用性，
+  再用 `scripts.evidence_operator workflow --no-dry-run` 显式落库、`recheck` 显示量化门槛是否达标。
+
 
 

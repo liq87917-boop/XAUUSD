@@ -56,6 +56,8 @@ Strategy 事实，不进入实盘。
 | **只读运行健康度 / 数据资格观测层**（窗口内 source 级运行与加工状态 + Phase 3.3 资格缺口机器可读输出；`--json` 稳定结构、默认 dry-run、输出脱敏，**不解除** `PHASE3_3_DATA`） | `src/monitoring/`、`scripts/report_collector_health.py` |
 | **授权证据接收入口 Evidence Intake Gateway**（版本化契约 `evidence-intake-v1`：来源身份 / 时间语义 / 出处 / 授权声明 / 历史可用证据；默认 dry-run 与零网络、坏行隔离 + 稳定原因码、幂等且不覆盖历史事实，**不解除** `PHASE3_3_DATA`） | `src/evidence/`、`scripts/intake_evidence.py` |
 | **证据就绪度 / 一键资格复核入口**（Author / News operator 模板，示例行显式标记 `record_kind=example`、`is_mock=true`，导入判 `SYNTHETIC_EVIDENCE` 隔离、永不计入台账；默认只读 preflight 量化 `accepted/quarantined/duplicate/conflict/not_oos_eligible` 与 Author/News 的 remaining gap；`recheck` 一键串联只读台账与 Phase 3.3 qualification report，**不解除** `PHASE3_3_DATA`） | `src/evidence/templates.py`、`src/monitoring/evidence_readiness.py`、`scripts/evidence_readiness.py`、`examples/evidence/` |
+| **单入口 Evidence Operator 工作流**（GOLD-007：`template → preflight → quarantine → intake → recheck` 串联；默认 dry-run / 零网络 / 零写入，写入前二次完整 Evidence Gateway 校验 + 写入门禁，隔离行永不进台账；输出 Author/News remaining gap 与稳定原因码） | `src/evidence/workflow.py`、`scripts/evidence_operator.py` |
+| **gateway-only 作者归属链**（GOLD-007：只消费 `evidence-intake-v1` + `scope=author` + `oos_eligible=true` 的记录；普通 CSV / 历史样本无证据块，**无法绕过** gateway；身份冲突跳过且不覆盖；新建 `author_accounts` 一律 `enabled=false`） | `src/evidence/author_chain.py`、`scripts/evidence_operator.py` |
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
 采集时间不可信而隔离；新闻侧只有 30 条 / 56 天，最大单源占比 66.67%。详见
@@ -528,6 +530,64 @@ Operator 工作流（全部默认只读、默认零网络）：
   `tests/integration/test_evidence_readiness_integration.py`（全部 Mock / 临时文件 / SQLite，零网络）；
 - **仍未解决（保持 BLOCKED）**：真实库内仍无足量已授权证据，`PHASE3_3_DATA` 保持
   `active=true`；本工具只列出缺口，不修改阈值、不放宽授权 / 时间 / availability 规则。
+
+### 单入口 Evidence Operator 工作流（`scripts/evidence_operator.py`，GOLD-007）
+
+> **合规红线**：本工作流只做**字段级机械校验**与量化；授权声明的法律效力、许可范围与
+> 历史可用时间证据**仍需人工核验**。命令**不联网**、不抓取站点、不绕过 robots / 条款 / 证书；
+> `blocker_active` / `human_gate_required` **恒为 true**；无真实合格证据时
+> `PHASE3_3_DATA` 保持 **BLOCKED**。
+
+```powershell
+# ① 单入口（推荐）：默认 dry-run，一次完成 preflight / 隔离摘要 / recheck（零写入、零网络）
+.\.venv\Scripts\python.exe -m scripts.evidence_operator workflow --scope news `
+  --input logs/evidence/news.csv --json
+
+# ② 唯一显式写入路径：先跑完整 dry-run 写入门禁，再 append-only 落库（含 manifest / 隔离清单）
+.\.venv\Scripts\python.exe -m scripts.evidence_operator workflow --scope news `
+  --input logs/evidence/news.csv --no-dry-run `
+  --manifest logs/evidence/news_manifest.json `
+  --quarantine logs/evidence/news_quarantine.jsonl
+
+# ③ 单步命令（与 workflow 同一套校验逻辑；均默认 dry-run）
+.\.venv\Scripts\python.exe -m scripts.evidence_operator template --scope author
+.\.venv\Scripts\python.exe -m scripts.evidence_operator preflight --scope author --input authors.jsonl --json
+.\.venv\Scripts\python.exe -m scripts.evidence_operator quarantine --scope author --input authors.jsonl
+.\.venv\Scripts\python.exe -m scripts.evidence_operator intake --scope author --input authors.jsonl
+.\.venv\Scripts\python.exe -m scripts.evidence_operator recheck --json
+
+# ④ gateway-only 作者归属链（默认 dry-run；只消费已通过网关的 Author 证据）
+.\.venv\Scripts\python.exe -m scripts.evidence_operator author-chain --json
+```
+
+- **单入口串联**：`workflow` 一次完成 `template → preflight → quarantine → intake → recheck`，
+  JSON 含 `steps` / `preflight.readiness` / `write_gate` / `quarantine` / `intake` /
+  `author_chain` / `qualification`，并显式输出 `blocker_code` 与 `blocker_active=true`；
+- **写入前二次验证**：`intake` / `workflow --no-dry-run` 会先跑一次完整 dry-run
+  Evidence Gateway 校验并汇总**写入门禁**（`accepted` / `quarantined` / `duplicate` /
+  `conflict` / `not_oos_eligible` / `synthetic` / `authorization_incomplete` /
+  `time_invalid` / `identity_issues` / `sensitive_detected` / `availability_unproven`），
+  只有 `ACCEPTED` 行才 append-only 落库；
+  未授权 / 合成示例 / 时间非法 / 身份冲突 / 凭据 / 坏行一律隔离，**绝不**进入 qualification
+  ledger，也**绝不**覆盖历史事实（`IDENTITY_CONFLICT` 拒绝覆盖并给稳定原因码）；
+- **幂等**：重复 dry-run 零写入；重复显式 intake 只产 `DUPLICATE`（原始层与台账不增长）；
+  同一 evidence identity 不会重复计入资格；
+- **gateway-only 作者归属链**：`author_chain` 只消费 `raw_json.evidence` 里带
+  `evidence-intake-v1` + `scope=author` + `oos_eligible=true` 的记录
+  （`scripts/import_real_posts.py` 的普通 CSV 载荷没有证据块，恒不是候选 → **无法绕过**
+  gateway）；同一 `raw_item` 只归属一次；身份冲突（账号已归属其他作者）跳过且不覆盖；
+  新建 `author_accounts` 一律 `enabled=false`（只建立归属，不启用采集）；
+- **默认零写入**：`--report` / `--manifest` / `--quarantine` 必须显式配 `--no-dry-run`；
+  退出码 `0` 报告成功（BLOCKED 也是正常结果）/ `2` 参数或输入错误 / `3` 输入没有数据行 /
+  `4` `intake` 存在被隔离的行；
+- **脱敏**：只输出计数 / 稳定原因码 / 已脱敏来源名 / 指纹前缀 / 时间，
+  绝不输出正文、token / API key / Authorization 或完整 source config；
+- **测试**：`tests/unit/test_evidence_workflow.py`、`tests/unit/test_evidence_author_chain.py`、
+  `tests/integration/test_evidence_operator_integration.py`（全部 Mock / 临时文件 / SQLite，零网络）；
+- 无新增依赖、无新增 migration / schema、不进入 Phase 3.4、不生成交易信号或订单；
+- **仍未解决（保持 BLOCKED）**：库内仍无足量真实授权证据，`PHASE3_3_DATA` 保持
+  `active=true`；本工具只列出缺口与隔离原因，不修改阈值、不放宽授权 / 时间 / availability 规则。
+  真实数据仍需**业务方提供**并**人工核验**。
 
 ## 8. 数据模型
 

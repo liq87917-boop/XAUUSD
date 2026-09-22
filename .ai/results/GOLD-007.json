@@ -1,0 +1,79 @@
+{
+  "task_id": "GOLD-007",
+  "title": "完善授权 Evidence Operator 工作流与安全导入闭环",
+  "status": "completed",
+  "finished_at": "2026-09-22T21:06:55+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    "?? scripts/evidence_operator.py",
+    "?? src/evidence/author_chain.py",
+    "?? src/evidence/workflow.py",
+    "?? tests/integration/test_evidence_operator_integration.py",
+    "?? tests/unit/test_evidence_author_chain.py",
+    "?? tests/unit/test_evidence_workflow.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md          | 70 ++++++++++++++++++++++++++++++++++++++++++++++++\n README.md                | 60 +++++++++++++++++++++++++++++++++++++++++\n TECH_DEBT.md             | 44 ++++++++++++++++++++++++++++++\n src/evidence/__init__.py | 47 ++++++++++++++++++++++++++++++--\n 4 files changed, 219 insertions(+), 2 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-22T20:46:33+08:00",
+      "finished_at": "2026-09-22T21:06:55+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 140,
+      "duration_ms": 1001814,
+      "usage": {
+        "inputTokens": 32862937,
+        "outputTokens": 130079,
+        "cacheReadTokens": 32564736,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.22047175800000005
+      },
+      "cline_final_text": "Submission recorded (verified): ## GOLD-007 完成总结（BLOCKER_TOOLING：完善授权 Evidence Operator 工作流与安全导入闭环）\n\n### 1. 完成内容\n- **单入口 operator workflow**（`scripts/evidence_operator.py` + `src/evidence/workflow.py`）：`workflow` 子命令一次串联 `template → preflight → quarantine → intake → recheck`，另有 `template/preflight/quarantine/intake/recheck/author-chain` 单步命令；**默认 dry-run、零网络、零写入**，`--report/--manifest/--quarantine` 必须显式配 `--no-dry-run`；`recheck` 直接复用 `scripts.evidence_readiness.py`（不另造第二套资格口径）。\n- **写入前二次验证**（`evaluate_write_gate`，纯函数）：显式写入前先跑完整 dry-run Evidence Gateway 校验，汇总 accepted/quarantined/duplicate/conflict/not_oos_eligible + synthetic/authorization_incomplete/time_invalid/identity_issues/sensitive_detected/provenance_missing/availability_unproven；只有 `ACCEPTED` 行 append-only 落库，未授权/合成示例/时间非法/身份冲突/凭据/坏行一律隔离，绝不进 qualification ledger、绝不覆盖历史事实。\n- **脱敏隔离摘要**（`build_quarantine_summary`/`render_quarantine_summary`）：逐行状态+稳定原因码+已脱敏来源名/记录 ID/指纹前缀，可人工复核，不含正文与输入额外列值。\n- **gateway-only 作者归属链**（`src/evidence/author_chain.py`）：只消费 `raw_json.evidence` 带 `evidence-intake-v1` + `scope=author` + `oos_eligible=true` + 身份齐全的记录；幂等（同一 raw_item 只归属一次）；身份冲突跳过且不覆盖；新建 `author_accounts` 一律 `enabled=false`；沿用既有 schema，未新增 migration。\n- **`scripts/import_real_posts.py` 复用评估**：其普通 CSV 载荷无证据块 → 恒非候选、无法绕过 gateway；故不改造该脚本，而是新增 gateway-only 归属链，并把「历史 CSV 口径不适用于资格证据」登记为 TD-49（技术债，非 migration）。\n- Author/News 剩余缺口与原因码持续输出，`blocker_active`/`human_gate_required` 恒为 true，`PHASE3_3_DATA` 保持 BLOCKED。\n\n### 2. 修改/新增文件\n- 修改：`src/evidence/__init__.py`（导出新模块）、`README.md`（交付表 + §7 新章节）、`TECH_DEBT.md`（TD-49 登记+明细+变更日志）、`PROGRESS_LOG.md`（第七十一轮）\n- 新增：`src/evidence/workflow.py`、`src/evidence/author_chain.py`、`scripts/evidence_operator.py`、`tests/unit/test_evidence_workflow.py`、`tests/unit/test_evidence_author_chain.py`、`tests/integration/test_evidence_operator_integration.py`\n\n### 3. 测试结果（项目 `.venv` 实测）\n- 新增 **23 项**测试全部通过（单元 9：写入门禁/隔离摘要/作者链纯函数边界；集成 14：模板示例永不入库、未授权/时间不足只隔离、显式 intake 幂等、身份冲突不覆盖、News coverage/source-share 缺口、作者链 gateway 安全边界与幂等、单步命令同一套加固、凭据脱敏、退出码）。\n- 全量门禁：`pytest tests -q` → **1831 passed / 1 skipped in 224.04s**；`ruff check .` → **All checks passed!**；`mypy config database src scripts` → **Success: no issues found in 152 source files**。\n- 真实 CLI 冒烟（临时 SQLite + `DATABASE_URL`）：`python -m scripts.evidence_operator workflow --json` 输出 `report=evidence_operator_workflow`、`blocker=PHASE3_3_DATA`、`active=True`、`steps=template,preflight,quarantine,intake,recheck`、`qualification.blocker_active=True`、`ready=False`。\n- 范围守规：`git status` 显示改动仅限 allowed 路径；`.ai/**`、`database/migrations/**`、`src/alpha/**`、`.env` 经检查**未触碰**（forbidden-path 检查为空）。\n\n### 4. 遗留问题（非本任务可解）\n- `PHASE3_3_DATA` 仍为 **BLOCKED**：库内无足量真实授权 Author/News 证据（须业务方提供 + 人工核验），工具只报告缺口与隔离原因，不修改阈值、不放宽授权/时间/availability 规则。\n- 作者链只建立归属，不做观点抽取/人工标注，也未接入任何采集；无告警推送（与 TD-46 同源）。\n\n### 5. 是否满足 acceptance\n**满足**：存在默认 dry-run 的单入口 workflow 串联 preflight/intake/quarantine/recheck；写入前重复完整 gateway 校验，未授权/合成/时间或 availability 不合格记录无法进 ledger；重复导入幂等、identity conflict 不覆盖且有稳定 reason code；作者链仅消费已过网关证据、普通 CSV 无法绕过；输出可量化 Author/News remaining gap 与隔离原因且敏感字段不泄漏；全量 pytest/ruff/mypy 通过；无新增依赖、migration/schema、未授权采集、Phase 3.4 或实盘代码；文档明确 PHASE3_3_DATA 仍 BLOCKED。\n\n### 6. 建议下一步\n由 Orchestrator 走 Git 流程提交；业务方按 `evidence-intake-v1` 提交真实授权数据并经人工核验后，用 `scripts.evidence_operator workflow --no-dry-run` 显式落库、`recheck` 复核缺口是否达标，再讨论解除 blocker 与进入 Phase 3.4。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        "?? scripts/evidence_operator.py",
+        "?? src/evidence/author_chain.py",
+        "?? src/evidence/workflow.py",
+        "?? tests/integration/test_evidence_operator_integration.py",
+        "?? tests/unit/test_evidence_author_chain.py",
+        "?? tests/unit/test_evidence_workflow.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md          | 70 ++++++++++++++++++++++++++++++++++++++++++++++++\n README.md                | 60 +++++++++++++++++++++++++++++++++++++++++\n TECH_DEBT.md             | 44 ++++++++++++++++++++++++++++++\n src/evidence/__init__.py | 47 ++++++++++++++++++++++++++++++--\n 4 files changed, 219 insertions(+), 2 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  3%]\n........................................................................ [  7%]\n........................................................................ [ 11%]\n........................................................................ [ 15%]\n........................................................................ [ 19%]\n........................................................................ [ 23%]\n........................................................................ [ 27%]\n........................................................................ [ 31%]\n........................................................................ [ 35%]\n........................................................................ [ 39%]\n........................................................................ [ 43%]\n........................................................................ [ 47%]\n........................................................................ [ 51%]\n........................................................................ [ 55%]\n........................................................................ [ 58%]\n........................................................................ [ 62%]\n........................................................................ [ 66%]\n........................................................................ [ 70%]\n........................................................................ [ 74%]\n........................................................................ [ 78%]\n........................................................................ [ 82%]\n........................................................................ [ 86%]\n........................................................................ [ 90%]\n........................................................................ [ 94%]\n...........................................................s............ [ 98%]\n................................                                         [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n1831 passed, 1 skipped in 215.31s (0:03:35)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 152 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
