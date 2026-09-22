@@ -347,7 +347,7 @@ ProcessorInput
   `processing` 摘要），生产工厂入口 `src/collectors/bootstrap.py::default_collector_factory(
   post_processor=...)`——Scheduler 核心不感知 Processor；
 - **测试**：`tests/unit/test_collection_processor.py`（35 项）、
-  `tests/unit/test_redaction.py`（25 项）、
+  `tests/unit/test_redaction.py`（26 项，含 GOLD-002-R1 复核补的 URL 空值回归）、
   `tests/integration/test_collection_processor_persistence.py`（8 项）、
   `tests/integration/test_collection_processor_wiring.py`（4 项），全部 Mock、零网络；
 - 无新增依赖、无新增 migration / schema（复用现有 `processed_items` 与 `ProcessStatus`）。
@@ -468,7 +468,10 @@ ProcessorInput
 
 - TD-02：PostgreSQL 上跑通采集写路径（`python -m scripts.phase1_pipeline_report --db-url ... --migrate`）；
 - TD-01：本地配置 `FRED_API_KEY` 后做一次单 series 真实冒烟；
-- TD-11：独立 Processor 层（含 TD-03 的 4h 聚合）；TD-09 已解除（见 §7「30 分钟调度」）；
+- **TD-11 / TD-09 已解除（2026-09-22）**：TD-11 独立 Processor 层见 §7「采集后处理 Processor
+  Pipeline」；TD-09 见 §7「30 分钟调度」。**TD-12 仍为部分解除**：`processed_items` /
+  `audit_logs` / `data_versions` 均已有写入路径，**剩余**非行情数据集的 `data_versions`
+  快照与 `processed_items` 缺 `error_message` 列（TD-19），见 `TECH_DEBT.md` TD-12；
 - TD-05 / TD-07：`econ_calendar_collector` 与宏观预期值补全；TD-10：API 与 Dashboard。
 
 ## 11. 强制约束速查（团队决定）

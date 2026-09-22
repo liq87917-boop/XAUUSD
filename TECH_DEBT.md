@@ -48,7 +48,7 @@
 | TD-08 | P1 | 生产 RSS / 行情备用源未配置（`feeds` 为空、Stooq 关闭） | 上线前运维配置 |
 | TD-09 | ✅ 已解除（2026-09-22） | ~~Scheduler（每 30 分钟任务框架）未实现~~ → `src/scheduler/`（UTC 对齐确定性 30 分钟槽 + `job_runs` 幂等 + stale RUNNING/RETRYING 接管 + 单源构造/执行故障隔离）+ `scripts/run_collector_scheduler.py`（`--once` / 常驻循环，Ctrl+C 正常退出）；复用现有 `job_runs`，无新 migration/schema；证据见 `PROGRESS_LOG.md` 第六十五轮（新增 60 项 Mock 测试，全量 pytest / ruff / mypy 通过） | 已修 |
 | TD-10 | P1 | Dashboard / API 未实现（Phase 1 交付物中的监控与查询页面） | Phase 1 收尾轮 / Phase 2 |
-| TD-11 | ✅ 已解除（2026-09-22） | ~~Processor 层未独立建立（normalize/dedup/timezone 目前内嵌在采集器内）~~ → `src/processors/collection/`（`contracts` / `normalize` / `identity` / `validate` / `pipeline`）：确定性四阶段流水线（normalize → timezone/effective_at → identity/dedup → validation/audit）+ 幂等写 `processed_items`（append-only，`(raw_item_id, processor_name, processor_version)` 唯一 + 存在性检查）+ 白名单审计摘要 + 凭据擦除（`src/common/redaction.py`）；采集侧接线点 `BaseCollector(post_processor=...)`（默认 None，零行为变化），参考实现 RSS `collect_rss.py --to-db`；无新 migration/schema；证据见 `PROGRESS_LOG.md` 第六十六轮（新增 72 项 Mock 测试，全量 pytest / ruff / mypy 通过） | 已修 |
+| TD-11 | ✅ 已解除（2026-09-22） | ~~Processor 层未独立建立（normalize/dedup/timezone 目前内嵌在采集器内）~~ → `src/processors/collection/`（`contracts` / `normalize` / `identity` / `validate` / `pipeline`）：确定性四阶段流水线（normalize → timezone/effective_at → identity/dedup → validation/audit）+ 幂等写 `processed_items`（append-only，`(raw_item_id, processor_name, processor_version)` 唯一 + 存在性检查）+ 白名单审计摘要 + 凭据擦除（`src/common/redaction.py`）；采集侧接线点 `BaseCollector(post_processor=...)`（默认 None，零行为变化），参考实现 RSS `collect_rss.py --to-db`；无新 migration/schema；证据见 `PROGRESS_LOG.md` 第六十六轮（新增 73 项 Mock 测试：交付 72 + R1 复核回归 1；全量 pytest / ruff / mypy 通过） | 已修 |
 | TD-12 | P2（部分解除，2026-09-22 收紧） | `job_runs` 已由 30 分钟 Scheduler 写入（TD-09）；`processed_items` 已有两条写入路径（`src/processors/collection/pipeline.py` 采集后处理 + `src/processors/opinion_pipeline.py`）；`audit_logs` 已由作者库仓储写入（`database/repositories/audit.py`）；`data_versions` 已由 `src/features/market.py` / `src/alpha/regime.py` 写入。**剩余**：`processed_items` 无 `error_message` 列（失败详情在 `structured_json`，见 TD-19）、非行情数据集的 `data_versions` 快照仍随各阶段补齐 | 随需求 |
 | TD-13 | P2 | `raw_media` 无下载器（图片二进制未落地，`storage_uri` 写入路径未验证） | Phase 2（微博图片） |
 | TD-14 | P2 | 依赖仅声明下界，无 lock 文件（可复现构建依赖 pip 解析） | 择期 |
@@ -230,9 +230,10 @@
 >   `src/collectors/bootstrap.py::default_collector_factory(post_processor=...)`。
 >   **Scheduler 核心（`src/scheduler/core.py`）不含任何 Processor 逻辑**（接线点评估结论：
 >   由 bootstrap/CLI 注入，不进调度核心）；
-> - **测试**：新增 72 项（`tests/unit/test_collection_processor.py` 35、
->   `tests/unit/test_redaction.py` 25、`tests/integration/test_collection_processor_persistence.py` 8、
->   `tests/integration/test_collection_processor_wiring.py` 4），全部 Mock、零网络；
+> - **测试**：新增 **73 项**（GOLD-002 交付 72 项 + GOLD-002-R1 复核补的 1 项 URL 空值回归）：
+>   `tests/unit/test_collection_processor.py` 35、
+>   `tests/unit/test_redaction.py` 26、`tests/integration/test_collection_processor_persistence.py` 8、
+>   `tests/integration/test_collection_processor_wiring.py` 4，全部 Mock、零网络；
 >   覆盖确定性、时区边界、`effective_at`、重复输入/重复运行、坏数据隔离、敏感字段过滤、空批次。
 >
 > TD-12 据此**收紧为"部分解除"**：`processed_items`（采集后处理 + 观点管道）、

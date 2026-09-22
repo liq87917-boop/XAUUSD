@@ -188,7 +188,13 @@ def sanitize_mapping(
 
         lowered = key.lower()
         if "url" in lowered or "uri" in lowered or "link" in lowered:
-            sanitized[key] = safe_url(str(raw_value), max_chars=max_value_chars)
+            # ⚠️ 空值必须原样保留为 ``None``：``str(None)`` 会让审计摘要里凭空多出一个
+            # 字符串 ``"None"``（把"未知 URL"伪造成"URL 就叫 None"）。
+            sanitized[key] = (
+                None
+                if raw_value is None
+                else safe_url(str(raw_value), max_chars=max_value_chars)
+            )
             continue
 
         value = sanitize_value(raw_value, max_chars=max_value_chars)

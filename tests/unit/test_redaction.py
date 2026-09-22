@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from src.common.redaction import (
@@ -101,6 +103,25 @@ def test_sanitize_mapping_drops_credentials_nested_and_url_query() -> None:
     assert sanitized["categories"] == ["gold", "macro"]
     assert "SECRETVALUE" not in str(sanitized)
     assert REDACTED in str(sanitized)
+
+
+def test_sanitize_mapping_keeps_null_url_values_as_null() -> None:
+    """URL 类键的空值必须保持 ``None``（不得被字符串化成 ``"None"``）。
+
+    回归背景（GOLD-002-R1 复核发现）：``sanitize_mapping`` 对 URL 类键无条件调用
+    ``safe_url(str(value))``，于是 ``{"feed_url": None}`` 会被写成 ``"None"``——
+    审计摘要凭空造出一个"看起来像值"的字符串，与"缺失即缺失"的口径冲突。
+    """
+
+    sanitized = sanitize_mapping({"feed_url": None, "url": None, "source_name": "金十数据"})
+
+    assert sanitized["feed_url"] is None
+    assert sanitized["url"] is None
+    assert sanitized["source_name"] == "金十数据"
+    # 落库形态（JSON）里必须是 null，而不是字符串 "None"
+    payload = json.dumps(sanitized, ensure_ascii=False)
+    assert '"feed_url": null' in payload
+    assert "None" not in payload
 
 
 def test_sanitize_mapping_is_bounded_and_returns_new_object() -> None:

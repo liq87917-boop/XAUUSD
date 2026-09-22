@@ -1979,3 +1979,153 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
 - TD-43 / TD-45 仍为 P0（待合法授权数据源）；未改 docs/10、docs/11 口径；未新增依赖
   （沿用 sklearn）；未写 Alpha 事实表、未进入 Phase 3.4 Meta Ensemble。
 
+
+## 第六十五轮（2026-09-22）：GOLD-001-R2 —— 30 分钟 Collector Scheduler + 质量门禁修复
+
+> **补记说明**：GOLD-001-R2 交付时未按任务要求写本日志（该缺口连同 GOLD-002 的日志缺口
+> 一并在 GOLD-002-R1 复核中补齐）。以下内容**只**来自 `.ai/results/GOLD-001-R2.json`
+> 审计记录与仓库现状（`git show 8895e70`），不含任何未发生的结论。
+
+### 1. 交付内容
+
+- **新增调度层** `src/scheduler/`（`slots.py` / `core.py` / `__init__.py`）：
+  UTC 对齐的**确定性 30 分钟槽**（`resolve_slot`，同一时刻必得同一槽，可重放）、
+  `job_runs` 幂等（同槽重复运行不重复执行）、stale `RUNNING` / `RETRYING` 接管、
+  单源「构造 / 执行」两级故障隔离（一个源坏掉不影响其它源）；
+- **新增常驻入口** `scripts/run_collector_scheduler.py`（`--once` 与常驻循环，Ctrl+C 正常退出）；
+- **新增生产工厂** `src/collectors/bootstrap.py`（注册副作用 + 按 `sources.config_json["collector"]`
+  构造采集器并注入 `AiohttpTransport`）；
+- **复用现有 `job_runs` 表**：无新增 migration / schema，无新增依赖；
+- **质量门禁修复**：`orchestrator/ai_orchestrator.py`、`scripts/collectors/dry_run_collectors.py`、
+  `scripts/collectors/smoke_collectors.py`；`README.md` §7 补「30 分钟调度」、
+  `TECH_DEBT.md` TD-09 解除。
+
+### 2. 测试与门禁（GOLD-001-R2 审计记录）
+
+- 新增 **60 项 Mock 测试**（5 个测试文件：`tests/integration/test_scheduler_core.py`、
+  `tests/integration/test_collector_scheduler_cli.py`、`tests/unit/test_scheduler_slots.py`、
+  `tests/unit/test_scheduler_core_units.py`、`tests/unit/test_collector_scheduler_cli_args.py`）；
+  **GOLD-002-R1 复核时用 `pytest --collect-only` 机械计数确认为 60 项**；
+- 全量 `pytest` **1589 passed / 1 skipped**；`ruff check .` → `All checks passed!`；
+  `mypy config database src scripts` → 127 source files 全绿
+  （GOLD-002 新增 7 个源文件后 = 134，与该差值自洽）；
+- 无联网测试、无 Mock 冒充真实数据、无 schema 变更。
+
+### 3. 本轮的已知瑕疵（已在 GOLD-002 处理）
+
+- R2 误把 7 个 `.tmp_pytest*` 临时测试产物提交进仓库（`.tmp_pytest{,2}_{err,out,pid}.*`），
+  已在 GOLD-002 清理并加 `.gitignore` 规则，见第六十六轮。
+
+
+## 第六十六轮（2026-09-22）：GOLD-002 —— 独立 Processor Pipeline 与数据处理审计基础（TD-11）
+
+### 1. 交付内容（commit `d7b0d42`）
+
+- **新增 `src/processors/collection/`**（采集后处理层，**不联网 / 不做 provider 授权 / 不做调度**）：
+  `contracts.py`（`ProcessorInput` / `ProcessedRecord` / `ProcessingReport` / `RawItemLike` 协议 /
+  `RecordOutcome` / `BatchStatus`；`processor_name=collection_normalizer`、
+  `processor_version=collection-normalizer-v1`）、`normalize.py`（NFKC / 去零宽 / 折叠空白 / 截断）、
+  `identity.py`（内容指纹 + 幂等键 + 批次内去重索引，纯内存无时间依赖）、
+  `validate.py`（`source_record_id` / `collected_at` / 空文本 / 未来时间戳）、
+  `pipeline.py`（normalize → timezone/effective_at → identity/dedup → validation/audit 四阶段编排 +
+  幂等落库 + 审计摘要）；
+- **新增 `src/common/redaction.py`**（凭据擦除**唯一实现**）：`redact_secrets` / `is_sensitive_key` /
+  `safe_text` / `safe_url` / `sanitize_mapping`；`src/scheduler/core.py` 原有内联规则上移复用
+  （对外仍导出 `redact_secrets`，实现改为共享模块）；规则顺序有语义——`Bearer` 必须先于
+  `Authorization` 擦除，否则 `Authorization: Bearer xxx` 会残留真实 token（单测锁定）；
+- **append-only + 幂等**：只写 `processed_items`，`(raw_item_id, processor_name, processor_version)`
+  唯一约束 + 落库前存在性检查 → 重复输入 / 重复运行新增 **0 行**；且 `processed_items` 已在
+  `database/protection.py` 的不可覆盖表清单（`allowed_updates=∅`）——UPDATE / DELETE 在 flush 期
+  直接报错，属**结构性** append-only；
+- **时间语义**：`effective_at = max(published_at, collected_at, 上游 raw_items.effective_at)`；
+  三者都不可用时判 `REJECTED` 且 `persistable=False`（**不落库**），绝不用「现在」冒充事实时间；
+- **坏数据隔离 + 诚实状态**：单条 `REJECTED` / `FAILED` 只影响自己；批次状态区分
+  `SUCCESS` / `PARTIAL_FAILED` / `FAILED`；落库状态复用现有 `ProcessStatus`（`DUPLICATE` / `REJECTED`
+  → `SKIPPED`，留痕但不冒充加工成功），**无新增枚举 / migration / schema**；
+- **审计摘要白名单**：`processor / processor_version / status / stages / input_count / output_count /
+  duplicate_count / rejected_count / failed_count / started_at / finished_at / warnings / error`；
+  元数据经 `sanitize_mapping`（丢弃凭据键、丢弃嵌套结构、URL 去 query/userinfo、超长截断）；
+- **采集侧最小接线**：`BaseCollector(..., post_processor=...)`（默认 `None` → 与引入前**零行为差异**）+
+  `src/collectors/bootstrap.py::default_collector_factory(post_processor=...)`；参考实现 = RSS 路径
+  `python scripts/collect_rss.py --to-db`（CLI 统计新增 `processing` 摘要）；Processor 异常在采集层
+  兜住并转成**脱敏**告警，不阻断采集、不丢原始数据；
+- **Scheduler / Processor 边界**：`src/scheduler/**` 与 `scripts/run_collector_scheduler.py` 中
+  **零** Processor 引用（GOLD-002-R1 用 grep 机械确认）——接线由 bootstrap / CLI 注入，不进调度核心；
+- **清理临时产物**：删除 R2 误提交的 7 个 `.tmp_pytest*`，`.gitignore` 增 `.tmp_pytest*` 规则。
+
+### 2. 测试与门禁（GOLD-002 交付时审计记录）
+
+- 新增 **72 项 Mock 测试**（全部零网络、零真实数据源）：
+  `tests/unit/test_collection_processor.py` 35、`tests/unit/test_redaction.py` 25、
+  `tests/integration/test_collection_processor_persistence.py` 8、
+  `tests/integration/test_collection_processor_wiring.py` 4；覆盖确定性、时区边界、`effective_at`、
+  重复输入 / 重复运行、坏数据隔离、敏感字段过滤、空批次与批次状态映射；
+- 全量 `pytest` **1663 passed / 1 skipped**；`ruff check .` 全通过；
+  `mypy config database src scripts` → 134 source files 全绿（Orchestrator 审计记录）；
+- 无新增依赖、无新增 migration / schema、未进入 Phase 3.4、未训练 Alpha、未生成交易信号。
+
+### 3. 文档同步
+
+- `README.md` §7 新增「采集后处理 Processor Pipeline」小节（流水线、职责边界、幂等、接线点、测试）；
+- `TECH_DEBT.md`：TD-11 **解除**；TD-12 收紧为**部分解除**（`processed_items` / `audit_logs` /
+  `data_versions` 均已有写入路径，剩余：非行情数据集的 `data_versions` 快照、
+  `processed_items` 无 `error_message` 列 → TD-19）；**未宣称 TD-12 全部解除**；
+- 遗留缺陷（GOLD-002-R1 复核修复）：见 §4。
+
+
+### 4. GOLD-002-R1 复核与验收记录补齐（2026-09-22）
+
+> 复核范围**刻意聚焦**（append-only / 幂等键 / `effective_at` / 坏数据隔离 / 审计摘要脱敏 /
+> Scheduler-Processor 边界 / RSS 接线），不扩功能、不改架构。
+
+- **结论：无未处理的 P0/P1 回归。** 逐项证据：
+  - **append-only**：`processed_items` 已在 `database/protection.py` 的不可覆盖表清单
+    （`allowed_updates=frozenset()`），flush 期改写抛 `ImmutableRecordError`
+    （既有测试 `tests/integration/test_opinion_pipeline.py::test_pipeline_processed_items_are_append_only` 锁定）；
+    `src/processors/collection/**` 中 **0 处** `update()` / `delete()`（grep 机械确认），只 `session.add`；
+  - **幂等键**：`(raw_item_id, processor_name, processor_version)` 唯一约束 + `_already_processed`
+    存在性检查 → 重复输入 / 重复运行**新增 0 行**；由
+    `test_repeat_run_does_not_create_duplicate_processed_rows`、
+    `test_known_identity_key_marks_rerun_as_duplicate` 锁定；
+  - **`effective_at`**：`max(published_at, collected_at, 上游 raw_items.effective_at)`；
+    三个时间源全缺 → `REJECTED` + `persistable=False`（**不落库**），绝不用「现在」冒充事实时间；
+    测试锁定 `processed.effective_at >= raw.effective_at`（含「发布时间晚于采集时间」边界）；
+  - **坏数据隔离**：`process_one` 把单条异常兜成 `FAILED` 记录；采集层 `_post_process` 再兜一层
+    （脱敏告警 + 不阻断采集 + 不丢原始数据）；批次状态映射有参数化测试；
+  - **审计摘要脱敏**：`sanitize_mapping` 丢弃凭据键与嵌套结构、URL 去 query/userinfo、值截断；
+    集成测试断言真实 `api_key` / `Authorization` 不出现在 `structured_json`；
+  - **Scheduler / Processor 边界**：`src/scheduler/**` 与 `scripts/run_collector_scheduler.py` 中
+    Processor 引用数 **0**（grep 机械确认）；接线由 `bootstrap` / CLI 注入；
+  - **RSS 接线**：`tests/integration/test_collection_processor_wiring.py` 4 项全绿（含 CLI
+    `--to-db` 端到端 + 「不注入 → 零 `processed_items`」的零回归断言）。
+- **发现并修复 1 处真实缺陷（P2）**：`src/common/redaction.py::sanitize_mapping` 对 URL 类键
+  无条件 `safe_url(str(value))`，于是 `{"feed_url": None}` 在审计摘要里被写成**字符串** `"None"`——
+  把「未知 URL」伪造成一个看起来像值的字符串。修复：空值原样保留 `None`；新增回归测试
+  `tests/unit/test_redaction.py::test_sanitize_mapping_keeps_null_url_values_as_null`
+  （断言 JSON 落库形态为 `null`）。未改公共接口、未改其它调用点。
+- **文档一致性修正**：
+  - `README.md` §10「Phase 2 并行推进」里「TD-11：独立 Processor 层（含 TD-03 的 4h 聚合）」属
+    **陈旧条目**（TD-11 已解除、TD-03 已解除），已改写为「TD-11 / TD-09 已解除 + TD-12 部分解除
+    （列明剩余范围，指向 TECH_DEBT）」，与 `TECH_DEBT.md` 口径一致；
+  - README §7 测试计数 25 → 26（复核新增 1 项回归）；`TECH_DEBT.md` TD-11 的 72 → 73
+    （交付 72 + 复核 1），两处口径一致；
+  - 新增本日志的**第六十五轮**（GOLD-001-R2）与**第六十六轮**（GOLD-002）记录：TECH_DEBT 中
+    「证据见 PROGRESS_LOG 第六十五 / 六十六轮」此前指向**不存在的条目**（原任务未写日志），
+    本轮补齐后引用可解析；
+  - TD-12 口径核对：`processed_items`（采集后处理 + `src/processors/opinion_pipeline.py`）、
+    `audit_logs`（`database/repositories/audit.py`）、`data_versions`（`src/features/market.py`、
+    `src/alpha/regime.py`）写入路径均在代码中确认存在 → 维持「**部分解除**」，未宣称全部解除；
+    TD-11 有实现 + 测试 + 接线证据 → 维持「已解除」。
+- **门禁（本轮实测，项目 `.venv`）**：
+  - `pytest tests -q` → **1666 passed / 1 skipped**（收集 1667 项；唯一 skip 为 `jieba` 已安装分支）；
+  - `ruff check .` → `All checks passed!`；
+  - `mypy config database src scripts` → `Success: no issues found in 134 source files`；
+  - **环境提示（非代码回归、非本轮引入）**：若当前 shell 已导出 `FRED_API_KEY`，
+    `tests/unit/test_config_security.py::test_defaults_are_safe` 会失败——该测试断言「默认值安全」，
+    而 pydantic-settings 会读取 OS 环境变量；仅清空该变量后即 **1666 passed / 1 skipped**。
+    本轮**未**修改该测试（越出 GOLD-002-R1 范围，仅记录）。
+- **范围守规**：未新增依赖、未新增/修改 migration 与 schema、未进入 Phase 3.4、未训练 Alpha、
+  未生成交易信号、未触碰 `.ai/tasks/**` 与 `.ai/results/**`。
+- **次要观察（未修改，留待后续）**：`sanitize_mapping` 对 URL 类键的非字符串标量
+  （如 `{"is_url": True}`）仍会 `str()` 成 `"True"`；属 P2 展示口径问题，不影响本轮验收。
+
