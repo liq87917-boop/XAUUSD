@@ -1,0 +1,75 @@
+{
+  "task_id": "GOLD-015",
+  "title": "建立 Phase 3.3 Evidence Qualification 人工决策包与 Gate 审计入口",
+  "status": "completed",
+  "finished_at": "2026-09-23T07:38:47+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    "?? scripts/evidence_decision_packet.py",
+    "?? src/evidence/decision_packet.py",
+    "?? tests/integration/test_evidence_decision_packet_integration.py",
+    "?? tests/unit/test_evidence_decision_packet.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md          | 123 +++++++++++++++++++++++++++++++++++++++++++++++\n README.md                |  95 +++++++++++++++++++++++++++++++++---\n TECH_DEBT.md             |   2 +\n src/evidence/__init__.py |  87 ++++++++++++++++++++++++++++++++-\n 4 files changed, 298 insertions(+), 9 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T07:09:06+08:00",
+      "finished_at": "2026-09-23T07:38:47+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 221,
+      "duration_ms": 1526795,
+      "usage": {
+        "inputTokens": 74995685,
+        "outputTokens": 243905,
+        "cacheReadTokens": 74693632,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.4157318460000002
+      },
+      "cline_final_text": "Submission recorded (verified): GOLD-015 完成：新增纯本地只读的 L3 人工决策包层（`src/evidence/decision_packet.py` + `scripts/evidence_decision_packet.py`），把 readiness/handoff（GOLD-008/010）、批准清单与 GOLD-013 plan、GOLD-014 收据与 qualification recheck 聚合为确定性、脱敏、内容寻址（`packet_id`）的决策包。\n\n实现要点（全部经执行验证）：\n- 复用而非复制资格规则：`build_intake_plan` / `build_intake_receipt` / `compute_receipt_id` / `scan_inbox` / `load_review_ledger` / `load_approved_intake_list` / `load_snapshot_state` / `build_snapshot` / `SingleInstanceLock` / `atomic_write_text`；\n- fail-closed：handoff 结构+算术+`thresholds`（必须等于当前唯一阈值来源）+安全字段+证据时间键，readiness 快照必须与 handoff 同源（含指纹），plan stale/fingerprint drift/review override/执行结果缺失或改写/recheck 缺失或早于执行或结论不一致、`HANDOFF_STALE`、可选收据文件的 `RECEIPT_ID_MISMATCH`/`PLAN_ID_MISMATCH`/`FINGERPRINT_MISMATCH`/`REVIEW_REVISION_MISMATCH`/`RECHECK_MISMATCH` → 退出 4 且零写入；\n- 五个布尔互不蕴含：`evidence_ready_for_human_review`/`receipt_verified`/`qualification_recheck_ready` 三个独立事实，只有同时成立才 `submit_to_l3_human_gate=true`（退出 0）；`data_qualification_passed`/`phase_transition_allowed` 恒 false、`blocker_active`/`human_gate_required` 恒 true、`human_gate_level` 恒 L3（硬编码）；默认读只读、只有显式 `--out` 才原子写、无任何 intake 参数、零网络零数据库写入；\n- 内容级 `packet_id` 不含 `generated_at`（同输入幂等/byte-stable，关键输入变化出新 id 或 fail-closed）。\n\n验证证据（最终状态实测）：\n- `.venv\\Scripts\\python.exe -m pytest tests -q` → 2282 passed / 1 skipped in 251.92s（新增 83 项 = 71 单元 + 12 集成，未改既有测试）；\n- `.venv\\Scripts\\python.exe -m ruff check .` → All checks passed!；\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts` → Success: no issues found in 168 source files（GOLD-014 为 166）；\n- 集成测试跑真实链路（真实 operator 落库 + 真实 recheck + 真实 handoff）：证据未达标时诚实 BLOCKED（退出 5、文件与数据库零变化），库内达标（Mock 证据块，仅控制流）时退出 0 但 `data_qualification_passed` 恒 false；含真实子进程 CLI 冒烟。\n\n文档同步：README（§1 交付行 / §7 新章节含七步人工路径 / §10 下一步）、TECH_DEBT（TD-57 + 变更日志）、PROGRESS_LOG（第七十九轮），三处均明确 `PHASE3_3_DATA` 仍 BLOCKED、Phase 切换仍是 L3 人工 Gate。未触碰 `.ai/tasks`、`.ai/results`、`.ai/PROJECT_STATE.json`、`.env`、migration、`src/alpha`；无 git 写操作。遗留：仓库仍无足量真实授权 Author/News 证据，blocker 未解除（本工具无解除能力）。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        "?? scripts/evidence_decision_packet.py",
+        "?? src/evidence/decision_packet.py",
+        "?? tests/integration/test_evidence_decision_packet_integration.py",
+        "?? tests/unit/test_evidence_decision_packet.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md          | 123 +++++++++++++++++++++++++++++++++++++++++++++++\n README.md                |  95 +++++++++++++++++++++++++++++++++---\n TECH_DEBT.md             |   2 +\n src/evidence/__init__.py |  87 ++++++++++++++++++++++++++++++++-\n 4 files changed, 298 insertions(+), 9 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  3%]\n........................................................................ [  6%]\n........................................................................ [  9%]\n........................................................................ [ 12%]\n........................................................................ [ 15%]\n........................................................................ [ 18%]\n........................................................................ [ 22%]\n........................................................................ [ 25%]\n........................................................................ [ 28%]\n........................................................................ [ 31%]\n........................................................................ [ 34%]\n........................................................................ [ 37%]\n........................................................................ [ 40%]\n........................................................................ [ 44%]\n........................................................................ [ 47%]\n........................................................................ [ 50%]\n........................................................................ [ 53%]\n........................................................................ [ 56%]\n........................................................................ [ 59%]\n........................................................................ [ 63%]\n........................................................................ [ 66%]\n........................................................................ [ 69%]\n........................................................................ [ 72%]\n........................................................................ [ 75%]\n........................................................................ [ 78%]\n........................................................................ [ 81%]\n........................................................................ [ 85%]\n........................................................................ [ 88%]\n........................................................................ [ 91%]\n........................................................................ [ 94%]\n........................................................................ [ 97%]\n......s............................................                      [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2282 passed, 1 skipped in 249.65s (0:04:09)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 168 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

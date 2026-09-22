@@ -40,6 +40,19 @@
   ``receipt_verified``（**绝不**蕴含 ``data_qualification_passed`` / ``phase_transition_allowed``，
   两者**恒为** false），默认零写入（只有显式 ``--out`` 才原子落盘 receipt 本身）；
   Phase 切换仍是 **L3 人工 Gate**。
+- :mod:`src.evidence.decision_packet`：**纯本地只读**的 L3 人工决策包（GOLD-015）：
+  把最新 readiness / handoff（GOLD-008/010）、批准清单与 GOLD-013 intake plan、
+  GOLD-014 verified receipt 与 qualification recheck 聚合为**确定性、脱敏、内容寻址**的
+  人工 Gate packet；**复用** GOLD-013/014 的重新绑定口径（**不复制、不降低**资格规则），
+  handoff 内部算术 / ``thresholds`` / 安全字段、readiness 快照**指纹同源性**、plan stale /
+  fingerprint drift / review override / 执行结果缺失或被改写 / recheck 缺失或早于执行或结论
+  不一致、以及**可选**收据文件的 ``receipt_id`` 内容寻址与**当前**重新绑定结果不一致 →
+  一律 **fail-closed**；显式区分 ``evidence_ready_for_human_review`` / ``receipt_verified`` /
+  ``qualification_recheck_ready``，且 ``data_qualification_passed`` /
+  ``phase_transition_allowed`` **恒为** false、``blocker_active`` / ``human_gate_required``
+  **恒为** true（**硬编码**），只能给出 ``submit_to_l3_human_gate`` 与缺口 / 稳定原因码；
+  默认零写入（只有显式 ``--out`` 才原子落盘 packet 本身），**绝不**自动 intake、**绝不**写
+  数据库、**绝不**解除 ``PHASE3_3_DATA``；Phase 切换仍是 **L3 人工 Gate**。
 
 红线（与 `.clinerules` 一致）：
 
@@ -50,7 +63,9 @@
 
 入口：``scripts/intake_evidence.py``（单步 intake）与 ``scripts/evidence_operator.py``
 （GOLD-007 单入口 operator workflow；两者均默认 dry-run、默认零写入、默认零网络）；
-``scripts/evidence_inbox.py``（GOLD-011 只读发现 + 预检；唯一写入口是显式 ``--out``）。
+``scripts/evidence_inbox.py``（GOLD-011 只读发现 + 预检；唯一写入口是显式 ``--out``）；
+``scripts/evidence_decision_packet.py``（GOLD-015 L3 人工决策包；默认只读，唯一写入口是显式
+``--out``，且**没有**任何 intake 参数）。
 """
 
 from __future__ import annotations
@@ -80,6 +95,42 @@ from src.evidence.contracts import (
     required_field_names,
     synthetic_marker_fields,
 )
+from src.evidence.decision_packet import (
+    DECISION_PACKET_FILE_NAME,
+    DECISION_PACKET_KIND,
+    DECISION_PACKET_LOCK_SUFFIX,
+    DECISION_PACKET_NOTE,
+    DECISION_PACKET_REPORT_NAME,
+    DECISION_PACKET_SCHEMA_VERSION,
+    PACKET_EXECUTION_MODE,
+    PACKET_NEXT_STEP_NOTE,
+    PACKET_TIME_SEMANTICS_NOTE,
+    READINESS_CHECK_KEYS,
+    RECEIPT_ENTRY_KEYS,
+    SCOPE_GAP_KEYS,
+    DecisionPacket,
+    DecisionPacketArgumentError,
+    DecisionPacketError,
+    DecisionPacketPathError,
+    DecisionPacketStateError,
+    DecisionPacketStatus,
+    DecisionPacketVerificationError,
+    DecisionPacketWriteError,
+    HandoffDocument,
+    PacketVerificationCode,
+    PacketViolation,
+    ReadinessStateDocument,
+    ReceiptDocument,
+    build_decision_packet,
+    compute_packet_id,
+    load_handoff_document,
+    load_intake_receipt_document,
+    load_readiness_state_document,
+    render_decision_packet_summary,
+    run_decision_packet,
+    verify_decision_packet,
+)
+from src.evidence.decision_packet import exit_code_for as decision_packet_exit_code_for
 from src.evidence.handoff import (
     BLOCKED_STATUS,
     CHECK_CATEGORIES,
@@ -363,6 +414,12 @@ __all__ = [
     "BLOCKED_STATUS",
     "CHECK_CATEGORIES",
     "COMMON_REQUIRED_FIELDS",
+    "DECISION_PACKET_FILE_NAME",
+    "DECISION_PACKET_KIND",
+    "DECISION_PACKET_LOCK_SUFFIX",
+    "DECISION_PACKET_NOTE",
+    "DECISION_PACKET_REPORT_NAME",
+    "DECISION_PACKET_SCHEMA_VERSION",
     "DEFAULT_JOURNAL_LIMIT",
     "EVIDENCE_CONTRACT_VERSION",
     "EVIDENCE_SCHEMA_VERSION",
@@ -418,6 +475,9 @@ __all__ = [
     "OPERATOR_STEPS",
     "OPERATOR_WORKFLOW_SCHEMA_VERSION",
     "PACKAGE_SUMMARY_KEYS",
+    "PACKET_EXECUTION_MODE",
+    "PACKET_NEXT_STEP_NOTE",
+    "PACKET_TIME_SEMANTICS_NOTE",
     "PENDING_FILE_NAME",
     "PENDING_HUMAN_REVIEW_STATUS",
     "PENDING_KIND",
@@ -426,7 +486,9 @@ __all__ = [
     "PLAN_EXECUTION_MODE",
     "QUALIFICATION_RECHECK_REPORT",
     "QUARANTINE_REASON_CODES",
+    "READINESS_CHECK_KEYS",
     "REASON_CODES_BY_DECISION",
+    "RECEIPT_ENTRY_KEYS",
     "RECEIPT_EXECUTION_MODE",
     "REVIEW_NOTE",
     "REVIEW_REPORT_KIND",
@@ -435,6 +497,7 @@ __all__ = [
     "RUNNER_NOTE",
     "RUNNER_REPORT_NAME",
     "RUNNER_SCHEMA_VERSION",
+    "SCOPE_GAP_KEYS",
     "SCOPE_STATE_FIELDS",
     "SNAPSHOT_KIND",
     "SNAPSHOT_SCHEMA_VERSION",
@@ -459,6 +522,14 @@ __all__ = [
     "CandidatePackage",
     "ChecklistItem",
     "DecidedReview",
+    "DecisionPacket",
+    "DecisionPacketArgumentError",
+    "DecisionPacketError",
+    "DecisionPacketPathError",
+    "DecisionPacketStateError",
+    "DecisionPacketStatus",
+    "DecisionPacketVerificationError",
+    "DecisionPacketWriteError",
     "EvidenceHandoffReport",
     "EvidenceIntakeReport",
     "EvidenceLedger",
@@ -466,6 +537,7 @@ __all__ = [
     "EvidenceScope",
     "ExcludedEvidence",
     "GatewayAuthorEvidence",
+    "HandoffDocument",
     "InboxArtifactWriteError",
     "InboxDirError",
     "InboxError",
@@ -501,6 +573,8 @@ __all__ = [
     "NormalizedRow",
     "OperatorHandoffStep",
     "OperatorResult",
+    "PacketVerificationCode",
+    "PacketViolation",
     "PendingEntry",
     "PendingRegister",
     "PendingStateError",
@@ -513,7 +587,9 @@ __all__ = [
     "QuarantineEntry",
     "QuarantineSummary",
     "ReadinessSnapshot",
+    "ReadinessStateDocument",
     "ReasonCode",
+    "ReceiptDocument",
     "ReceiptEntry",
     "ReceiptVerificationCode",
     "ReceiptViolation",
@@ -551,6 +627,7 @@ __all__ = [
     "atomic_write_text",
     "attribute_gateway_author_evidence",
     "build_approved_intake_list",
+    "build_decision_packet",
     "build_evidence_checklist",
     "build_excluded_evidence",
     "build_handoff_report",
@@ -560,8 +637,10 @@ __all__ = [
     "build_snapshot",
     "build_snapshot_from_session",
     "compute_decision_id",
+    "compute_packet_id",
     "compute_plan_id",
     "compute_receipt_id",
+    "decision_packet_exit_code_for",
     "detect_changes",
     "ensure_outside_inbox",
     "evaluate_write_gate",
@@ -578,17 +657,21 @@ __all__ = [
     "load_event_journal",
     "load_evidence_ledger",
     "load_gateway_author_evidence",
+    "load_handoff_document",
     "load_input_rows",
     "load_intake_plan_document",
+    "load_intake_receipt_document",
     "load_operator_result",
     "load_pending_register",
     "load_qualification_recheck",
+    "load_readiness_state_document",
     "load_review_ledger",
     "load_snapshot_state",
     "normalize_input_row",
     "quarantine_payload",
     "read_input_file",
     "record_review_decision",
+    "render_decision_packet_summary",
     "render_handoff_markdown",
     "render_inbox_summary",
     "render_intake_plan_summary",
@@ -603,6 +686,7 @@ __all__ = [
     "required_field_names",
     "resolve_format",
     "review_exit_code_for",
+    "run_decision_packet",
     "run_inbox_scan",
     "run_intake_plan",
     "run_intake_receipt",
@@ -612,6 +696,7 @@ __all__ = [
     "synthetic_marker_fields",
     "template_columns",
     "template_output_name",
+    "verify_decision_packet",
     "verify_intake_plan_inputs",
     "verify_intake_receipt",
     "write_approved_intake_list",

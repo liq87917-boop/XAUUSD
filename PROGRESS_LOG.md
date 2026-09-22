@@ -3195,3 +3195,126 @@ intake 建立**纯本地、可复核、fail-closed** 的 **post-intake receipt /
 
 
 
+---
+
+## 第七十九轮（2026-09-23）：GOLD-015 —— Evidence Qualification L3 人工决策包与 Gate 审计入口
+
+### 1. 交付内容
+
+在 `PHASE3_3_DATA` 仍 **BLOCKED** 的前提下，为"能不能提交 **L3 人工 Gate**"这件事补上**最后一张
+只读聚合视图**：把最新 readiness / handoff（GOLD-008/010）、批准清单与 GOLD-013 plan、
+GOLD-014 verified receipt 与 qualification recheck 聚合成**确定性、脱敏、内容寻址**的决策包：
+
+- **核心 `src/evidence/decision_packet.py`**（零网络 / 零数据库 / 零新增依赖）：
+  - `DecisionPacketStatus`（`READY_FOR_L3_HUMAN_GATE` / `BLOCKED_PENDING_EVIDENCE`）与
+    `PacketVerificationCode`（13 个**稳定**原因码；与 GOLD-014 同义的核验失败**沿用**其稳定
+    原因码字符串，**不另造词**）+ `PacketViolation`；
+  - `HandoffDocument` / `load_handoff_document(...)`：GOLD-008 handoff 的严格**只读视图** ——
+    文档标识 / schema / 契约版本 / 四个安全字段不可被削弱 / `thresholds` 必须等于**当前**代码里
+    的唯一阈值来源 / 缺口与检查的**算术自洽**（`status` / `remaining` / `remaining_checks` 必须与
+    `current` / `required` / `comparator` / `evaluable` 一致）/ **任何证据时间键一律拒绝加载**；
+    并用 `readiness_watch.build_snapshot` **重新推导**同源快照（指纹 / 原因码 / 未 PASS 检查键）；
+  - `ReadinessStateDocument` / `load_readiness_state_document(...)`：GOLD-010
+    `readiness_state.json` 的严格只读视图（**复用**其指纹校验与安全字段守卫）；
+  - `ReceiptDocument` / `load_intake_receipt_document(...)`：GOLD-014 收据的严格只读视图；
+    重建 `IntakeReceipt` 以便用 **GOLD-014 的 `compute_receipt_id`** 做内容寻址核对；
+  - `verify_decision_packet(...)` / `build_decision_packet(...)`：**复用** GOLD-013 的
+    `build_intake_plan` 与 GOLD-014 的 `build_intake_receipt` 做重新绑定（**不复制、不降低**任何
+    资格规则）—— ①handoff 时点 / 未来时间；②给出 `--readiness` 时快照必须与 handoff **逐字段 +
+    指纹**同源（`READINESS_MISMATCH`）；③plan stale / fingerprint drift / review override /
+    执行结果缺失或 dry-run 或零落库 / recheck 缺失或早于执行或结论不一致（沿用 GOLD-014 原因码）；
+    ④handoff **不得早于**最近一次人工显式落库（`HANDOFF_STALE`）；⑤可选 GOLD-014 收据文件再做一次
+    交叉核对（`RECEIPT_ID_MISMATCH` / `PLAN_ID_MISMATCH` / `FINGERPRINT_MISMATCH` /
+    `REVIEW_REVISION_MISMATCH` / `RECHECK_MISMATCH`）→ 任一不一致 →
+    `DecisionPacketVerificationError`（退出 `4`、**零写入**）；
+  - **五个布尔互不蕴含**：`evidence_ready_for_human_review`（只由 readiness / handoff 推导）/
+    `receipt_verified`（GOLD-014 重新绑定核验）/ `qualification_recheck_ready`（recheck 存在 +
+    绑定成功 + 自报 `ready`）三个独立事实；只有**同时**成立才是 `submit_to_l3_human_gate=true`；
+    `data_qualification_passed` / `phase_transition_allowed` **恒为** false、
+    `blocker_active` / `human_gate_required` 恒为 true、`human_gate_level` 恒为 `L3`（**硬编码**）；
+  - 内容级 `compute_packet_id(...)`（只由策略块 + handoff state / 产物摘要 + readiness 摘要 +
+    `plan_id` + 收据摘要 + recheck 摘要 + 五个布尔 + 状态派生，**不含** `generated_at`）；
+    `run_decision_packet(...)` 默认只读，只有显式 `out_path` 才（先取单实例锁）**原子**写 packet；
+    `render_decision_packet_summary(...)` / `exit_code_for(...)`；
+  - 产出里**没有**任何证据时间键（`evidence_time_semantics.contains_evidence_times=false`，并显式
+    声明只含审计操作时间）。
+- **CLI `scripts/evidence_decision_packet.py`**：`--handoff` / `--inbox-dir` / `--ledger` /
+  `--approved-list` / `--plan` 必填，`--readiness` / `--receipt` / `--operator-result`（可重复）/
+  `--recheck` 可选，`--out` 唯一写开关，`--lock` / `--as-of` / `--json`；**没有任何 intake /
+  `--no-dry-run` 参数**；退出码 0/2/3/4/5/6；失败路径 stdout 为空、stderr 已脱敏。
+- **导出**：`src/evidence/__init__.py` 增加 GOLD-015 的模块说明与 30+ 个新 API 导出。
+- **文档**：`README.md`（§1 交付表新增 GOLD-015 行、§7 新增「Evidence Qualification 人工决策包」
+  章节含用法 / 边界 / 七步人工路径、§10 更新下一步与 TD-57）；`TECH_DEBT.md` 登记 **TD-57** 与
+  变更日志；`PROGRESS_LOG.md` 本轮记录。三处均明确 **`PHASE3_3_DATA` 仍 BLOCKED**、
+  Phase 切换仍是 **L3 人工 Gate**。
+
+### 2. 测试与验收
+
+- **`tests/unit/test_evidence_decision_packet.py`（**71 项**）**：退出码映射；缺参数 / naive 时点；
+  inbox 缺失 / 输出写进 inbox；handoff 的 **22 种**结构 / 安全字段 / 算术 / 阈值篡改 + 证据时间键
+  一律 fail-closed；readiness state 缺失 / 损坏 / **不同源**；完整链路绑定成功（内容级 `packet_id`、
+  五个布尔、安全字段、`approved_entry_count` / `landed_rows`、`STATE_FILE_MATCHED`、零写入）；
+  无批准 → 预期 BLOCKED；执行结果缺失 / dry-run / 零落库 / plan stale / recheck 早于执行或结论
+  不一致 / handoff stale / 未来时间；可选 GOLD-014 收据文件的 5 种"改写并重签"仍 fail-closed +
+  `receipt_id` 篡改 + 收据缺字段 / 安全字段被削弱；`verify_decision_packet` 公开 API 返回稳定原因码
+  而不抛错；幂等 / byte-stable / 关键输入变化出新 `packet_id`；只读（含原始 evidence 字节不变）/
+  原子写 / 锁冲突 / 多线程并发 / 写失败；递归键断言"没有证据时间字段"、凭据样式字符串被脱敏、
+  Markdown 摘要保留 blocker / human Gate；**源码守卫**（无 `aiohttp` / `httpx` / `requests` /
+  `socket` / `urllib` / `sqlalchemy` / `subprocess`，无 `unlink` / `rmtree` / `os.remove` /
+  `os.rename` / `shutil.move`，无 `intake_evidence` / `evaluate_write_gate`，无 `while` 循环，
+  `atomic_write_text` 是唯一写路径，安全字段与执行模式硬编码）与 CLI 参数守卫（缺必填 → 2；
+  `--no-dry-run` → 2；`--operator-result` 可重复、`--readiness` / `--receipt` 可解析）。
+- **`tests/integration/test_evidence_decision_packet_integration.py`（**12 项**）**：**真实链路**
+  —— inbox 预检 → `evidence_review --approved-out` → `evidence_intake_plan --out` → **真实**
+  `evidence_operator intake --no-dry-run --manifest`（临时 SQLite 真落库）→ **真实**
+  `evidence_readiness recheck --report` → **真实** `scripts.evidence_handoff --out` →
+  GOLD-015 决策包：①证据未达标时**诚实 BLOCKED**（退出 `5`，`receipt_verified=true` /
+  `evidence_ready=false`，文件与数据库零变化）；②库内达标（Mock 证据块 + 合法格式 recheck 控制流）
+  → `submit_to_l3_human_gate=true`（退出 `0`，但 `data_qualification_passed` **恒 false**）；
+  `--out` 原子写 + 幂等；handoff / readiness state 被改写 → 退出 `4`（stdout 为空、stderr 带稳定
+  原因码、零写入）；内容变化 → plan stale；handoff 早于显式落库 → `HANDOFF_STALE`；参数错误退出
+  `2`；`--out` 写进 inbox / inbox 不存在退出 `3`；锁冲突退出 `6` 且零写入；Markdown 摘要保留
+  blocker；**真实子进程** `python -m scripts.evidence_decision_packet` 端到端冒烟（stdout 为纯 JSON）。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **2282 passed / 1 skipped in 251.92s**（唯一 skip
+    仍是 `tests/unit/test_text_similarity.py` 的「本环境已安装 jieba」分支；本轮新增 **83** 项
+    （`--collect-only` 实测 = 71 单元 + 12 集成），GOLD-014 记录的基线为 2197 passed / 1 skipped，
+    本轮**未修改任何既有测试文件**；与该系列记录中的"既有测试收集口径差 2 项"一致，
+    本轮同样观察到同一现象）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 168 source files`（GOLD-014 为 166，本轮 +2 个新模块文件）。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增 / 修改 migration 与 schema、未联网、未抓取任何站点、未触碰 `.env`、
+  未安装 / 未修改任何 OS 计划任务；
+- `src/alpha/**`、`src/monitoring/**`、`src/scheduler/**`、`src/collectors/**`、
+  `src/processors/**` 未改动（只**复用**其契约 / 原因码 / 阈值）；GOLD-005 ~ GOLD-014 的既有模块
+  （`inbox.py` / `review.py` / `intake_plan.py` / `intake_receipt.py` / `readiness_watch.py` /
+  `readiness_runner.py`）只被**复用**，未改动；
+- **未解除** `PHASE3_3_DATA`：决策包持续显式 `blocker_active=true` / `human_gate_required=true` /
+  `data_qualification_passed=false` / `phase_transition_allowed=false`；三个布尔为 true 也**不会**
+  自动改变任何安全字段；未进入 Phase 3.4，未训练 Alpha、未生成任何交易信号或订单；
+  `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；未执行任何 git
+  写操作（commit / push / reset / rebase / merge 由 Orchestrator 负责）。
+
+### 4. 遗留 / 下一步
+
+- 仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 **BLOCKED**。GOLD-015 **只是**"把散落在多个 JSON 里的
+  事实绑成一张可复核的人工 Gate 输入"的**只读**聚合层：它**不是**资格判定器，也**不具备**解除
+  blocker 的能力；
+- 完整人工路径：业务方按 `evidence-intake-v1` 提供真实授权 Author / News 数据（放入 inbox 子目录 +
+  `manifest.json`）→ `evidence_inbox --out` 预检 → `evidence_review --decision approve
+  --approved-out` 人工复核 → `evidence_intake_plan --out` 生成计划 → 人工**显式**执行
+  `evidence_operator workflow --no-dry-run --manifest` 落库 → `evidence_operator recheck
+  --no-dry-run --report` 复核 → `evidence_intake_receipt --out` 生成收据 →
+  `evidence_decision_packet --out` 生成决策包（建议同时给 `--readiness` 把 handoff 锚定到真实 tick
+  产物）→ **L3 人工确认**；
+- 决策包**不缓存**任何输入：handoff / readiness 指纹 / plan / review revision / 指纹 / 执行结果 /
+  复核结果 / 收据任一变化 → 新 `packet_id` 或直接 fail-closed（旧决策包不会"升级"成新决策包）；
+  `generated_at` / `handoff.as_of` / `readiness_state.generated_at` /
+  `operator_results[].generated_at` / `qualification_recheck.as_of` 都**只是审计操作时间**，
+  产出里根本没有证据时间键。
+
