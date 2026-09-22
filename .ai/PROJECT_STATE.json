@@ -4,13 +4,13 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-012",
-  "last_completed_task": "GOLD-011",
-  "last_reviewed_task": "GOLD-011",
+  "current_task": "GOLD-013",
+  "last_completed_task": "GOLD-012",
+  "last_reviewed_task": "GOLD-012",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-011 已完成并通过工程验收：Evidence Inbox 已具备纯本地只读发现/preflight、内容 SHA-256/fingerprint、幂等 pending register、symlink/path traversal 防护与 fail-closed。真实库仍缺少足量合法授权且具有可信独立时间/availability/OOS 证据的 Author/News 数据，资格不能由工程工具自动解除。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
+      "detail": "GOLD-012 已完成并通过工程验收：Evidence Inbox 已具备纯本地显式人工 review、append-only 决策 ledger、approved-for-explicit-intake 清单、内容变化/候选消失/预检回退失效与 fail-closed。真实库仍缺少足量合法授权且具有可信独立时间/availability/OOS 证据的 Author/News 数据；人工 APPROVE 只表示预审通过，不等于 data qualification PASS，资格不能由工程工具自动解除。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
       "retryable": false
     }
   ],
@@ -19,7 +19,7 @@
     {"code": "CLINE_MODEL_QUOTA_OR_CONFIG", "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"},
     {"code": "CLINE_CLI_INSTALLATION", "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"}
   ],
-  "next_action": "Run GOLD-012 only as blocker-facing tooling: add a pure-local explicit human review decision/audit layer for GOLD-011 inbox candidates and produce an approved-for-explicit-intake list. Do not auto-intake, write the research database, add external services, lower qualification thresholds, or create Phase 3.4/model tasks. Phase transition remains an L3 human gate.",
+  "next_action": "Run GOLD-013 only as blocker-facing tooling: bind the GOLD-012 approved list to a deterministic read-only intake plan and revalidate current inbox fingerprint/preflight/review state immediately before any future explicit Evidence Operator write. Do not auto-intake, lower qualification thresholds, auto-pass data qualification, or create Phase 3.4/model tasks. Phase transition remains an L3 human gate.",
   "human_gates": [
     {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."}
   ],
