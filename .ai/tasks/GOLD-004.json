@@ -1,0 +1,51 @@
+{
+  "task_id": "GOLD-004",
+  "type": "FEATURE",
+  "title": "建立 Collector 运行健康度与数据资格观测层",
+  "max_attempts": 3,
+  "goal": "在 GOLD-003 已完成 Scheduler→Collector→Processor 可选生产闭环后，建立只读、可审计的采集运行健康度与 Phase 3.3 数据资格观测能力，让系统能够从 job_runs/raw_items/processed_items/source 配置自动汇总运行质量与资格缺口；不得绕过 Author/News 真实数据 blocker，也不得进入 Phase 3.4。",
+  "requirements": [
+    "先读取 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-003 task/result、README.md、TECH_DEBT.md、PROGRESS_LOG.md，以及 scheduler/collector/processor 与现有 phase3 数据资格报告代码；复用已有口径，禁止另造互相冲突的阈值。",
+    "建立独立只读 health/qualification 服务或报告模块，汇总最近运行窗口内 source 级：运行次数、SUCCESS/PARTIAL/FAILED、raw inserted/dedup、processed success/rejected/failed、最近成功时间、连续失败/陈旧状态；不得修改历史事实。",
+    "将 Phase 3.3 Author/News 资格缺口以机器可读结构输出：当前值、要求值、PASS/BLOCKED、原因和证据时间范围；必须诚实保留 PHASE3_3_DATA blocker，不得用 Mock 或缺失数据判 PASS。",
+    "提供 CLI 报告入口，默认只读、可输出人类可读摘要；如项目已有 JSON 报告惯例则支持稳定 JSON 输出，且输出不得泄露 token/API key/Authorization/完整 source config。",
+    "对空数据库、从未成功、部分失败、重复/幂等运行、stale 数据、Processor 未启用等边界给出明确状态，不得把 unknown 当 healthy。",
+    "新增充分 Mock/SQLite 单元与集成测试，禁止联网；至少覆盖健康聚合、资格 BLOCKED、空数据、敏感字段脱敏、时间窗口边界和重复运行。",
+    "同步 README、TECH_DEBT、PROGRESS_LOG；本任务只提升可观测性，不解除 Phase 3.3 blocker，除非仓库中已有真实数据证据满足既定资格且无需外部人工 Gate。",
+    "不得新增第三方依赖、不得新增/修改 migration/schema、不得训练 Alpha、不得生成交易信号或订单。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/monitoring/**",
+      "src/reporting/**",
+      "src/common/**",
+      "scripts/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**",
+      "src/alpha/**"
+    ]
+  },
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在独立只读健康/资格观测层，不向 Scheduler core 塞入报告业务逻辑。",
+    "CLI 能基于持久化事实输出 source 运行健康度和 Phase 3.3 Author/News 资格缺口。",
+    "空/未知/陈旧/失败状态不会被误报为 healthy 或 qualified。",
+    "报告输出经过脱敏，不泄露凭据或完整 source config。",
+    "Phase 3.3 blocker 保持诚实，不因本任务被自动解除。",
+    "全量 pytest、ruff、mypy 通过；无新依赖、migration/schema、Phase 3.4 或实盘范围扩张。"
+  ]
+}
