@@ -1,0 +1,128 @@
+{
+  "task_id": "GOLD-010",
+  "title": "建立 Evidence Readiness 本地周期运行与防重入闭环",
+  "status": "completed",
+  "finished_at": "2026-09-23T00:26:32+08:00",
+  "attempt_count": 2,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    " M src/evidence/readiness_watch.py",
+    "?? scripts/evidence_readiness_runner.py",
+    "?? src/evidence/readiness_runner.py",
+    "?? tests/integration/test_evidence_readiness_runner_integration.py",
+    "?? tests/unit/test_evidence_readiness_runner.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md                 |  91 +++++++++++++++++++++++++++++++++++\n README.md                       | 104 +++++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md                    |  49 +++++++++++++++++++\n src/evidence/__init__.py        |  76 +++++++++++++++++++++++++++++\n src/evidence/readiness_watch.py |  13 +++--\n 5 files changed, 323 insertions(+), 10 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-22T23:53:20+08:00",
+      "finished_at": "2026-09-23T00:08:07+08:00",
+      "cline_exit_code": 1,
+      "cline_timed_out": false,
+      "finish_reason": "error",
+      "model": "deepseek-flash",
+      "iterations": 59,
+      "duration_ms": 658297,
+      "usage": {
+        "inputTokens": 8392762,
+        "outputTokens": 98551,
+        "cacheReadTokens": 8244096,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.106162788
+      },
+      "cline_final_text": "The operation timed out.",
+      "cline_error_tail": "{\"ts\":\"2026-09-22T16:04:21.149Z\",\"type\":\"error\",\"message\":\"The operation timed out.\"}\n",
+      "changed_files": [
+        " M src/evidence/__init__.py",
+        " M src/evidence/readiness_watch.py",
+        "?? scripts/evidence_readiness_runner.py",
+        "?? src/evidence/readiness_runner.py",
+        "?? tests/unit/test_evidence_readiness_runner.py"
+      ],
+      "git_diff_stat": " src/evidence/__init__.py        | 63 ++++++++++++++++++++++++++++++++++++++++-\n src/evidence/readiness_watch.py | 10 +++++++\n 2 files changed, 72 insertions(+), 1 deletion(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "_seconds == 3 * 3600\n            assert lock.prior.over_ttl is True\n            assert lock.to_dict()[\"previous_owner\"] == stale_owner\n>           assert json.loads(path.read_text(encoding=\"utf-8\"))[\"owner\"] == \"taker\"\n                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests\\unit\\test_evidence_readiness_runner.py:261: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\nC:\\Program Files\\Python313\\Lib\\pathlib\\_local.py:546: in read_text\n    return PathBase.read_text(self, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = WindowsPath('C:/Users/Admin/AppData/Local/Temp/pytest-of-Admin/pytest-538/test_stale_lock_is_taken_over_0/readiness.lock')\nencoding = 'utf-8', errors = None, newline = None\n\n    def read_text(self, encoding=None, errors=None, newline=None):\n        \"\"\"\n        Open the file in text mode, read it, and close the file.\n        \"\"\"\n        with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n>           return f.read()\n                   ^^^^^^^^\nE           PermissionError: [Errno 13] Permission denied\n\nC:\\Program Files\\Python313\\Lib\\pathlib\\_abc.py:633: PermissionError\n_________________________ test_lock_owner_is_redacted _________________________\n\ntmp_path = WindowsPath('C:/Users/Admin/AppData/Local/Temp/pytest-of-Admin/pytest-538/test_lock_owner_is_redacted0')\n\n    def test_lock_owner_is_redacted(tmp_path: Path) -> None:\n        path = tmp_path / LOCK_FILE_NAME\n        lock = SingleInstanceLock(\n            path, owner=f\"Authorization: Bearer {SECRET}\", clock=lambda: MOMENT\n        )\n        lock.acquire()\n        try:\n>           blob = path.read_text(encoding=\"utf-8\")\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests\\unit\\test_evidence_readiness_runner.py:290: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\nC:\\Program Files\\Python313\\Lib\\pathlib\\_local.py:546: in read_text\n    return PathBase.read_text(self, encoding, errors, newline)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _\n\nself = WindowsPath('C:/Users/Admin/AppData/Local/Temp/pytest-of-Admin/pytest-538/test_lock_owner_is_redacted0/readiness.lock')\nencoding = 'utf-8', errors = None, newline = None\n\n    def read_text(self, encoding=None, errors=None, newline=None):\n        \"\"\"\n        Open the file in text mode, read it, and close the file.\n        \"\"\"\n        with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:\n>           return f.read()\n                   ^^^^^^^^\nE           PermissionError: [Errno 13] Permission denied\n\nC:\\Program Files\\Python313\\Lib\\pathlib\\_abc.py:633: PermissionError\n______________ test_render_runner_summary_is_honest_and_redacted ______________\n\ntmp_path = WindowsPath('C:/Users/Admin/AppData/Local/Temp/pytest-of-Admin/pytest-538/test_render_runner_summary_is_0')\n\n    def test_render_runner_summary_is_honest_and_redacted(tmp_path: Path) -> None:\n        snapshot = snapshot_for([])\n        events = detect_changes(None, snapshot, detected_at=MOMENT)\n        result = tick_result_for(snapshot, events=events, tmp_path=tmp_path)\n        text = render_runner_summary(result)\n        assert f\"�˳��룺{EXIT_BLOCKED}\" in text\n        assert \"phase_transition_allowed=false\" in text\n        assert \"�����\" in text\n        assert \"DATA\" in text  # blocker code PHASE3_3_DATA\n>       assert \"��ʵ����\" in text or \"��\" in text\nE       AssertionError: assert ('��ʵ����' in '# Evidence Readiness �������У�Evidence Readiness Runner��\\n\\n> blocker `PHASE3_3_DATA`��active=true��human_gate_required=tru...���ӵ��������ͣ�**�����** `PHASE3_3_DATA`����ʹ `ready_for_human_review=true`��Phase �л����� `.ai/DEVELOPMENT_PROTOCOL.md` �� L3 �˹�ȷ�ϡ�\\n' or '��' in '# Evidence Readiness �������У�Evidence Readiness Runner��\\n\\n> blocker `PHASE3_3_DATA`��active=true��human_gate_required=tru...���ӵ��������ͣ�**�����** `PHASE3_3_DATA`����ʹ `ready_for_human_review=true`��Phase �л����� `.ai/DEVELOPMENT_PROTOCOL.md` �� L3 �˹�ȷ�ϡ�\\n')\n\ntests\\unit\\test_evidence_readiness_runner.py:475: AssertionError\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\nFAILED tests/unit/test_evidence_readiness_runner.py::test_lock_lifecycle_metadata_is_auditable_and_non_sensitive\nFAILED tests/unit/test_evidence_readiness_runner.py::test_lock_rejects_concurrent_reentry_without_touching_lock_file\nFAILED tests/unit/test_evidence_readiness_runner.py::test_stale_lock_is_taken_over_safely\nFAILED tests/unit/test_evidence_readiness_runner.py::test_lock_owner_is_redacted\nFAILED tests/unit/test_evidence_readiness_runner.py::test_render_runner_summary_is_honest_and_redacted\n5 failed, 1884 passed, 1 skipped in 223.87s (0:03:43)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 158 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    },
+    {
+      "attempt": 2,
+      "started_at": "2026-09-23T00:08:17+08:00",
+      "finished_at": "2026-09-23T00:26:32+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 119,
+      "duration_ms": 861753,
+      "usage": {
+        "inputTokens": 22124507,
+        "outputTokens": 127317,
+        "cacheReadTokens": 21960320,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.16689920999999988
+      },
+      "cline_final_text": "Submission recorded (verified): ## GOLD-010 完成总结：Evidence Readiness 本地周期运行与防重入闭环\n\n### 1. 完成内容\n按 `.ai/tasks/GOLD-010.json` + `.clinerules` 执行（先读 `DEVELOPMENT_PROTOCOL.md`、`PROJECT_STATE.json`、GOLD-009 task/result、`TECH_DEBT.md`、`PROGRESS_LOG.md`、`README.md`、最近 commits），只做 PHASE3_3_DATA blocker-facing tooling：\n\n- **单次本地 tick 核心** `src/evidence/readiness_runner.py`（新增）\n  - `SingleInstanceLock`：Windows `msvcrt` / POSIX `fcntl` 的 **OS 级独占文件锁**（零第三方依赖）；锁文件记录可审计 `owner`/`pid`/`acquired_at`（无敏感数据）；正常退出释放锁但**不删除文件**；活动锁冲突 → `LockConflictError` 且**零写入**，**绝不 unlink / 绝不改写**活动锁（OS 锁才是\"是否活动\"的唯一权威 → 不存在\"强删活动锁导致并发写 state\"）；崩溃遗留的**陈旧锁**（含内容不可解析）被安全接管并留 `recovered_stale=true` + `previous_owner` 审计痕迹。\n  - `TickPaths` / `run_tick`：只写**显式 `--work-dir`** 内三类 artifact（`readiness_state.json` / `readiness_events.jsonl` / `readiness_status.json`）+ 锁文件；op 顺序 **先追加事件日志 → 再原子替换 state → 最后写 status**（强杀最坏\"多一条待确认事件\"，绝不丢变化）；全部复用既有**原子写**原语。\n  - `build_snapshot_from_session`：只读台账（`load_evidence_ledger → build_readiness_report → build_handoff_report → build_snapshot`，与既有 CLI 同源），显式 `rollback`，**零数据库写入**。\n  - `load_event_journal` / `write_event_journal`：**有界保留**最新 200 条（确定性滚动、丢弃数记入 status），**本次新事件永不丢弃**；无变化不追加也不重写日志；加载时校验四个安全字段（被篡改即 fail-closed）。\n  - `TickReport.to_dict()` / `write_status`：四个安全字段**硬编码** true/true/false/false；`exit_code_for` 稳定退出码映射（`0/2/3/4/5/6/7`）。\n- **CLI** `scripts/evidence_readiness_runner.py`（新增）：`--work-dir` 必填、可选 `--as-of`（必须带时区）/`--json`；**只跑一次即返回**（模块内无任何循环，AST 守卫测试）；失败路径 stdout 为空、stderr 已脱敏；零网络、零数据库写入、不接第三方推送、不自动改 OS 计划任务。\n- **复用而非复制**：`src/evidence/readiness_watch.py` 的私有原子写原语改为公开 `atomic_write_text`，runner 复用同一原语；`src/evidence/__init__.py` 导出新 API。指纹/事件/缺口/阈值口径全部复用 GOLD-009，未复制或降低任何阈值算法。\n- **文档**：README（§1 交付表 + §7 新章节含**仅供人工配置**的任务计划程序/`schtasks` 示例与\"退出码 5 = 预期 BLOCKED\"说明 + §10）、TECH_DEBT（TD-52 登记行 + 明细 + 变更日志）、PROGRESS_LOG（第七十四轮）。\n\n### 2. 修改的文件\n`README.md`、`TECH_DEBT.md`、`PROGRESS_LOG.md`、`src/evidence/__init__.py`、`src/evidence/readiness_watch.py`（仅 `atomic_write_text` 公开化，行为不变）\n\n### 3. 新增的文件\n`src/evidence/readiness_runner.py`、`scripts/evidence_readiness_runner.py`、`tests/unit/test_evidence_readiness_runner.py`、`tests/integration/test_evidence_readiness_runner_integration.py`\n\n### 4. 执行的测试与结果\n- `.venv\\Scripts\\python.exe -m pytest tests -q` → **1903 passed / 1 skipped in 226.40s**（唯一 skip 为 jieba 分支；本轮新增 30 项，基线 1873 项全绿）\n- `.venv\\Scripts\\python.exe -m ruff check .` → **All checks passed!**\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts` → **Success: no issues found in 158 source files**（GOLD-009 为 156，+2 新模块文件）\n- 新增测试 30 项：单元 23（正常 tick、连续无变化 0 事件、活动锁冲突零写入且不动活动锁、陈旧锁接管、锁不可解析接管、锁幂等/释放、损坏与被篡改 state、损坏与篡改事件日志、资格失败脱敏、artifact 写入失败事件优先+重放+无残留 `.tmp`、有界保留不丢新事件、达标时安全字段不变、脱敏、源码守卫）+ 集成 7（真实 CLI + 临时 SQLite：只读幂等、达标事件、锁冲突退 6、陈旧锁审计、损坏 state 退 4、资格失败退 7 不泄露凭据、参数错误退 2）\n- **真实 CLI 冒烟（临时 SQLite + 派生 schema，两个真实进程）**：第 1 次 退出码 5 / 1 个 FIRST_SNAPSHOT / 四安全字段正确 / author 0/30、news 0/200；第 2 次 退出码 5 / **0 事件** / `changed=false` / 指纹一致 / 日志仍 1 行 / 锁安全接管（`recovered_stale=true` + 上一位 owner 留痕）；目录内仅 4 个 artifact、无 `.tmp` 残留；损坏 state → 退 4 且原文件与 status 未被改动；并发持锁运行 → 退 6、stdout 空、持锁进程仍读到自己的 owner；数据库 `raw_items=0` / `sources=0`（零写入）。\n\n### 5. 未解决的问题\n`PHASE3_3_DATA` **仍 BLOCKED**：库内无足量真实授权 Author/News 证据（human gate + 真实 availability/OOS 证据不可由工程生成）。runner 只把盯盘自动化，不是资格判定器；调度方式仍需人工配置（工具不会安装/修改计划任务）。事件日志是有界本地留痕，不是投递通道。\n\n### 6. 是否满足 acceptance\n全部满足：①单次本地 runner 可被外部定时器调用、零网络、零数据库写入、无常驻循环；②并发重入安全拒绝、陈旧锁处理不删除活动锁、异常不破坏旧 state；③连续相同 tick 零重复事件、变化沿用 GOLD-009 脱敏事件与确定性指纹；④四安全字段恒定不变；⑤全量 pytest/ruff/mypy 全通过；⑥无新增依赖/migration/第三方推送/未授权采集/Phase 3.4/实盘代码（git status 仅上述 9 个文件，全在 allowed_primary_paths 内，未触碰 `.ai/**`、`.env`、`src/alpha/**`）；⑦README/TECH_DEBT/PROGRESS_LOG 明确 PHASE3_3_DATA 仍 BLOCKED 并给出仅供人工配置的本地定时调用方式。\n\n### 7. 建议下一步\n由 Orchestrator 评审并提交本轮 diff；阻塞项交业务方按 `evidence-intake-v1` 提供真实授权 Author/News 数据 + 人工核验授权与历史可用性，再跑 `workflow` / `handoff` / `recheck`，并由人工把 `scripts.evidence_readiness_runner` 挂到任务计划程序（示例见 README §7）；Phase 切换仍须 L3 人工 Gate，不得进入 Phase 3.4。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        " M src/evidence/readiness_watch.py",
+        "?? scripts/evidence_readiness_runner.py",
+        "?? src/evidence/readiness_runner.py",
+        "?? tests/integration/test_evidence_readiness_runner_integration.py",
+        "?? tests/unit/test_evidence_readiness_runner.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md                 |  91 +++++++++++++++++++++++++++++++++++\n README.md                       | 104 +++++++++++++++++++++++++++++++++++++---\n TECH_DEBT.md                    |  49 +++++++++++++++++++\n src/evidence/__init__.py        |  76 +++++++++++++++++++++++++++++\n src/evidence/readiness_watch.py |  13 +++--\n 5 files changed, 323 insertions(+), 10 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  3%]\n........................................................................ [  7%]\n........................................................................ [ 11%]\n........................................................................ [ 15%]\n........................................................................ [ 18%]\n........................................................................ [ 22%]\n........................................................................ [ 26%]\n........................................................................ [ 30%]\n........................................................................ [ 34%]\n........................................................................ [ 37%]\n........................................................................ [ 41%]\n........................................................................ [ 45%]\n........................................................................ [ 49%]\n........................................................................ [ 52%]\n........................................................................ [ 56%]\n........................................................................ [ 60%]\n........................................................................ [ 64%]\n........................................................................ [ 68%]\n........................................................................ [ 71%]\n........................................................................ [ 75%]\n........................................................................ [ 79%]\n........................................................................ [ 83%]\n........................................................................ [ 86%]\n........................................................................ [ 90%]\n........................................................................ [ 94%]\n...........................................................s............ [ 98%]\n................................                                         [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n1903 passed, 1 skipped in 226.04s (0:03:46)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 158 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

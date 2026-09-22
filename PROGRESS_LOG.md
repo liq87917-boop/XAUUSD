@@ -2610,3 +2610,94 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   Author / News 数据并**人工核验**，用 `scripts.evidence_operator workflow --no-dry-run`
   显式落库，再以 `handoff` / `recheck` 复核；Phase 切换仍需 L3 人工确认。
 
+## 第七十四轮（2026-09-23）：GOLD-010 —— Evidence Readiness 单次本地 tick runner 与防重入闭环
+
+### 1. 交付内容
+
+- **单次 tick 核心**（`src/evidence/readiness_runner.py`，纯本地 / 零网络 / 零数据库写入）：
+  - `SingleInstanceLock`：**OS 级独占文件锁**（Windows `msvcrt` / POSIX `fcntl`，零第三方依赖）
+    防止同一工作目录的 tick 并发重入；锁文件内写入**可审计** `owner` / `pid` / `acquired_at`
+    且不含敏感信息；正常退出**释放锁但不删除文件**；活动锁冲突 → `LockConflictError` 且
+    **零写入**、**绝不删除 / 绝不改写**活动锁（OS 锁才是"是否活动"的唯一权威 →
+    不可能"强删活动锁导致并发写 state"）；崩溃进程遗留的**陈旧锁**（含内容不可解析）
+    可被安全接管，并留下 `recovered_stale=true` + `previous_owner` 审计痕迹；
+  - `TickPaths`：三类 artifact 的固定文件名（`readiness_state.json` / `readiness_events.jsonl` /
+    `readiness_status.json`）+ 锁文件，全部位于**显式配置的工作目录**内；
+  - `run_tick(...)`：一次 tick 的完整链路 —— 取锁 → 读上次快照（GOLD-009 `load_snapshot_state`）
+    → 读事件日志 → 计算快照（`SnapshotBuilder`，注入真实只读 builder 或测试双）→
+    `detect_changes` → **先追加事件日志** → 再原子替换 state → 最后写 status；
+    写入失败一律 `ArtifactWriteError`（fail-closed）；
+  - `build_snapshot_from_session(...)`：**只读**台账（`load_evidence_ledger` → `build_readiness_report`
+    → `build_handoff_report` → `build_snapshot`，与既有 CLI **同源**，不复制任何阈值 / 指纹 /
+    事件算法），会话显式 `rollback`；
+  - `load_event_journal` / `write_event_journal`：**有界保留**（保留最新 200 条，确定性滚动，
+    丢弃条数记入 status 的 `journal.dropped`），**本次 tick 的新事件永不被丢弃**；
+    加载时校验四个安全字段（被篡改即 fail-closed）；无变化时**不重写**既有日志；
+  - `write_status` / `TickReport.to_dict()`：简洁 status，四个安全字段**硬编码**
+    （`blocker_active=true` / `human_gate_required=true` / `data_qualification_passed=false` /
+    `phase_transition_allowed=false`），含锁信息 / 事件数 / 指纹 / 缺口三元组；
+  - `exit_code_for`：稳定退出码映射（`4` state 损坏 / `6` 锁冲突 / `7` 资格失败 /
+    `3` 不可写 / 网络与数据库零写入）。
+- **CLI** `scripts/evidence_readiness_runner.py`：`--work-dir` **必填**（唯一写入口）、
+  可选 `--as-of`（ISO8601 必须带时区）/ `--json`；**只跑一次即返回**，不自带循环、
+  不安装 / 不修改 OS 计划任务；失败路径 stdout 为空、stderr 已脱敏。
+- **复用而非复制**：`src/evidence/readiness_watch.py` 的私有原子写原语改为**公开**
+  `atomic_write_text`，runner 直接复用（不各写一套）；`src/evidence/__init__.py` 导出新 API。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **30 项**测试（全部临时文件 / 临时 SQLite / Mock 证据块，零网络，未新增依赖）：
+  - `tests/unit/test_evidence_readiness_runner.py` **23**：退出码映射、工作目录派生、
+    正常 tick（三类 artifact + 原子写无残留 `.tmp`）、锁结束即释放且可重取、
+    连续无变化 tick 幂等（0 事件且日志逐字节不变）、变化只追加新事件、
+    **活动锁冲突零写入且不动活动锁**、陈旧锁安全接管（可审计留痕）、
+    锁文件不可解析仍可接管、锁幂等获取、损坏 state / 被篡改 state（声称解锁）、
+    损坏事件日志、事件日志安全字段被篡改、缺失日志、资格计算失败（脱敏，异常正文不入输出）、
+    builder 返回类型非法、artifact 写入失败（事件优先 + 重放 + 无残留临时文件）、
+    工作目录是文件、达标时安全字段不变且要求 L3 人工确认、artifact 与摘要全面脱敏、
+    有界保留不丢本次新事件、**源码守卫**（runner 模块无任何循环、无 scheduler /
+    subprocess / threading 依赖，CLI 无 `while` / `time.sleep`）；
+  - `tests/integration/test_evidence_readiness_runner_integration.py` **7**：真实 CLI +
+    临时 SQLite —— 只读且幂等（含 `raw_items` / `sources` 零写入断言）、
+    达标事件（安全字段不变、退出码 `0`）、锁冲突退出 `6` 且零写入、
+    陈旧锁接管（`previous_owner` 审计）、损坏 state 退出 `4` 且保留原文件、
+    资格计算失败退出 `7` 且不泄露连接串 / 凭据、参数错误退出 `2`。
+- **真实 CLI 冒烟**（临时 SQLite + 派生 schema，`DATABASE_URL` 指向临时库，两个真实进程）：
+  第 1 次 退出码 `5` / 1 个 `FIRST_SNAPSHOT` / `blocker_active=true`、
+  `human_gate_required=true`、`data_qualification_passed=false`、
+  `phase_transition_allowed=false`、author `0/30`、news `0/200`；
+  第 2 次 退出码 `5` / **0 事件** / `changed=false` / 指纹与 state 一致 / 日志仍 1 行 /
+  锁被安全接管（`recovered_stale=true` + 上一位 owner 留痕）；
+  目录内只有 4 个 artifact、**无残留 `.tmp`**；损坏 state → 退出码 `4`、原文件保留、status 未变；
+  并发持锁运行 → 退出码 `6`、stdout 为空、持锁进程仍能读到自己的 owner 记录；
+  数据库 `raw_items=0` / `sources=0`（零写入）。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **1903 passed / 1 skipped in 226.40s**
+    （唯一 skip 为 `tests/unit/test_text_similarity.py` 的「本环境已安装 jieba」分支；
+    本轮新增 30 项，基线 1873 项全部保持通过）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 158 source files`（GOLD-009 为 156，本轮 +2 个新模块文件）。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增 / 修改 migration 与 schema（仅本地文件型 artifact）、未联网、
+  未抓取任何站点、未触碰 `.env`、**未安装 / 未修改任何 OS 计划任务**；
+- `src/alpha/**`（含阈值 `evidence_gate.py`）、`src/monitoring/**`、`src/scheduler/**`、
+  `src/collectors/**` 未改动（只**复用**其阈值与口径）；`src/evidence/readiness_watch.py`
+  仅把私有原子写原语改为**公开** `atomic_write_text`（行为不变，GOLD-009 的 19 项测试全绿）；
+- **未解除** `PHASE3_3_DATA`：status / 事件持续显式 `blocker_active=true` /
+  `human_gate_required=true`，`data_qualification_passed=false`、
+  `phase_transition_allowed=false`；未进入 Phase 3.4，未生成任何交易信号或订单；
+  `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；
+- 同步 `README.md`（§1 交付表 + §7 新章节「Evidence Readiness 单次本地 tick runner」
+  含**仅供人工配置**的任务计划程序 / `schtasks` 示例 + §10 说明）与 `TECH_DEBT.md`
+  （新增 TD-52 登记行 + 明细 + 变更日志行）。
+- **遗留 / 下一步**：仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 BLOCKED。runner **只把盯盘
+  自动化**（把"人工反复执行"换成"外部定时器调用一次"），不解除该 blocker；业务方仍须按
+  `evidence-intake-v1` 提供真实授权的 Author / News 数据并**人工核验**，用
+  `scripts.evidence_operator workflow --no-dry-run` 显式落库，再以 `handoff` / `recheck` 复核；
+  调度方式由**人工**配置（README 给出示例，工具不会自动安装计划任务）；Phase 切换仍需 L3 人工确认。
+
+

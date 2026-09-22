@@ -60,6 +60,7 @@ Strategy 事实，不进入实盘。
 | **gateway-only 作者归属链**（GOLD-007：只消费 `evidence-intake-v1` + `scope=author` + `oos_eligible=true` 的记录；普通 CSV / 历史样本无证据块，**无法绕过** gateway；身份冲突跳过且不覆盖；新建 `author_accounts` 一律 `enabled=false`） | `src/evidence/author_chain.py`、`scripts/evidence_operator.py` |
 | **Evidence 人工交接包**（GOLD-008：只读 / 默认 dry-run 的 `scripts/evidence_handoff.py`；机器可读 JSON + 人类可读 Markdown，量化 Author/News `eligible`/`required`/`remaining`、coverage gap、source-share 可评估性与主要隔离原因码；明确人工证据 checklist（authorization / provenance / published_at / collected_at / availability / identity），模板 / Mock / 示例醒目标记为不计资格；`data_qualification_passed` / `phase_transition_allowed` 恒为 false，**只减少人工交接摩擦、不解除** `PHASE3_3_DATA`） | `src/evidence/handoff.py`、`scripts/evidence_handoff.py` |
 | **Evidence Readiness 状态变更通知**（GOLD-009：只读 / 默认 dry-run 的 `scripts/evidence_readiness_watch.py`；确定性脱敏快照指纹 + 幂等变化检测：首次快照 / BLOCKED 缺口变化 / reason-code 集合变化 / `ready_for_human_review` 双向变化；默认零写入、零网络，只有显式 `--out` / `--events` 才**原子**落盘快照与事件；不接邮件 / 短信 / Webhook / 第三方推送；`ready_for_human_review=true` 仍明确要求 L3 人工 Gate，`phase_transition_allowed` 恒为 false，**不解除** `PHASE3_3_DATA`） | `src/evidence/readiness_watch.py`、`scripts/evidence_readiness_watch.py` |
+| **Evidence Readiness 单次本地 tick runner**（GOLD-010：`scripts/evidence_readiness_runner.py` **只做一次** tick，供 Windows Task Scheduler / 现有本地 orchestrator 等**外部定时器**调用；自带 OS 级**单实例锁**（owner / pid / 时间可审计、**绝不删除**活动锁）与陈旧锁安全接管；三类本地 artifact（snapshot state / 事件日志 / status）全部**原子写**且有界滚动，无变化零重复事件；损坏 state / 锁冲突 / 资格计算失败一律 **fail-closed** 并保留旧 state；零网络、零数据库写入、**不自带常驻循环**、不自动改 OS 计划任务；四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/readiness_runner.py`、`scripts/evidence_readiness_runner.py` |
 
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
@@ -687,6 +688,96 @@ Operator 工作流（全部默认只读、默认零网络）：
 - **仍未解决（保持 BLOCKED）**：通知层**只是减少盯盘 / 轮询**，不解除 `PHASE3_3_DATA`；
   即使 `ready_for_human_review=true`，Phase 切换仍须 `.ai/DEVELOPMENT_PROTOCOL.md` 的 L3 人工确认。
 
+### Evidence Readiness 单次本地 tick runner（`scripts/evidence_readiness_runner.py`，GOLD-010）
+
+> **合规红线**：本 runner 只做**一次**本地 tick，调度交给**外部定时器**（Windows Task Scheduler /
+> 现有本地 orchestrator）。它不联网、不抓取站点、不写数据库、不新增 migration / schema、
+> 不接邮件 / 短信 / Webhook / 第三方推送、**不自带常驻循环**、也**不自动修改**你的 OS 计划任务；
+> `blocker_active` / `human_gate_required` 恒为 true，`data_qualification_passed` /
+> `phase_transition_allowed` 恒为 false；无真实合格授权证据时 `PHASE3_3_DATA` 保持 **BLOCKED**。
+
+```powershell
+# 单次 tick（唯一写入口 = 显式 --work-dir；state / 事件日志 / status 都写在该目录内）
+.\.venv\Scripts\python.exe -m scripts.evidence_readiness_runner `
+  --work-dir logs/evidence/runner --json
+
+# 固定审计时点（ISO8601 必须带时区；用于人工复现 / 培训，不改变任何口径）
+.\.venv\Scripts\python.exe -m scripts.evidence_readiness_runner `
+  --work-dir logs/evidence/runner --as-of 2026-09-23T00:00:00+00:00
+```
+
+**工作目录内的 artifact**（固定文件名，全部原子写：同目录临时文件 + `fsync` + `os.replace`）：
+
+| 文件 | 作用 |
+|---|---|
+| `readiness_state.json` | GOLD-009 快照 state（等价于 watch CLI 的 `--state` / `--out`） |
+| `readiness_events.jsonl` | 有界事件日志：只追加**有意义变化**的脱敏事件，保留最新 200 条且**本次新事件永不丢弃** |
+| `readiness_status.json` | 本次 tick 的简洁 status（锁信息 / 事件数 / 四个安全字段 / 指纹 / 缺口三元组） |
+| `readiness_tick.lock` | 单实例锁（可审计 owner / pid / 获取时间；**不删除**，保留为审计留痕） |
+
+- **单实例锁（防并发重入）**：同一工作目录的 tick 用 **OS 级独占文件锁**
+  （Windows `msvcrt` / POSIX `fcntl`，零第三方依赖）串行化；锁文件记录
+  `owner` / `pid` / `acquired_at`（**不含任何敏感数据**），正常退出释放锁但**不删除文件**；
+  锁冲突 → 退出码 `6` 且**零写入**——因为 OS 锁才是"是否活动"的唯一权威，
+  工具**绝不删除 / 绝不改写**活动锁，因此**不可能**造成并发写 state；
+- **陈旧锁安全接管**：崩溃进程遗留的锁文件（无活动 OS 锁）可被安全接管，
+  并在新锁记录与 status 中留下 `recovered_stale=true` + `previous_owner` 审计留痕
+  （锁文件内容不可解析时同样只留痕、不崩溃、不删除）；
+- **幂等**：完全相同 readiness 状态连续 tick → **0 事件**、事件日志逐字节不变
+  （指纹不包含时间戳，`--as-of` 变化不算状态变化）；有意义变化仍沿用 GOLD-009 的
+  脱敏事件（`FIRST_SNAPSHOT` / `BLOCKER_GAP_CHANGED` / `REASON_CODES_CHANGED` /
+  `READY_FOR_HUMAN_REVIEW_ENABLED` / `REVOKED`）；
+- **写入顺序事件优先**：先追加事件日志 → 再原子替换 state → 最后写 status。
+  即使进程在写入途中被强杀，最坏只会"多一条待确认事件"，
+  而**不会**出现"状态已更新、事件永久丢失"（那会让 operator 永远看不到变化）；
+- **有界保留（确定性）**：事件日志保留**最新 200 条**，滚动丢弃条数写入 status 的
+  `journal.dropped`；本次 tick 的新事件**永不被丢弃**（上限不足时自动放宽到本次事件数）；
+- **fail-closed**：state / 事件日志损坏或被篡改（含"声称 blocker 已解除 / 资格已通过"）
+  → 退出码 `4`；锁冲突 → `6`；资格计算失败 → `7`；工作目录或 artifact 不可写 → `3`。
+  这些路径**保留旧的有效 state**、**不把异常当成首次快照**、**不自动重置资格状态**、
+  也不产生任何输出文件（stdout 为空，错误只走 stderr 且已脱敏，绝不回显数据库连接串 / 凭据）；
+- **诚实**：status 与事件恒为 `blocker_active=true` / `human_gate_required=true` /
+  `data_qualification_passed=false` / `phase_transition_allowed=false`（**硬编码**，不被上游或
+  被篡改的 state 透传影响）；即使 `ready_for_human_review=true`，Phase 切换仍须
+  `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**；
+- **退出码**：`0` 量化门槛达标（**仍需 L3 人工 Gate**）/ `2` 参数错误（未显式给出
+  `--work-dir`、`--as-of` 无时区）/ `3` 工作目录或 artifact 不可写 /
+  `4` state 或事件日志损坏（安全失败）/ `5` **仍未达标（预期 BLOCKED，不是定时器故障）** /
+  `6` 锁冲突（另一个 tick 正在运行）/ `7` 资格计算失败；
+- **测试**：`tests/unit/test_evidence_readiness_runner.py`（23 项：锁冲突 / 陈旧锁接管 /
+  正常与无变化 tick / 有界保留 / 损坏 state 与事件日志 / 资格失败脱敏 / 原子写失败 /
+  退出码映射 / 无常驻循环源码守卫）、
+  `tests/integration/test_evidence_readiness_runner_integration.py`（7 项：真实 CLI + 临时
+  SQLite，只读台账、退出码、锁冲突、陈旧锁、损坏 state、参数错误；全部零网络）；
+- **仍未解决（保持 BLOCKED）**：runner **只是把盯盘自动化**（把"人工反复执行"换成"外部定时器
+  调用一次"），**不是**资格判定器，也不具备解除 blocker 的能力；库内仍无足量真实授权证据，
+  `PHASE3_3_DATA` 保持 `active=true`。
+
+#### 外部定时调用示例（**仅供人工配置**；本工具不会自动修改你的计划任务）
+
+Windows 任务计划程序（taskschd.msc）→ 创建任务：
+
+- **程序或脚本**：`D:\VSCodeProject\XAUUSD\.venv\Scripts\python.exe`
+- **添加参数**：`-m scripts.evidence_readiness_runner --work-dir logs\evidence\runner --json`
+- **起始于**：`D:\VSCodeProject\XAUUSD`（`-m` 需要仓库根作为工作目录）
+- **触发器**：例如每 30 分钟一次；建议勾选"如果任务已在运行，则不要启动新实例"
+  （本 runner 的单实例锁是第二层保护，两层同时存在更稳）
+
+等价 `schtasks`（**人工执行，本工具不会替你跑**）：
+
+```bat
+schtasks /Create /TN "GOLD-AI Evidence Readiness Tick" /SC MINUTE /MO 30 /ST 00:00 ^
+  /TR "\"D:\VSCodeProject\XAUUSD\.venv\Scripts\python.exe\" -m scripts.evidence_readiness_runner --work-dir logs\evidence\runner --json" ^
+  /RL LIMITED
+```
+
+> ⚠️ 退出码 `5` 表示"数据仍未达标"——这是**预期**的诚实状态，**不是**定时器故障：
+> 真正的故障只有 `2` / `3` / `4` / `6` / `7`。若希望任务计划程序不因 `5` 报红，
+> 请在包装脚本（`.bat` / `.ps1`）里把 `5` 视为成功，或只检查
+> `logs\evidence\runner\readiness_status.json` 的 `blocker_active` 与 `journal`；
+> 状态文件与事件日志本身**不含**任何正文 / 凭据，可安全交给本地运维查看。
+> 本工具**不会**联网、不会发通知，README 只提供调用方式。
+
 ## 8. 数据模型
 
 
@@ -813,13 +904,14 @@ Operator 工作流（全部默认只读、默认零网络）：
 - **TD-43 / TD-44 / TD-45 仍未解除**：证据接收入口已由 GOLD-005 交付并可用，
   就绪度 / 一键复核工具已由 GOLD-006 交付，单入口 operator workflow 与 gateway-only
   作者链已由 GOLD-007 交付，人工交接包已由 GOLD-008 交付，readiness 状态变更通知层已由
-  GOLD-009 交付（见 §7「授权证据接收入口」、§7「证据就绪度与一键资格复核」、
-  §7「单入口 Evidence Operator 工作流」、§7「Evidence 人工交接包」与
-  §7「Evidence Readiness 状态变更通知」），但**仓库内没有任何经该入口认证的真实授权证据**，
+  GOLD-009 交付，readiness **周期 tick runner** 已由 GOLD-010 交付（见 §7「授权证据接收入口」、
+  §7「证据就绪度与一键资格复核」、§7「单入口 Evidence Operator 工作流」、
+  §7「Evidence 人工交接包」、§7「Evidence Readiness 状态变更通知」与
+  §7「Evidence Readiness 单次本地 tick runner」），但**仓库内没有任何经该入口认证的真实授权证据**，
   因此 `PHASE3_3_DATA` 保持 `active=true`；下一步是业务方按 `evidence-intake-v1` 契约
-  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 / TD-48 / TD-49 / TD-50 / TD-51）。
-  GOLD-007 / GOLD-008 / GOLD-009 的工具**只减少人工交接与盯盘摩擦**，不解除该 blocker；
-  任何数量达标最多只到 `ready_for_human_review=true`，Phase 切换仍是 L3 人工 Gate。
+  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 / TD-48 / TD-49 / TD-50 / TD-51 / TD-52）。
+  GOLD-007 / GOLD-008 / GOLD-009 / GOLD-010 的工具**只减少人工交接、盯盘与定时执行摩擦**，
+  不解除该 blocker；任何数量达标最多只到 `ready_for_human_review=true`，Phase 切换仍是 L3 人工 Gate。
 
 ## 11. 强制约束速查（团队决定）
 

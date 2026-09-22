@@ -59,6 +59,7 @@ __all__ = [
     "SnapshotStateError",
     "WatchEvent",
     "WatchEventType",
+    "atomic_write_text",
     "build_snapshot",
     "detect_changes",
     "load_snapshot_state",
@@ -630,8 +631,12 @@ def _event(
             scope_changes=scope_changes,
         ),
     )
-def _atomic_write_text(path: Path, text: str) -> None:
-    """原子写文本（同目录临时文件 + ``fsync`` + ``os.replace``），避免半写状态。"""
+def atomic_write_text(path: Path, text: str) -> None:
+    """原子写文本（同目录临时文件 + ``fsync`` + ``os.replace``），避免半写状态。
+
+    公开导出：tick runner（``src.evidence.readiness_runner``）等本地 artifact 复用**同一**
+    安全原语，避免各处各写一套（对应 ``src/common/redaction`` 的同一设计原则）。
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_name: str | None = None
     try:
@@ -684,7 +689,7 @@ def load_snapshot_state(path: Path) -> ReadinessSnapshot | None:
 def write_snapshot_state(path: Path, snapshot: ReadinessSnapshot) -> None:
     """原子落盘快照 state（**仅在 CLI 显式给出 ``--out`` 时调用**）。"""
     text = json.dumps(snapshot.to_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    _atomic_write_text(path, text)
+    atomic_write_text(path, text)
 
 
 def write_events(
@@ -707,7 +712,7 @@ def write_events(
         "notes": [WATCH_NOTE],
     }
     text = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    _atomic_write_text(path, text)
+    atomic_write_text(path, text)
 def render_watch_summary(
     snapshot: ReadinessSnapshot,
     events: tuple[WatchEvent, ...],
