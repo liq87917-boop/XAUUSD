@@ -1,0 +1,22 @@
+{
+  "task_id": "TEST-001",
+
+  "title": "测试自动开发链路",
+
+  "goal": "验证 Cline 自动任务执行系统",
+
+  "requirements": [
+    "在项目根目录创建 ai_test.txt",
+    "文件内容写入 Cline automation working"
+  ],
+
+  "constraints": [
+    "不得修改其他任何代码"
+  ],
+
+  "validation_commands": [],
+
+  "acceptance": [
+    "ai_test.txt 存在"
+  ]
+}
