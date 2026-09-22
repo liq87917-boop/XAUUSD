@@ -3,14 +3,14 @@
   "project": "XAUUSD",
   "branch": "cline-agent",
   "phase": "Phase 3",
-  "status": "RUNNING",
-  "current_task": "GOLD-006",
-  "last_completed_task": "GOLD-005",
-  "last_reviewed_task": "GOLD-005",
+  "status": "BLOCKED",
+  "current_task": null,
+  "last_completed_task": "GOLD-006",
+  "last_reviewed_task": "GOLD-006",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "Author/News 真实数据资格仍未达标：需要真实授权且具独立 published_at/collected_at/availability 证据的数据；Author >=30 可信帖子，News >=200 条、>=90 天、单源 <=40%。GOLD-005 已建立 Evidence Intake Gateway，但代码/Mock 不解除 blocker。",
+      "detail": "GOLD-006 已完成并通过工程验收，但真实 Author/News 资格仍未达标。只读 recheck 显示 Author eligible=0（门槛>=30）；News eligible=0（门槛>=200）、coverage 仍缺 90 天，单源集中度因无 eligible evidence 不可评估。必须由业务方提供真实授权且具独立 published_at/collected_at/availability 证据的数据；模板、示例和 Mock 不计入资格。",
       "retryable": false
     }
   ],
@@ -28,13 +28,18 @@
       "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
     }
   ],
-  "next_action": "Orchestrator should pick up GOLD-006: finish the PHASE3_3_DATA blocker tooling with operator-ready evidence templates, preflight/readiness reporting and a one-command qualification recheck. Do not acquire or fabricate external data and do not enter Phase 3.4.",
-  "human_gates": [],
+  "next_action": "PHASE3_3_DATA is an external/human evidence blocker. Use the GOLD-006 operator workflow to prepare authorized Author/News evidence, run dry-run/preflight, inspect quarantine, explicitly intake verified evidence, then run qualification recheck. Do not create normal Phase 3.4/model tasks until the gate passes. GOLD-007 may only improve blocker-facing operator automation and must not claim to resolve the data gate.",
+  "human_gates": [
+    {
+      "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
+      "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."
+    }
+  ],
   "invariants": [
     "LIVE_TRADING=false",
     "不得伪造 published_at / collected_at / effective_at / availability",
     "不得绕过来源授权或 robots/证书安全限制",
-    "不得用 Mock 数据宣称真实数据资格",
+    "不得用 Mock/模板/示例数据宣称真实数据资格",
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ]
 }
