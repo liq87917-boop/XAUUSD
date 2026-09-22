@@ -1,0 +1,49 @@
+{
+  "task_id": "GOLD-011",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立授权 Evidence 本地 Inbox 发现与预检闭环",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 仍 BLOCKED 的前提下，把 GOLD-005~010 已有 Evidence Gateway、Operator、Readiness 能力连接到一个纯本地、只读发现的 evidence inbox：operator 只需把候选 Author/News evidence 与 manifest 放入显式目录，系统即可确定性发现、预检、生成脱敏待处理清单；不得自动 intake、不得自动解除 blocker、不得进入 Phase 3.4。",
+  "recovery_context": [
+    "GOLD-010 已完成：Evidence Readiness runner 已具备单次本地 tick、OS 级单实例锁、原子 state/event/status、fail-closed 与外部定时器安全调用能力。",
+    "GOLD-010 最终 validation 记录为 1903 passed / 1 skipped，ruff 全通过，mypy 158 source files 全通过。",
+    "真实 PHASE3_3_DATA 仍 BLOCKED；合法授权、可信独立时间/availability/OOS 证据及 L3 人工 Gate 不能由工程自动生成或解除。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-010 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 和最近 commits/diff；只处理 PHASE3_3_DATA blocker-facing tooling。",
+    "复用现有 Evidence Gateway/Operator/Readiness 的 schema、reason codes、redaction 与资格口径；不得复制或降低阈值。",
+    "提供纯本地 inbox scanner/CLI，仅扫描显式 --inbox-dir；禁止网络、禁止数据库写入、禁止自动移动/删除原始 evidence 文件。",
+    "候选包必须由 evidence 文件 + manifest 明确关联；manifest 至少声明 evidence_type、source/provider、authorization reference、time/availability semantics、historical OOS applicability 与文件摘要；缺失/格式错误必须 fail-closed 并给出稳定 reason code。",
+    "对候选 evidence 计算 SHA-256 与确定性 package fingerprint；同一内容重复扫描必须幂等，不重复生成待处理项。不得把文件名、mtime 或扫描时间当作资格证据。",
+    "只生成脱敏的 pending/preflight artifact，明确区分 discovered、preflight_pass、quarantined/rejected、requires_human_action；不得自动调用 intake commit 路径。",
+    "任何授权声明、独立时间/availability 或 OOS 证据不足时都只能 quarantine/reject；模板、示例、Mock 必须显式识别且永远不能计入真实资格。",
+    "输出必须保持 blocker_active=true、human_gate_required=true、data_qualification_passed=false、phase_transition_allowed=false；即使所有候选 preflight 通过也只能进入人工确认/显式 intake 队列。",
+    "新增 unit/integration tests，使用临时目录/Mock/SQLite，禁止联网，覆盖空 inbox、合法候选、缺 manifest、manifest 损坏、重复扫描、内容变更、symlink/path traversal、防敏感信息泄漏与 fail-closed。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，给出 operator 放置候选 evidence 的最小目录/manifest 示例和后续显式 Evidence Operator intake 步骤。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/common/redaction.py", "scripts/evidence_*.py", "tests/unit/**", "tests/integration/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md", ".gitignore"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".env", "database/migrations/**", "src/alpha/**"]
+  },
+  "constraints": [
+    "不新增第三方依赖或 migration/schema。",
+    "不联网、不接第三方推送、不自动修改 OS 计划任务、不自动 intake/写数据库。",
+    "不新增或启用未授权数据源，不伪造 published_at/collected_at/effective_at/availability。",
+    "不用 Mock/模板/示例数据宣称真实数据资格，不降低资格阈值或 human gate。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不启用实盘；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在纯本地、只读发现的 evidence inbox scanner，可从显式目录确定性生成脱敏 pending/preflight artifact。",
+    "候选包具备内容 SHA-256/fingerprint，重复扫描幂等；缺失授权/时间/availability/OOS 证据 fail-closed。",
+    "scanner 不自动 intake、不写数据库、不移动/删除原始 evidence、不联网，且防 symlink/path traversal。",
+    "模板/Mock/示例不会计入资格，输出始终保持 blocker 与 human gate 安全字段。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "README/TECH_DEBT/PROGRESS_LOG 明确 PHASE3_3_DATA 仍 BLOCKED，并给出人工 evidence drop → preflight → 显式 intake 的操作路径。"
+  ]
+}
