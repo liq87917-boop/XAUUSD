@@ -4,9 +4,9 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "RUNNING",
-  "current_task": "GOLD-003",
-  "last_completed_task": "GOLD-002-R1",
-  "last_reviewed_task": "GOLD-002-R1",
+  "current_task": "GOLD-004",
+  "last_completed_task": "GOLD-003",
+  "last_reviewed_task": "GOLD-003",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
@@ -28,7 +28,7 @@
       "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
     }
   ],
-  "next_action": "Orchestrator should pick up GOLD-003: optionally wire the existing CollectionProcessor into the persistent Collector Scheduler while preserving scheduler boundaries, then harden redaction and config-security test isolation and rerun full validation.",
+  "next_action": "Orchestrator should pick up GOLD-004: build read-only collector health and Phase 3.3 data-qualification observability, preserve the PHASE3_3_DATA blocker, and rerun full validation.",
   "human_gates": [],
   "invariants": [
     "LIVE_TRADING=false",
