@@ -1,0 +1,159 @@
+{
+  "task_id": "GOLD-001",
+  "title": "实现 30 分钟 Collector Scheduler 并解除 TD-09",
+  "status": "blocked",
+  "finished_at": "2026-09-22T11:29:12+08:00",
+  "attempt_count": 3,
+  "max_attempts": 3,
+  "changed_files": [],
+  "git_diff_stat": "",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-22T11:10:56+08:00",
+      "finished_at": "2026-09-22T11:28:05+08:00",
+      "cline_exit_code": 1,
+      "cline_timed_out": false,
+      "finish_reason": "error",
+      "model": "cline-free/deepseek-v4.1-flash",
+      "iterations": 94,
+      "duration_ms": 1024723,
+      "usage": {
+        "inputTokens": 14695232,
+        "outputTokens": 92065,
+        "cacheReadTokens": 14540288,
+        "cacheWriteTokens": 0,
+        "totalCost": 0
+      },
+      "cline_final_text": "{\"error\":{\"code\":\"INFERENCE_CAP_ERROR\",\"message\":\"Error 429: Daily free limit reached on model deepseek/deepseek-v4.1-flash. Try again in 8h 32m\"}}",
+      "cline_error_tail": "{\"ts\":\"2026-09-22T03:28:05.133Z\",\"type\":\"error\",\"message\":\"Daily free model limit reached\\nYou've reached today's free usage limit for this model.\\nTry again in 8h 32m\\\"}} or select another model.\\nOpen the model selector with /model.\"}\n",
+      "changed_files": [
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M docs/05_分阶段开发路线图.md",
+        " M orchestrator/ai_orchestrator.py",
+        " M scripts/collectors/dry_run_collectors.py",
+        " M scripts/collectors/smoke_collectors.py",
+        "?? scripts/run_collector_scheduler.py",
+        "?? src/scheduler/",
+        "?? tests/integration/test_scheduler_collection.py",
+        "?? tests/unit/test_scheduler_windows.py"
+      ],
+      "git_diff_stat": " README.md                                | 36 +++++++++++++++++++++++++--\n TECH_DEBT.md                             | 42 ++++++++++++++++++++++++--------\n docs/05_分阶段开发路线图.md              |  2 +-\n orchestrator/ai_orchestrator.py          | 17 +++----------\n scripts/collectors/dry_run_collectors.py |  3 ++-\n scripts/collectors/smoke_collectors.py   |  3 ++-\n 6 files changed, 74 insertions(+), 29 deletions(-)\n",
+      "validations": [
+        {
+          "command": "py -m pytest tests -q",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named pytest\n"
+        },
+        {
+          "command": "py -m ruff check .",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named ruff\n"
+        },
+        {
+          "command": "py -m mypy config database src scripts",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named mypy\n"
+        }
+      ]
+    },
+    {
+      "attempt": 2,
+      "started_at": "2026-09-22T11:28:15+08:00",
+      "finished_at": "2026-09-22T11:28:42+08:00",
+      "cline_exit_code": 1,
+      "cline_timed_out": false,
+      "finish_reason": "error",
+      "model": "cline-free/deepseek-v4.1-flash",
+      "iterations": 1,
+      "duration_ms": 12079,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "totalCost": 0
+      },
+      "cline_final_text": "{\"error\":{\"code\":\"INFERENCE_CAP_ERROR\",\"message\":\"Error 429: Daily free limit reached on model deepseek/deepseek-v4.1-flash. Try again in 8h 32m\"}}",
+      "cline_error_tail": "{\"ts\":\"2026-09-22T03:28:41.751Z\",\"type\":\"error\",\"message\":\"Daily free model limit reached\\nYou've reached today's free usage limit for this model.\\nTry again in 8h 32m\\\"}} or select another model.\\nOpen the model selector with /model.\"}\n",
+      "changed_files": [],
+      "git_diff_stat": "",
+      "validations": [
+        {
+          "command": "py -m pytest tests -q",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named pytest\n"
+        },
+        {
+          "command": "py -m ruff check .",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named ruff\n"
+        },
+        {
+          "command": "py -m mypy config database src scripts",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named mypy\n"
+        }
+      ]
+    },
+    {
+      "attempt": 3,
+      "started_at": "2026-09-22T11:28:52+08:00",
+      "finished_at": "2026-09-22T11:29:12+08:00",
+      "cline_exit_code": 1,
+      "cline_timed_out": false,
+      "finish_reason": "error",
+      "model": "cline-free/deepseek-v4.1-flash",
+      "iterations": 1,
+      "duration_ms": 1390,
+      "usage": {
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "totalCost": 0
+      },
+      "cline_final_text": "{\"error\":{\"code\":\"INFERENCE_CAP_ERROR\",\"message\":\"Error 429: Daily free limit reached on model deepseek/deepseek-v4.1-flash. Try again in 8h 31m\"}}",
+      "cline_error_tail": "{\"ts\":\"2026-09-22T03:29:12.290Z\",\"type\":\"error\",\"message\":\"Daily free model limit reached\\nYou've reached today's free usage limit for this model.\\nTry again in 8h 31m\\\"}} or select another model.\\nOpen the model selector with /model.\"}\n",
+      "changed_files": [],
+      "git_diff_stat": "",
+      "validations": [
+        {
+          "command": "py -m pytest tests -q",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named pytest\n"
+        },
+        {
+          "command": "py -m ruff check .",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named ruff\n"
+        },
+        {
+          "command": "py -m mypy config database src scripts",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "",
+          "stderr_tail": "C:\\Program Files\\Python313\\python.exe: No module named mypy\n"
+        }
+      ]
+    }
+  ],
+  "note": "Task failed after maximum retry count."
+}
