@@ -114,6 +114,12 @@ def is_sensitive_key(key: str) -> bool:
     return any(token in _SENSITIVE_TOKENS for token in tokens)
 
 
+def _is_url_like_key(key: str) -> bool:
+    """键名是否属于 URL 类键（含 ``url`` / ``uri`` / ``link`` 片段，大小写无关）。"""
+    lowered = key.lower()
+    return "url" in lowered or "uri" in lowered or "link" in lowered
+
+
 def safe_url(value: str, *, max_chars: int = MAX_AUDIT_VALUE_CHARS) -> str:
     """URL → 仅保留 ``scheme://host/path``（丢弃 userinfo / query / fragment）。
 
@@ -157,7 +163,9 @@ def sanitize_mapping(
     1. 丢弃凭据类键（:func:`is_sensitive_key`）；
     2. 只保留标量；``list`` / ``tuple`` 只保留标量项（最多 ``max_list_items`` 项）；
        嵌套 ``Mapping`` 一律丢弃（防止把完整 source config / HTTP headers 带进审计摘要）；
-    3. URL 类键（``url`` / ``uri`` / ``link``）走 :func:`safe_url`，丢弃查询串与 userinfo；
+    3. URL 类键（``url`` / ``uri`` / ``link``）只对**字符串**走 :func:`safe_url`
+       （丢弃查询串与 userinfo）；``None`` 原样保留；``bool`` / ``int`` / ``float``
+       保留原值而**绝不** ``str()`` 伪造成字符串 URL；其它复杂对象丢弃；
     4. 字符串擦除凭据并截断；最多保留 ``max_entries`` 个键。
 
     Returns:
@@ -186,15 +194,23 @@ def sanitize_mapping(
             sanitized[key] = [item for item in items if item is not None]
             continue
 
-        lowered = key.lower()
-        if "url" in lowered or "uri" in lowered or "link" in lowered:
-            # ⚠️ 空值必须原样保留为 ``None``：``str(None)`` 会让审计摘要里凭空多出一个
-            # 字符串 ``"None"``（把"未知 URL"伪造成"URL 就叫 None"）。
-            sanitized[key] = (
-                None
-                if raw_value is None
-                else safe_url(str(raw_value), max_chars=max_value_chars)
-            )
+        if _is_url_like_key(key):
+            # ⚠️ 只有**字符串**才允许进入 :func:`safe_url`。历史实现无条件 ``str(value)``，
+            # 于是 ``{"feed_url": None}`` 被写成字符串 ``"None"``（把"未知 URL"伪造成
+            # "URL 就叫 None"，GOLD-002-R1 已修），而 ``{"is_url": True}`` / ``{"feed_url": 123}``
+            # 被写成 ``"True"`` / ``"123"``（非字符串标量被伪造成字符串 URL）。
+            # GOLD-003 起采用如下**确定性规则**（不再对非字符串标量做 ``str()``）：
+            #   1. ``str`` → :func:`safe_url`（丢弃 userinfo / query / fragment）；
+            #   2. ``None`` → 原样保留 ``None``；
+            #   3. ``bool`` / ``int`` / ``float`` → 保留原值（诚实审计，绝不字符串化）；
+            #   4. 其它对象（复杂类型）→ 丢弃该键（不猜测、不字符串化）。
+            if isinstance(raw_value, str):
+                sanitized[key] = safe_url(raw_value, max_chars=max_value_chars)
+                continue
+            scalar = sanitize_value(raw_value, max_chars=max_value_chars)
+            if scalar is None and raw_value is not None:
+                continue
+            sanitized[key] = scalar
             continue
 
         value = sanitize_value(raw_value, max_chars=max_value_chars)

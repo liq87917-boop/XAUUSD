@@ -133,10 +133,17 @@ class PersistedItemProcessor(Protocol):
     - 只读 ``raw_item``、只写 ``processed_items``（append-only），**绝不修改原始层**；
     - 单条失败必须转成状态记录（``FAILED`` / ``REJECTED``），不得让整批静默丢失；
     - 摘要不得包含 token / API key / Authorization / 完整 source config。
+
+    说明：``processor_name`` / ``processor_version`` 声明为**只读属性**——Processor 的身份
+    由实现方给出，调用方（采集层 / CLI）只读取、不得改写；因此既可以用 ``@property``
+    实现（``CollectionProcessor``），也可以用普通类属性实现（测试替身），两者都满足本协议。
     """
 
-    processor_name: str
-    processor_version: str
+    @property
+    def processor_name(self) -> str: ...
+
+    @property
+    def processor_version(self) -> str: ...
 
     def process_persisted(self, session: Any, raw_item: RawItemLike) -> ProcessedRecord: ...
 

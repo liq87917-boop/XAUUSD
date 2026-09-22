@@ -124,6 +124,44 @@ def test_sanitize_mapping_keeps_null_url_values_as_null() -> None:
     assert "None" not in payload
 
 
+def test_sanitize_mapping_does_not_stringify_non_string_url_values() -> None:
+    """URL 类键的**非字符串标量**绝不能被 ``str()`` 伪造成字符串 URL。
+
+    回归背景（GOLD-003）：``sanitize_mapping`` 早期对 URL 类键无条件 ``safe_url(str(value))``，
+    于是 ``{"is_url": True}`` → ``"True"``、``{"feed_url": 123}`` → ``"123"``——
+    审计摘要里凭空多出"看起来像 URL 的字符串"，与"只记录真实值"的口径冲突。
+    本测试锁定确定性行为：``str`` 走 :func:`safe_url`（去 query/userinfo）；
+    ``None`` 保持 ``None``；``bool`` / ``int`` / ``float`` 保留原值（不字符串化）；
+    复杂对象直接丢弃。
+    """
+
+    sanitized = sanitize_mapping(
+        {
+            "feed_url": 123,
+            "is_url": True,
+            "uri_length": 4.5,
+            "url": None,
+            "source_url": "https://feeds.example.invalid/rss.xml?token=SECRETVALUE",
+            "callback_object": object(),
+        }
+    )
+
+    assert sanitized["feed_url"] == 123
+    assert isinstance(sanitized["feed_url"], str) is False
+    assert sanitized["is_url"] is True
+    assert sanitized["uri_length"] == 4.5
+    assert sanitized["url"] is None
+    assert sanitized["source_url"] == "https://feeds.example.invalid/rss.xml"
+    assert "callback_object" not in sanitized  # 复杂对象丢弃，绝不字符串化
+
+    payload = json.dumps(sanitized, ensure_ascii=False)
+    assert '"feed_url": 123' in payload
+    assert '"is_url": true' in payload
+    assert '"123"' not in payload
+    assert '"True"' not in payload
+    assert "SECRETVALUE" not in payload
+
+
 def test_sanitize_mapping_is_bounded_and_returns_new_object() -> None:
     raw = {f"k{index}": index for index in range(50)}
     sanitized = sanitize_mapping(raw, max_entries=3)

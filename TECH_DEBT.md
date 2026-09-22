@@ -244,6 +244,16 @@
 > 原始冻结描述（保留审计历史）：`processed_items`（加工结果，append-only）原本无写入路径；
 > `data_versions` / `audit_logs` 同样只建表未使用；normalize / dedup / timezone 处理内嵌在
 > 采集器内（职责边界尚可，但不满足 `docs/02` 的 Processor 分层）。
+>
+> **更新（2026-09-22，GOLD-003）**：接线范围扩展到**常驻采集入口**——
+> `scripts/run_collector_scheduler.py --with-processor`（**默认关闭**，不传即零行为差异）
+> 把现有 `CollectionProcessor` 经 `default_collector_factory(post_processor=...)` 注入采集器，
+> 使 30 分钟采集完成 `raw_items → processed_items` 闭环；单源 Processor 故障按源隔离
+> （原始数据不丢、其它源照常调度），故障告警在**写日志与写 `job_runs.output_json.warnings` 前**
+> 统一经 `src/common/redaction.py` 脱敏；`src/scheduler/core.py` 仍**零** Processor 逻辑。
+> TD-11 维持「已解除」；**TD-12 维持「部分解除」**——剩余缺口仍是「所有数据集建立
+> `data_versions` 快照」与 `processed_items` 缺 `error_message` 列（TD-19），
+> 本任务**不**宣称 TD-12 全部解除。
 
 ### TD-13 `raw_media` 无下载器（P2）
 

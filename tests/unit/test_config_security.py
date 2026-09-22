@@ -12,11 +12,45 @@ from src.common.exceptions import ConfigSecurityError
 pytestmark = pytest.mark.unit
 
 
-def test_defaults_are_safe() -> None:
+@pytest.fixture()
+def isolated_host_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """隔离宿主环境变量，使测试只验证**代码默认值**。
+
+    回归背景（GOLD-003 修复 GOLD-002-R1 遗留问题）：``Settings(_env_file=None)`` 只关闭
+    ``.env`` 文件读取，pydantic-settings **仍会读取进程环境变量**。开发 / CI 机器上只要导出过
+    ``FRED_API_KEY``，``test_defaults_are_safe`` 就会假失败（实测本机 shell 已导出该变量，
+    失败信息为 ``assert True is False``）。
+
+    这里删除相关宿主变量而不是改生产代码——生产配置读取环境变量的能力必须保留，
+    由 :func:`test_environment_variables_are_still_honored_for_secrets` 明确锁定。
+    """
+    for name in (
+        "FRED_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "LIVE_TRADING",
+        "ALLOW_EXTERNAL_ORDER_SUBMISSION",
+        "DATABASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_defaults_are_safe(isolated_host_env: None) -> None:
     settings = Settings(_env_file=None)
     assert settings.live_trading is False
     assert settings.allow_external_order_submission is False
     assert settings.fred_configured is False
+
+
+def test_environment_variables_are_still_honored_for_secrets(
+    isolated_host_env: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """生产配置**读取环境变量**的能力不得因测试隔离而被削弱。"""
+    monkeypatch.setenv("FRED_API_KEY", "env-secret-value")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.fred_configured is True
+    assert "env-secret-value" not in repr(settings)
 
 
 def test_fred_key_is_secret_and_reports_only_configuration_state() -> None:

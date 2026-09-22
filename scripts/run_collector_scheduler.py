@@ -8,11 +8,18 @@
     # 常驻：每个 30 分钟槽执行一次（Ctrl+C 正常退出）
     python -m scripts.run_collector_scheduler --interval-minutes 30
 
+    # 采集后立即加工（raw_items → processed_items）：显式开启 Processor
+    python -m scripts.run_collector_scheduler --interval-minutes 30 --with-processor
+
 安全与边界（与 .clinerules 一致）：
 - 只读取 ``sources``（``enabled=true`` 且配置 ``config_json.collector``），
   不打印、不落库任何密钥 / Token（``JobRun.output_json`` 只写白名单摘要）；
 - 采集器构造走 :func:`src.collectors.bootstrap.default_collector_factory`（生产注册表），
   授权 / robots / 证书等门禁仍由各采集器自身强制，本 CLI 不做任何绕过；
+- ``--with-processor`` **默认关闭**：不传该开关时注入 ``post_processor=None``，
+  行为与 GOLD-001-R2 完全一致；开启后由 CLI 显式构造
+  :class:`~src.processors.collection.pipeline.CollectionProcessor` 并交给 bootstrap 注入，
+  Processor 的业务逻辑既不在本 CLI、也不在 ``src/scheduler/core.py``；
 - 调度只使用标准库 ``asyncio`` / ``time``，未引入 APScheduler / Celery。
 """
 
@@ -37,6 +44,8 @@ from database.session import build_engine, build_session_factory, session_scope 
 from scripts._console import configure_stdout  # noqa: E402
 from src.collectors.bootstrap import default_collector_factory  # noqa: E402
 from src.common.time import utc_now  # noqa: E402
+from src.processors.collection.contracts import PersistedItemProcessor  # noqa: E402
+from src.processors.collection.pipeline import CollectionProcessor  # noqa: E402
 from src.scheduler.core import (  # noqa: E402
     CollectorFactory,
     SchedulerRunResult,
@@ -73,7 +82,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="在途 RUNNING/RETRYING 多久后可接管（默认 3 倍调度间隔）",
     )
+    parser.add_argument(
+        "--with-processor",
+        action="store_true",
+        help="采集成功后立即执行采集后处理（raw_items → processed_items）；默认关闭",
+    )
     return parser
+
+
+def build_post_processor(enabled: bool) -> PersistedItemProcessor | None:
+    """按显式开关构造采集后处理 Processor（默认关闭 → ``None``）。
+
+    Args:
+        enabled: ``--with-processor`` 是否显式开启。
+
+    Returns:
+        ``None``（默认，行为与 GOLD-001-R2 一致、零 ``processed_items``）或
+        :class:`~src.processors.collection.pipeline.CollectionProcessor` 实例。
+
+    备注：这里只做"显式可选接线"——Processor 的业务逻辑不在本 CLI，也不在
+    ``src/scheduler/core.py``；实例最终由
+    :func:`src.collectors.bootstrap.default_collector_factory` 注入采集器。
+    """
+    return CollectionProcessor() if enabled else None
 
 
 def resolve_stale_after(interval_minutes: int, override_minutes: int | None) -> timedelta:
@@ -119,7 +150,18 @@ def main(
     configure_stdout()
     args = build_parser().parse_args(argv)
     stale_after = resolve_stale_after(args.interval_minutes, args.stale_after_minutes)
-    factory = collector_factory if collector_factory is not None else default_collector_factory()
+    processor = build_post_processor(args.with_processor)
+    if processor is not None:
+        _log.info(
+            "已显式启用采集后处理：processor=%s@%s（raw_items → processed_items）",
+            processor.processor_name,
+            processor.processor_version,
+        )
+    factory = (
+        collector_factory
+        if collector_factory is not None
+        else default_collector_factory(post_processor=processor)
+    )
     factory_session = session_factory or build_session_factory(build_engine())
 
     if args.once:

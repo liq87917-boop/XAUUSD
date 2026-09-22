@@ -2126,6 +2126,68 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
     本轮**未**修改该测试（越出 GOLD-002-R1 范围，仅记录）。
 - **范围守规**：未新增依赖、未新增/修改 migration 与 schema、未进入 Phase 3.4、未训练 Alpha、
   未生成交易信号、未触碰 `.ai/tasks/**` 与 `.ai/results/**`。
-- **次要观察（未修改，留待后续）**：`sanitize_mapping` 对 URL 类键的非字符串标量
-  （如 `{"is_url": True}`）仍会 `str()` 成 `"True"`；属 P2 展示口径问题，不影响本轮验收。
+- **次要观察（GOLD-003 已修复）**：`sanitize_mapping` 对 URL 类键的非字符串标量
+  （如 `{"is_url": True}`）会 `str()` 成 `"True"`；属 P2 展示口径问题，
+  已在 GOLD-003 收紧为「只有字符串走 `safe_url`，`bool`/`int`/`float` 保留原值」
+  并补回归测试锁定，见第六十七轮。
+
+## 第六十七轮（2026-09-22）：GOLD-003 —— Processor 可选接入常驻 Scheduler 并加固运行边界
+
+### 1. 交付内容
+
+- **常驻入口显式可选接线**（`scripts/run_collector_scheduler.py`）：
+  新增 `--with-processor`（`store_true`，**默认关闭**）与纯函数
+  `build_post_processor(enabled)`（关闭时返回 `None`）；`main()` 用
+  `default_collector_factory(post_processor=...)` 把实例交给 bootstrap 注入采集器。
+  未开启时注入 `post_processor=None` ⇒ 与 GOLD-001-R2 **零行为差异**；
+  `src/scheduler/core.py` **零改动**（Processor 业务逻辑既不在 CLI、也不在调度核心）；
+- **单源 Processor 故障的脱敏记录**（`src/collectors/base.py`）：采集层
+  `_record_processing_warning` 统一负责「脱敏 → 写日志 → 记入运行摘要」，修掉了
+  **真实缺陷**——旧实现把**未脱敏**的异常文本直接写日志，Processor 异常里带
+  `api_key=...` 会把凭据落进日志文件；告警仍经 `collector.last_warnings` →
+  `CollectorRunResult.warnings` → `job_runs.output_json.warnings`（Scheduler 侧再擦一遍），
+  容量上限只限制留痕条数、不抑制日志；
+- **`sanitize_mapping` URL 类键收紧**（`src/common/redaction.py`）：只有 `str` 才走
+  `safe_url`（去 userinfo / query / fragment）；`None` 原样保留；`bool` / `int` / `float`
+  **保留原值**、绝不 `str()` 伪造成字符串 URL；其它复杂对象丢弃。修复前
+  `{"is_url": True}` → `"True"`、`{"feed_url": 123}` → `"123"`
+  （即第六十六轮 §4 记录的「次要观察」，本轮闭环）；
+- **契约类型微调**（`src/processors/collection/contracts.py`）：
+  `PersistedItemProcessor` 的 `processor_name` / `processor_version` 由可变属性改为
+  **只读 `@property`**，使 `CollectionProcessor`（property 实现）与测试替身（类属性实现）
+  都满足协议，接线点不再需要 `# type: ignore`（mypy 全绿的必要条件）；
+- **config security 测试与环境解耦**（`tests/unit/test_config_security.py`）：
+  新增 `isolated_host_env` 夹具（删除宿主 `FRED_API_KEY` 等）后验证 defaults；
+  并新增 `test_environment_variables_are_still_honored_for_secrets` 锁定「生产配置仍读取
+  环境变量」不被削弱——第六十六轮 §4 记录的假失败不再出现，运行者无需手工清环境。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **10 项 Mock 测试**（零网络、零真实数据源、零外部站点）：
+  - `tests/integration/test_scheduler_processor_wiring.py` **5**（新增文件）：默认关闭零行为差异 /
+    `--with-processor` 注入真实 `CollectionProcessor` / 生产路径（真实 bootstrap + Scheduler +
+    runner + Processor）`raw_items → processed_items` 闭环（含 `effective_at` 下界与凭据不落审计）/
+    同槽与重复加工幂等 / 单源 Processor 故障隔离（原始数据不丢、其它源照常加工）+ 日志与审计脱敏；
+  - `tests/unit/test_redaction.py` **+1**（共 27）：URL 类键的非字符串标量不被伪造成字符串 URL；
+  - `tests/unit/test_collector_scheduler_cli_args.py` **+3**（共 6）：`--with-processor` 默认关闭 /
+    显式开启、`build_post_processor(False) is None`、`build_post_processor(True)` 返回真实 Processor；
+  - `tests/unit/test_config_security.py` **+1**（共 9）：环境变量仍被尊重（不削弱生产读取能力）；
+- **负向验证**（确认回归测试真能拦住缺陷）：临时把采集层日志改回「未脱敏」形态后，
+  `test_single_source_processor_failure_is_isolated_and_redacted` 立即失败
+  （日志中出现 `api_key=SECRETVALUE-9f1c`），恢复修复后重新通过；
+- **全量门禁**（宿主已导出 `FRED_API_KEY` 的情况下实测，证明环境脆弱性已消除）：
+  - `pytest tests -q` → **1678 passed / 1 skipped in 200.38s**（收集 1679 项；唯一 skip 为
+    `jieba` 已安装分支），stderr 为空；
+  - `ruff check .` → `All checks passed!`；
+  - `mypy config database src scripts` → `Success: no issues found in 134 source files`。
+
+### 3. 范围守规
+
+- 未新增依赖、未新增/修改 migration 与 schema、未进入 Phase 3.4、未训练 Alpha、
+  未生成或执行任何实盘交易信号（`LIVE_TRADING=false` 门禁未触碰）；
+- `src/scheduler/**` 未改动（接线点只在 CLI + bootstrap 注入处）；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`.env`；
+- `TD-11` 维持「已解除」、`TD-12` 维持「部分解除」（未因本任务宣称全部解除）；
+- 遗留（未修，超出本轮范围）：`processed_items` 缺 `error_message` 列（TD-19）、
+  非行情数据集的 `data_versions` 快照（TD-12 剩余口径）等既有技术债照旧。
 

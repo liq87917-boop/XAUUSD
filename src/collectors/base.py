@@ -70,6 +70,9 @@ _DUPLICATE = PERSIST_DUPLICATE
 #: 采集器侧保留的 Processor 告警上限（防止异常刷屏把 collector_runs.warnings_json 撑爆）
 _MAX_PROCESSING_WARNINGS = 20
 
+#: 单条 Processor 告警的最大长度（写日志 / 写摘要前先截断）
+_MAX_PROCESSING_WARNING_CHARS = 300
+
 
 class BaseCollector(ABC):
     """所有采集器的基类。
@@ -343,9 +346,9 @@ class BaseCollector(ABC):
         try:
             record: ProcessedRecord = processor.process_persisted(session, raw_item)
         except Exception as exc:  # noqa: BLE001 - 后处理异常必须可观测，但不得阻断采集
-            warning = f"Processor 后处理异常：{type(exc).__name__}: {exc}"
-            self._record_processing_warning(warning)
-            _log.warning("%s | %s", self.collector_name, warning)
+            self._record_processing_warning(
+                f"Processor 后处理异常：{type(exc).__name__}: {exc}"
+            )
             return
 
         outcome = record.outcome.value
@@ -354,12 +357,20 @@ class BaseCollector(ABC):
             self._record_processing_warning(warning)
 
     def _record_processing_warning(self, text: str) -> None:
-        """记录 Processor 告警（脱敏 + 截断 + 上限，绝不写入凭据）。"""
-        if len(self._processing_warnings) >= _MAX_PROCESSING_WARNINGS:
+        """记录 Processor 告警（脱敏 + 截断 + 上限，绝不写入凭据）。
+
+        ⚠️ 日志与运行摘要必须使用**同一份脱敏文本**：早期实现把**未脱敏**的异常信息直接
+        写日志，若 Processor 异常里带 ``api_key=...`` / URL query，凭据就会落到日志文件
+        （`.clinerules` 第六条、`.ai/DEVELOPMENT_PROTOCOL.md` §5 均禁止）。
+        因此本方法统一负责"脱敏 → 写日志 → 记入摘要"。
+        """
+        redacted = safe_text(str(text), max_chars=_MAX_PROCESSING_WARNING_CHARS)
+        if not redacted:
             return
-        redacted = safe_text(str(text), max_chars=300)
-        if redacted:
-            self._processing_warnings.append(redacted)
+        _log.warning("%s | Processor 告警：%s", self.collector_name, redacted)
+        if len(self._processing_warnings) >= _MAX_PROCESSING_WARNINGS:
+            return  # 摘要容量上限只限制**留痕条数**，不抑制日志
+        self._processing_warnings.append(redacted)
 
 
     # ------------------------------------------------------------------

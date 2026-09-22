@@ -306,10 +306,19 @@ python -m scripts.run_collector_scheduler --interval-minutes 30
 
 # 自定义"在途多久可接管"（默认 = 3 倍调度间隔，30 分钟 → 90 分钟）
 python -m scripts.run_collector_scheduler --stale-after-minutes 45
+
+# 采集后立即加工（raw_items → processed_items）：显式开启 Processor（默认关闭）
+python -m scripts.run_collector_scheduler --interval-minutes 30 --with-processor
 ```
 
 - 只读取 `sources`（`enabled=true` 且配置 `config_json["collector"]`）；各采集器仍自行强制
   授权 / robots / 证书门禁，本 CLI **不做任何绕过**；
+- `--with-processor` **默认关闭**（不传即注入 `post_processor=None`，行为与 GOLD-001-R2 一致）；
+  显式开启后由 CLI 构造 `CollectionProcessor` 并经
+  `src/collectors/bootstrap.py::default_collector_factory(post_processor=...)` 注入采集器，
+  使 30 分钟采集完成 `raw_items → processed_items` 闭环——**Scheduler 核心仍不感知 Processor**；
+- Processor 故障按源隔离：异常经 `src/common/redaction.py` 脱敏后同时写入日志与
+  `job_runs.output_json.warnings`（`***` 替换凭据），不阻断其它源、不丢 `raw_items`；
 - `job_runs.output_json` 只写白名单摘要（source / status / run_id / fetched / inserted /
   duplicate / failed / skipped / retry_count / warnings），**不写** token / API key /
   Authorization / 完整 source 配置；
@@ -346,10 +355,14 @@ ProcessorInput
   参考实现是 RSS 采集路径 `python scripts/collect_rss.py --to-db`（CLI 统计里多出
   `processing` 摘要），生产工厂入口 `src/collectors/bootstrap.py::default_collector_factory(
   post_processor=...)`——Scheduler 核心不感知 Processor；
+- **常驻调度接线（GOLD-003）**：`scripts/run_collector_scheduler.py --with-processor`
+  显式开启后，30 分钟采集与 Processor 形成生产级闭环；默认关闭即零行为差异；
 - **测试**：`tests/unit/test_collection_processor.py`（35 项）、
-  `tests/unit/test_redaction.py`（26 项，含 GOLD-002-R1 复核补的 URL 空值回归）、
+  `tests/unit/test_redaction.py`（27 项，含 URL 空值 / 非字符串标量不被伪造成 URL 的回归）、
   `tests/integration/test_collection_processor_persistence.py`（8 项）、
-  `tests/integration/test_collection_processor_wiring.py`（4 项），全部 Mock、零网络；
+  `tests/integration/test_collection_processor_wiring.py`（4 项）、
+  `tests/integration/test_scheduler_processor_wiring.py`（5 项，Scheduler ↔ Processor 接线、
+  幂等与单源故障隔离），全部 Mock、零网络；
 - 无新增依赖、无新增 migration / schema（复用现有 `processed_items` 与 `ProcessStatus`）。
 
 
