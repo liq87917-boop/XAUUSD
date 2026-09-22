@@ -3053,3 +3053,145 @@ W0-1 代码已交付，**未执行真实回填**（按你的要求等确认）�
   （本工具不会把旧计划"升级"成新计划）；`reviewer` / `note` / 文件名 / mtime / `reviewed_at` /
   `generated_at` / "曾被人批准" 都**不是**证据时间，产出里根本没有这些证据时间键。
 
+
+---
+
+## 第七十八轮（2026-09-23）：GOLD-014 —— Evidence 显式 Intake Receipt 与资格复核审计闭环
+
+### 1. 交付内容
+
+在 `PHASE3_3_DATA` 仍 **BLOCKED** 的前提下，为 GOLD-013 生成的 approved Evidence 显式人工
+intake 建立**纯本地、可复核、fail-closed** 的 **post-intake receipt / verification 层**：
+
+- **核心 `src/evidence/intake_receipt.py`**（零网络 / 零数据库 / 零新增依赖）：
+  - `IntakeReceiptStatus`（`VERIFIED_EXECUTION_RECORDED` / `BLOCKED_NO_APPROVED_EVIDENCE`）与
+    `ReceiptVerificationCode`（17 个**稳定**原因码）+ `ReceiptViolation`；
+  - `IntakePlanDocument` / `PlanEntryDocument` / `load_intake_plan_document(...)`：GOLD-013 plan 的
+    严格**只读视图**（kind / schema / 契约版本、四个安全字段与 `auto_intake_allowed` /
+    `writes_database` / `requires_explicit_operator_action` 不可被 state 削弱、条目**白名单键**、
+    `approved_for_explicit_intake_count` 与列表长度自洽、`data_qualification_passed_count` 必须为 0、
+    `plan_id` 必须 64 位小写十六进制、**任何证据时间键一律拒绝加载**）→ `IntakeReceiptStateError`；
+  - `OperatorResult` / `load_operator_result(...)`：人工**显式** Evidence Operator 执行结果
+    （`EvidenceIntakeReport.to_dict()` manifest）的严格只读视图；记录**内容寻址**的
+    `artifact_sha256`、`input.sha256`、`scope`、`dry_run`、`generated_at` 与全部 `counts`；
+  - `QualificationRecheck` / `load_qualification_recheck(...)`：`phase33_qualification_recheck`
+    产物的严格只读视图（`as_of` / `blocker_code` / `blocker_active` / `human_gate_required` /
+    `ready` / gate 计数）；
+  - `verify_intake_receipt(...)` / `build_intake_receipt(...)`：**复用** GOLD-013 的
+    `build_intake_plan` 做重新绑定核验（**不复制、不降低**任何资格规则）——
+    ①plan 必须**当前仍然成立**（`plan_id` 与条目摘要（指纹 / `decision_id` / `review revision` /
+    `scope` / 文件清单）与用**当前** inbox + ledger + 批准清单重新算出的完全一致：
+    `PLAN_STALE` / `PLAN_ENTRY_MISMATCH` / `PLAN_TAMPERED`）；
+    ②人工显式执行结果必须**按内容 SHA-256** 覆盖**每一个**被批准的证据文件且 scope 一致、
+    `dry_run=false`、`persisted>=1`、`counts` 自洽（`rows` 条数一致 /
+    `accepted+quarantined+duplicate<=rows` / `persisted<=accepted`）：
+    `OPERATOR_RESULT_MISSING` / `OPERATOR_NOT_EXECUTED` / `OPERATOR_FAILED` /
+    `OPERATOR_TAMPERED` / `OPERATOR_INPUT_MISMATCH` / `OPERATOR_SCOPE_MISMATCH` /
+    `OPERATOR_COVERAGE_INCOMPLETE`；无批准却给出执行结果 → `OPERATOR_UNBOUND`；
+    ③qualification recheck 必须存在且**不早于**最后一次显式执行、`blocker_code` 仍为
+    `PHASE3_3_DATA` 且 `blocker_active` / `human_gate_required` 仍为 true：
+    `RECHECK_MISSING` / `RECHECK_BEFORE_INTAKE` / `RECHECK_TAMPERED` / `RECHECK_UNBOUND`；
+    ④任何操作时间都不得晚于收据审计时点（`FUTURE_TIMESTAMP`）或早于 plan（`INTAKE_BEFORE_PLAN`）；
+    任一不一致 → `IntakeReceiptVerificationError`（exit 4、**零写入**）；
+  - **四个布尔互不蕴含**：`intake_executed`（人工显式落库确实发生）与 `receipt_verified`
+    （绑定核验通过）独立；`data_qualification_passed` / `data_qualification_passed_count` 恒为
+    false / 0、`phase_transition_allowed` 恒为 false、`blocker_active` / `human_gate_required` 恒为
+    true（**硬编码**）；即使 recheck 自报 `ready=true` 也**绝不**升级为资格 / Phase 结论
+    （`is_qualification_decision=false`）；
+  - 内容级 `compute_receipt_id(...)`（只由策略块 + `plan_id` + 批准条目 + 执行摘要 + 复核摘要 +
+    两个布尔派生，**不含** `receipt_at`）；`run_intake_receipt(...)` 默认只读，只有显式 `out_path`
+    才（先取单实例锁）**原子**写收据本身；`render_intake_receipt_summary(...)` / `exit_code_for(...)`；
+  - 收据结构里**没有**任何证据时间键（`evidence_time_semantics.contains_evidence_times=false`，
+    并显式声明只含审计操作时间）。
+- **CLI `scripts/evidence_intake_receipt.py`**：`--inbox-dir` / `--ledger` / `--approved-list` /
+  `--plan` 必填，`--operator-result` 可重复，`--recheck` 可选，`--out` 唯一写开关，
+  `--lock` / `--as-of` / `--json`；**没有任何 intake / `--no-dry-run` 参数**（传入 → 退出码 2）；
+  退出码 0/2/3/4/5/6；失败路径 stdout 为空、stderr 已脱敏。
+- **导出**：`src/evidence/__init__.py` 增加 GOLD-014 的模块说明与 30+ 个新 API 导出。
+- **文档**：`README.md`（§1 交付表新增 GOLD-014 行、§7 新增「Evidence 显式 Intake Receipt」章节含
+  用法 / fail-closed 口径 / 退出码 / **inbox → review → approved list → intake plan → 人工显式
+  intake → receipt verify → qualification recheck → L3 human gate** 最小路径、§10 明确仍未解除）、
+  `TECH_DEBT.md`（新增 **TD-56** 登记行 + 明细 + 变更日志行）、`PROGRESS_LOG.md`（本轮）。
+
+### 2. 测试与门禁（本轮实测，项目 `.venv`）
+
+- 新增 **102 项**测试（临时目录 / Mock 与**真实**审计产物 / **无数据库（单元）** / 临时 SQLite
+  （集成） / **零网络**，未新增依赖）：
+  - `tests/unit/test_evidence_intake_receipt.py`（**91 项**）：退出码映射与参数 / 时区 / inbox 错误；
+    真实 GOLD-013 plan 绑定成功路径（状态 / 条目内容摘要 / 四个布尔 / 零写入 / 原始 evidence 字节不变）；
+    无批准 → `BLOCKED_NO_APPROVED_EVIDENCE` 且两个布尔为 false；无批准却给出执行结果 →
+    `OPERATOR_UNBOUND` / `RECHECK_UNBOUND`；**plan 结构篡改 24 种口径**（kind / schema / 契约 /
+    四个安全字段 / `auto_intake_allowed` / `writes_database` / `requires_explicit_operator_action` /
+    `plan_id` / 计数 / naive 时间 / 证据时间键 / 条目缺键 / 多余键 / 未批准 / 资格声称 / 无显式动作 /
+    scope / 指纹 / 空文件清单 / 负数行数）全部 fail-closed；plan 被改写 `plan_id` → `PLAN_STALE`；
+    内容变化 → `PLAN_STALE` + `PLAN_ENTRY_MISMATCH`；**review override** → 旧收据失效，且用**当前**
+    事实重新生成 plan 后得到 BLOCKED 收据（旧批准不继承）；执行结果缺失 / dry-run / 零落库 /
+    输入摘要不符 / scope 不符 / 用了**未批准**输入 / 多批准覆盖不全 / 计数矛盾（3 种）/ 早于 plan /
+    未来时间 逐项 fail-closed；执行结果 12 种与 recheck 8 种损坏口径 → `IntakeReceiptStateError`；
+    recheck 声称 blocker 解除 / 其他 `blocker_code` / 早于显式执行 → fail-closed；`receipt_id` 与
+    审计时点无关、执行结果或复核结果变化 → 新 `receipt_id`；`--out` 幂等（逐字节稳定、无 `.tmp`）；
+    只读零写入；输出写进 inbox 被拒；写失败 fail-closed；锁冲突零写入；多线程并发不产生半写文档；
+    全部候选被 approve 也不改变安全字段；`intake_executed` / `receipt_verified` 绝不蕴含资格
+    （即使 recheck 自报 `ready=true`）；公开 `verify_intake_receipt` 返回稳定原因码而不抛错；
+    递归键断言"没有证据时间字段"；包名含凭据样式字符串被脱敏；Markdown 摘要保留 blocker / human
+    gate；以及**源码守卫**（无 `aiohttp` / `httpx` / `requests` / `socket` / `urllib` /
+    `sqlalchemy` / `subprocess`，无 `unlink` / `rmtree` / `os.remove` / `os.rename` /
+    `shutil.move`，无 `intake_evidence` / `evaluate_write_gate`，无 `while` 循环，
+    `atomic_write_text` 是唯一写路径）与 CLI 参数守卫（缺必填 → 2；`--no-dry-run` → 2；
+    `--operator-result` 可重复给出）；
+  - `tests/integration/test_evidence_intake_receipt_integration.py`（**11 项**）：**真实链路** ——
+    inbox 预检 → `evidence_review --approved-out` → `evidence_intake_plan --out` →
+    **真实** `evidence_operator intake --no-dry-run --manifest`（临时 SQLite 真落库）→
+    **真实** `evidence_readiness recheck --no-dry-run --report` → GOLD-014 收据核验；只读退出 `0`
+    且 stdout 纯 JSON、收据字段与安全字段全部核对、真实 manifest 的 `input.sha256` 与产物摘要被绑定；
+    `--out` 原子落盘 + 幂等；无批准退出 `5`；执行结果被改成 dry-run / 内容变化导致 plan 过期 →
+    退出 `4`（stdout 为空、stderr 带原因码、零写入）；损坏 recheck → 退出 `4` 且旧文件保留；
+    参数错误退出 `2`（缺 `--plan` / naive `--as-of`）；`--out` 写进 inbox / inbox 不存在退出 `3`；
+    锁冲突退出 `6` 且零写入；Markdown 摘要保留 blocker；**真实子进程**
+    `python -m scripts.evidence_intake_receipt` 端到端冒烟（stdout 为纯 JSON）。
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **2197 passed / 1 skipped in 240.79s**
+    （唯一 skip 仍是 `tests/unit/test_text_similarity.py` 的「本环境已安装 jieba」分支；
+    本轮新增 **102** 项：单元 91 + 集成 11；GOLD-013 记录的基线为 2034 → 2093 passed / 1 skipped，
+    本轮观察到的收集口径差与该系列记录中的"既有测试收集口径差 2 项"一致，
+    本轮**未修改任何既有测试文件**）；
+  - `.venv\Scripts\python.exe -m ruff check .` → `All checks passed!`；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` →
+    `Success: no issues found in 166 source files`（GOLD-013 为 164，本轮 +2 个新模块文件）。
+
+
+### 3. 范围守规
+
+- 未新增依赖、未新增 / 修改 migration 与 schema、未联网、未抓取任何站点、未触碰 `.env`、
+  未安装 / 未修改任何 OS 计划任务；
+- `src/alpha/**`、`src/monitoring/**`、`src/scheduler/**`、`src/collectors/**`、
+  `src/processors/**` 未改动（只**复用**其契约 / 原因码 / 阈值）；GOLD-005 ~ GOLD-013 的既有模块
+  （`inbox.py` / `review.py` / `intake_plan.py` / `readiness_runner.py` / `readiness_watch.py`）
+  只被**复用**，未改动；
+- **未解除** `PHASE3_3_DATA`：收据持续显式 `blocker_active=true` / `human_gate_required=true` /
+  `data_qualification_passed=false` / `phase_transition_allowed=false`；
+  `intake_executed` / `receipt_verified` **不会**自动改变任何安全字段；未进入 Phase 3.4，
+  未训练 Alpha、未生成任何交易信号或订单；`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；未执行任何 git
+  写操作（commit / push / reset / rebase / merge 由 Orchestrator 负责）。
+
+### 4. 遗留 / 下一步
+
+- 仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 **BLOCKED**。GOLD-014 **只是**"把已发生的显式落库
+  与随后的复核绑定成可复核审计记录"的**只读**收据层：它把"到底有没有人显式执行过、执行的是不是
+  被批准的那一版内容、执行之后有没有复核"变成可复算的 artifact，但**不是**资格判定器，也不具备
+  解除 blocker 的能力；
+- 业务方按 `evidence-intake-v1` 提供真实授权 Author / News 数据（放入 inbox 子目录 +
+  `manifest.json`）→ `evidence_inbox --out` 预检 → `evidence_review --decision approve
+  --approved-out` 人工复核 → `evidence_intake_plan --out` 生成计划与显式 `handoff` 命令 →
+  人工**显式**执行 `evidence_operator workflow --no-dry-run --manifest` 落库 →
+  `evidence_operator recheck --no-dry-run --report` 复核 → `evidence_intake_receipt --out` 生成收据
+  → **L3 人工确认**；
+- 收据**不缓存**任何输入：plan / review revision / 指纹 / 执行结果 / 复核结果任一变化 → 新
+  `receipt_id` 或直接 fail-closed（旧收据不会"升级"成新收据）；`receipt_at` / `plan.generated_at` /
+  `operator_results[].generated_at` / `qualification_recheck.as_of` 都**只是审计操作时间**，
+  产出里根本没有证据时间键。
+
+
+

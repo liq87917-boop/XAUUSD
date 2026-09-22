@@ -1,0 +1,75 @@
+{
+  "task_id": "GOLD-014",
+  "title": "建立 Evidence 显式 Intake Receipt 与资格复核审计闭环",
+  "status": "completed",
+  "finished_at": "2026-09-23T06:16:18+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    "?? scripts/evidence_intake_receipt.py",
+    "?? src/evidence/intake_receipt.py",
+    "?? tests/integration/test_evidence_intake_receipt_integration.py",
+    "?? tests/unit/test_evidence_intake_receipt.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md          | 142 +++++++++++++++++++++++++++++++++++++++++++++++\n README.md                | 137 +++++++++++++++++++++++++++++++++++++++++++--\n TECH_DEBT.md             |  71 ++++++++++++++++++++++++\n src/evidence/__init__.py |  76 +++++++++++++++++++++++++\n 4 files changed, 420 insertions(+), 6 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T05:49:23+08:00",
+      "finished_at": "2026-09-23T06:16:18+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 200,
+      "duration_ms": 1370365,
+      "usage": {
+        "inputTokens": 55773934,
+        "outputTokens": 189832,
+        "cacheReadTokens": 55275904,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.35443141200000006
+      },
+      "cline_final_text": "Submission recorded (verified): ## GOLD-014 —— Evidence 显式 Intake Receipt 与资格复核审计闭环（完成）\n\n### 1. 完成内容\n在 `PHASE3_3_DATA` 仍 **BLOCKED** 的前提下，为 GOLD-013 生成的 approved Evidence 显式人工 intake 建立了**纯本地、可复核、fail-closed** 的 **post-intake receipt / verification 层**：\n\n- **核心 `src/evidence/intake_receipt.py`**（零网络 / 零数据库 / 零新增依赖）\n  - `IntakeReceiptStatus` / `ReceiptVerificationCode`（17 个稳定原因码）/ `ReceiptViolation`；\n  - `load_intake_plan_document`（GOLD-013 plan 严格**只读视图**：kind/schema/契约版本、四个安全字段与 `auto_intake_allowed`/`writes_database`/`requires_explicit_operator_action` 不可被削弱、条目**白名单键**、计数自洽、`data_qualification_passed_count` 必须为 0、`plan_id` 必须 64hex、**任何证据时间键一律拒绝**）；\n  - `load_operator_result`（人工**显式** `--no-dry-run --manifest` 产物的严格只读视图，记录内容寻址的 `artifact_sha256` / `input.sha256` / scope / dry_run / counts）；\n  - `load_qualification_recheck`（`phase33_qualification_recheck` 严格只读视图）；\n  - `verify_intake_receipt` / `build_intake_receipt`：**复用** GOLD-013 的 `build_intake_plan` 重新绑定（不复制、不降低资格规则）—— plan 必须**当前仍成立**（plan_id + 条目摘要：指纹/decision_id/review revision/scope/文件清单）；执行结果必须按**内容 SHA-256** 覆盖**每个**被批准文件且 scope 一致、`dry_run=false`、`persisted>=1`、counts 自洽；recheck 必须存在且**不早于**最后一次显式执行且 blocker 安全字段未被改写；操作时间不得越界/未来 → 任一不一致即 fail-closed（零写入）；\n  - 四个布尔 `intake_executed` / `receipt_verified` / `data_qualification_passed`（恒 false）/ `phase_transition_allowed`（恒 false）**互不蕴含**（即使 recheck 自报 `ready=true` 也不升级）；\n  - 内容级 `compute_receipt_id`（不含 `receipt_at`）、`run_intake_receipt`（默认只读，只有显式 `out_path` 才先取单实例锁再原子写）、`render_intake_receipt_summary`、`exit_code_for`；收据内**没有**任何证据时间键。\n- **CLI `scripts/evidence_intake_receipt.py`**：`--inbox-dir`/`--ledger`/`--approved-list`/`--plan` 必填，`--operator-result`（可重复）、`--recheck`、`--out`（唯一写开关）、`--lock`/`--as-of`/`--json`；**没有任何 intake / `--no-dry-run` 参数**；退出码 0/2/3/4/5/6。\n- 文档同步（README §1 交付表 + §7 新章节 + §10；TECH_DEBT TD-56 + 登记行 + 变更日志；PROGRESS_LOG 第七十八轮），三处均明确 **PHASE3_3_DATA 仍 BLOCKED**、Phase 切换仍是 **L3 人工 Gate**。\n\n### 2. 修改的文件\n`src/evidence/__init__.py`（模块说明 + 30+ API 导出）、`README.md`、`TECH_DEBT.md`、`PROGRESS_LOG.md`\n\n### 3. 新增的文件\n`src/evidence/intake_receipt.py`、`scripts/evidence_intake_receipt.py`、`tests/unit/test_evidence_intake_receipt.py`（91 项）、`tests/integration/test_evidence_intake_receipt_integration.py`（11 项）\n\n### 4. 执行的测试（task `validation_commands`，项目 `.venv`，逐条实测）\n- `.venv\\Scripts\\python.exe -m pytest tests -q` → **2197 passed, 1 skipped in 241.48s**（stderr 为空；唯一 skip 为既有的 `test_text_similarity` jieba 分支）\n- `.venv\\Scripts\\python.exe -m ruff check .` → **All checks passed!**\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts` → **Success: no issues found in 166 source files**（GOLD-013 为 164，+2 新模块）\n- 新增测试单独复跑 → **102 passed in 10.26s**（91 单元 + 11 集成）\n- 集成用例为**真实链路**：inbox 预检 → `evidence_review --approved-out` → `evidence_intake_plan --out` → **真实** `evidence_operator intake --no-dry-run --manifest`（临时 SQLite 真落库）→ **真实** `evidence_readiness recheck --no-dry-run --report` → 收据核验退出 0 且只读，并含**真实子进程** CLI 冒烟；篡改/dry-run/plan 过期/损坏 state/锁冲突/参数/路径/无批准（退出 5）逐项 fail-closed 且零写入。\n\n### 5. 测试结果\n全部通过。fail-closed 覆盖已由测试锁定：plan 结构篡改 24 种口径、plan stale/fingerprint drift/review override、执行结果缺失/dry-run/零落库/计数矛盾/输入内容或 scope 不符/用了未批准输入/覆盖不全、recheck 缺失/早于执行/声称 blocker 解除、未来时间、损坏输入；幂等与 byte-stable、原子写、锁冲突、并发、脱敏、递归\"无证据时间键\"断言、源码守卫（无网络/无 sqlalchemy/无 intake 调用/唯一写路径）。\n\n### 6. 未解决的问题\n- 仓库内仍**没有**足量合法授权且具可信独立时间 / availability / OOS 证据的 Author/News 数据 → `PHASE3_3_DATA` **保持 BLOCKED**（业务/人工事项，非代码可解）。\n- 观察到的新增收集数差（2197-2093=104 vs 新增 102）与此前 GOLD-012/013 记录中的\"既有测试收集口径差 2 项\"一致；本轮**未修改任何既有测试文件**。\n- 任务范围外发现的可改进点（未改动）：收发据的 CLI `--help` 在 PowerShell 下退出码显示异常（仅影响手工 help 调用，不影响功能与测试）。\n\n### 7. 是否满足 acceptance\n全部满足：(a) 存在纯本地确定性 receipt verifier 并能绑定 GOLD-013 plan + 当前 evidence/review + 人工 operator 执行结果 + qualification recheck；(b) stale plan / fingerprint drift / review override / operator failure或tamper / recheck mismatch / 损坏输入全部 fail-closed；(c) 相同输入幂等/byte-stable，关键输入变化产生新 `receipt_id` 或直接 fail-closed（不静默继承）；(d) 收据不把操作时间冒充证据时间，`intake_executed`/`receipt_verified` 不自动等于 qualification PASS；(e) 默认不执行 intake、不写数据库、不联网、不解除 blocker、不修改 Phase（Phase 切换仍 L3 人工 Gate）；(f) 全量 pytest/ruff/mypy 通过且 README/TECH_DEBT/PROGRESS_LOG 同步并明确仍 BLOCKED。\n\n### 8. 建议下一步\n业务方按 `evidence-intake-v1` 提供真实授权数据 → `evidence_inbox --out` 预检 → `evidence_review --approved-out` 人工复核 → `evidence_intake_plan --out` 生成计划 → 人工**显式** `evidence_operator workflow --no-dry-run --manifest` 落库 → `evidence_operator recheck --no-dry-run --report` → `evidence_intake_receipt --out` 生成收据 → **L3 人工 Gate**（在此之前不得进入 Phase 3.4 / 不得训练 Alpha / 不得启用实盘）。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        "?? scripts/evidence_intake_receipt.py",
+        "?? src/evidence/intake_receipt.py",
+        "?? tests/integration/test_evidence_intake_receipt_integration.py",
+        "?? tests/unit/test_evidence_intake_receipt.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md          | 142 +++++++++++++++++++++++++++++++++++++++++++++++\n README.md                | 137 +++++++++++++++++++++++++++++++++++++++++++--\n TECH_DEBT.md             |  71 ++++++++++++++++++++++++\n src/evidence/__init__.py |  76 +++++++++++++++++++++++++\n 4 files changed, 420 insertions(+), 6 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  3%]\n........................................................................ [  6%]\n........................................................................ [  9%]\n........................................................................ [ 13%]\n........................................................................ [ 16%]\n........................................................................ [ 19%]\n........................................................................ [ 22%]\n........................................................................ [ 26%]\n........................................................................ [ 29%]\n........................................................................ [ 32%]\n........................................................................ [ 36%]\n........................................................................ [ 39%]\n........................................................................ [ 42%]\n........................................................................ [ 45%]\n........................................................................ [ 49%]\n........................................................................ [ 52%]\n........................................................................ [ 55%]\n........................................................................ [ 58%]\n........................................................................ [ 62%]\n........................................................................ [ 65%]\n........................................................................ [ 68%]\n........................................................................ [ 72%]\n........................................................................ [ 75%]\n........................................................................ [ 78%]\n........................................................................ [ 81%]\n........................................................................ [ 85%]\n........................................................................ [ 88%]\n........................................................................ [ 91%]\n........................................................................ [ 94%]\n.................................................................s...... [ 98%]\n......................................                                   [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2197 passed, 1 skipped in 239.45s (0:03:59)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 166 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
