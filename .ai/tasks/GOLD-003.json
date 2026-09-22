@@ -1,0 +1,52 @@
+{
+  "task_id": "GOLD-003",
+  "type": "FEATURE",
+  "title": "将 Processor 可选接入常驻 Collector Scheduler 并加固运行边界",
+  "max_attempts": 3,
+  "goal": "在不改变 Scheduler 核心职责、不进入 Phase 3.4 的前提下，把 GOLD-002 的采集后 Processor 以显式可选方式接入常驻采集入口，使 30 分钟采集可完成 raw_items → processed_items 的生产级闭环；同时修复 GOLD-002-R1 留下的两个小型运行/测试边界问题。",
+  "requirements": [
+    "先读取 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-002-R1 task/result、README.md、TECH_DEBT.md、PROGRESS_LOG.md，以及 scheduler/bootstrap/collection processor/redaction/config security 相关代码与测试。",
+    "为 scripts/run_collector_scheduler.py 增加显式可选 Processor 接线（建议 --with-processor；默认关闭以保持向后兼容）。Processor 通过 collector bootstrap/factory 注入，不得把 Processor 业务逻辑放入 src/scheduler/core.py。",
+    "开启 Processor 时，每个采集源在原始数据成功持久化后执行现有 CollectionProcessor；单源 Processor 失败必须脱敏记录且不得破坏其它源调度、不得丢 raw_items。",
+    "补齐 Mock 单元/集成测试：默认关闭零行为差异、开启后 raw_items→processed_items、重复槽/重复处理幂等、单源 Processor 失败隔离、敏感信息不进入日志/审计。",
+    "收紧 sanitize_mapping 的 URL 类键：非字符串且非 None 的标量不得被 str() 伪造成 URL；定义明确的安全行为并用回归测试锁定。",
+    "修复 tests/unit/test_config_security.py 默认安全测试对宿主 FRED_API_KEY 环境变量的脆弱性：测试必须隔离相关环境变量后验证 defaults，而不是要求运行者手工清环境；不得削弱生产配置读取环境变量的能力。",
+    "同步 README、TECH_DEBT、PROGRESS_LOG，准确记录接线范围和门禁；TD-12 仍按证据标记，不得因本任务自动宣称全部解除。",
+    "不得新增依赖、不得新增/修改 migration/schema、不得进入 Phase 3.4、不得训练 Alpha、不得生成或执行实盘交易信号。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "scripts/run_collector_scheduler.py",
+      "src/collectors/**",
+      "src/processors/collection/**",
+      "src/common/redaction.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**",
+      "src/alpha/**"
+    ]
+  },
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "Scheduler CLI 默认行为与 GOLD-001-R2 一致；仅显式开启时注入 Processor。",
+    "显式开启后存在自动化测试证明 raw_items→processed_items 闭环、幂等与故障隔离成立。",
+    "src/scheduler/core.py 不含 Processor 业务逻辑，职责边界保持清晰。",
+    "sanitize_mapping 不再把 URL 类键的非字符串标量伪造成字符串 URL。",
+    "config security 测试不再受宿主 FRED_API_KEY 是否存在影响，同时生产配置环境变量行为未被削弱。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "文档同步完成，且无依赖/migration/schema/Phase 3.4/实盘范围扩张。"
+  ]
+}
