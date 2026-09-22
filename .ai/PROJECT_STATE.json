@@ -4,13 +4,13 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-014",
-  "last_completed_task": "GOLD-013",
-  "last_reviewed_task": "GOLD-013",
+  "current_task": "GOLD-015",
+  "last_completed_task": "GOLD-014",
+  "last_reviewed_task": "GOLD-014",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-013 已完成并通过工程验收：Approved Evidence 已具备 deterministic read-only intake plan 与最终写入前门禁，pytest 2093 passed / 1 skipped，ruff 全通过，mypy 164 source files 全通过。真实库仍缺少足量合法授权且具有可信独立时间/availability/OOS 证据的 Author/News 数据；approved/intake plan 只允许人工显式 intake，不等于 data qualification PASS，资格不能由工程工具自动解除。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
+      "detail": "GOLD-014 已完成并通过工程验收：Evidence Intake Receipt 与 qualification recheck 审计闭环已落地，pytest 2197 passed / 1 skipped，ruff 全通过，mypy 166 source files 全通过。真实库仍缺少足量合法授权且具有可信独立时间/availability/OOS 证据的 Author/News 数据；verified receipt 只证明显式 intake 与复核链路可审计，不等于 data qualification PASS。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
       "retryable": false
     }
   ],
@@ -19,7 +19,7 @@
     {"code": "CLINE_MODEL_QUOTA_OR_CONFIG", "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"},
     {"code": "CLINE_CLI_INSTALLATION", "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"}
   ],
-  "next_action": "Run GOLD-014 only as blocker-facing tooling: bind any future human-explicit Evidence Operator intake result to the GOLD-013 plan and subsequent qualification recheck using a deterministic redacted receipt verifier. Do not auto-intake, treat receipt/review times as evidence times, lower qualification thresholds, auto-pass data qualification, or create Phase 3.4/model tasks. Phase transition remains an L3 human gate.",
+  "next_action": "Run GOLD-015 only as blocker-facing tooling: aggregate readiness/handoff, approved evidence/intake plan, verified receipt and latest qualification recheck into a deterministic redacted L3 human decision packet. Do not auto-intake, treat operation times as evidence times, lower qualification thresholds, auto-pass data qualification, modify PROJECT_STATE from tooling, or create Phase 3.4/model tasks. Phase transition remains an L3 human gate.",
   "human_gates": [
     {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."}
   ],
