@@ -4,13 +4,13 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "RUNNING",
-  "current_task": "GOLD-004",
-  "last_completed_task": "GOLD-003",
-  "last_reviewed_task": "GOLD-003",
+  "current_task": "GOLD-005",
+  "last_completed_task": "GOLD-004",
+  "last_reviewed_task": "GOLD-004",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "Author/News 真实数据资格仍未达标，Phase 3.3 保持 BLOCKED。",
+      "detail": "Author/News 真实数据资格仍未达标：需要具备授权、独立 published_at/collected_at 与可审计历史可用时间证据的数据；News 还需达到 >=200 条、>=90 天、单源 <=40%。",
       "retryable": false
     }
   ],
@@ -28,12 +28,13 @@
       "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
     }
   ],
-  "next_action": "Orchestrator should pick up GOLD-004: build read-only collector health and Phase 3.3 data-qualification observability, preserve the PHASE3_3_DATA blocker, and rerun full validation.",
+  "next_action": "Orchestrator should pick up GOLD-005: build a compliance-first authorized evidence intake gateway for externally supplied Author/News datasets, validate provenance and timestamp semantics, quarantine invalid rows, preserve PHASE3_3_DATA until real authorized evidence actually passes qualification, and rerun full validation.",
   "human_gates": [],
   "invariants": [
     "LIVE_TRADING=false",
-    "不得伪造历史可用时间",
+    "不得伪造 published_at / collected_at / effective_at",
     "不得绕过来源授权或 robots/证书安全限制",
+    "不得用 Mock 数据宣称真实数据资格",
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ]
 }
