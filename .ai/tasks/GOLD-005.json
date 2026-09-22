@@ -1,0 +1,78 @@
+{
+  "task_id": "GOLD-005",
+  "type": "FEATURE",
+  "title": "建立合规授权数据 Evidence Intake Gateway",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 仍 BLOCKED 的前提下，只处理该 blocker 的可自动化部分：为业务方未来提供的已授权 Author/News 数据建立严格、append-only、可审计的 Evidence Intake Gateway。入口必须验证授权声明、来源身份、published_at/collected_at/历史可用时间语义与内容完整性；不满足条件的数据只能拒绝或隔离，绝不通过补时间、Mock 或普通历史 CSV 冒充可用于 OOS 的真实证据。",
+  "context": [
+    "GOLD-004 已完成并通过 Review：1709 passed / 1 skipped，ruff 全通过，mypy 139 source files 全通过；真实研究库只读健康报告 state=DEGRADED，PHASE3_3_DATA 仍 active=true。",
+    "TD-43：Author 可信标签不足；News 仅 30 条/56 天且单源占 66.67%，门槛为 Author >=30 可信帖子、News >=200 条、>=90 天、单源 <=40%。",
+    "TD-44：今天下载的历史新闻不能把旧 published_at 冒充历史可用时间；普通历史 CSV 不自动具备历史 OOS 资格。",
+    "TD-45：公开可访问不等于允许自动采集/训练；不得绕过 Kitco robots/条款或证书错误；微博等来源必须先有合法授权。",
+    "本任务不负责寻找、抓取或伪造授权数据，只建立安全接收与审计入口。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-004 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 与最近 commits/diff；以仓库事实为准。",
+    "设计独立 evidence intake 层，优先放在 src/evidence/ 或与现有分层一致的位置；不得把导入规则塞进 Collector/Scheduler/Alpha 核心。",
+    "定义版本化输入契约，至少覆盖 Author 与 News：source identity、source_record_id、content 或可验证内容引用、published_at、collected_at、availability/evidence timestamp（若有）、授权/许可声明元数据、provenance/reference、ingested_at。字段命名应复用现有模型语义，避免重复概念。",
+    "授权声明必须显式且可审计；缺失/unknown/denied 不得被推断为 authorized。代码只验证声明与证据字段是否齐全，不自行声称法律授权成立。",
+    "时间字段必须 timezone-aware 并统一 UTC；不得以当前时间补 published_at/collected_at/历史 availability。published_at 早于 collected_at 本身不等于历史可用；历史 OOS 资格必须有独立可审计 availability/evidence 语义，否则标记 NOT_OOS_ELIGIBLE。",
+    "实现 validate-first / dry-run-first 的导入流程：先生成逐行 validation outcome 与批次摘要；只有显式非 dry-run 且满足落库条件的记录才允许进入现有 append-only raw/processed 路径。若现有 schema 无法无损表达关键证据，不新增 migration，保留 quarantine/manifest 并登记技术债。",
+    "实现确定性 fingerprint/idempotency；同一 evidence bundle 重复导入不得产生重复 raw/processed 事实。不得 UPDATE 覆盖历史事实。",
+    "无效记录必须隔离并给出机器可读 reason code，例如 AUTHORIZATION_MISSING、PROVENANCE_MISSING、PUBLISHED_AT_INVALID、COLLECTED_AT_INVALID、AVAILABILITY_UNPROVEN、CONTENT_EMPTY、DUPLICATE；reason 文本必须脱敏。",
+    "新增 CLI（名称按现有风格），支持 --dry-run 默认、显式提交开关、Author/News scope、输入文件、JSON report/manifest；默认不得联网。输入优先 JSONL/CSV 等标准库可处理格式，不为本任务新增第三方依赖。",
+    "与 GOLD-004 qualification report 最小集成：仅真实已授权且满足时间/来源证据契约的记录才可计入可信证据；仅完成代码或 Mock 测试绝不能解除 PHASE3_3_DATA。",
+    "测试 100% Mock/临时文件/SQLite，禁止联网；覆盖授权缺失、时间伪造防护、历史 CSV 不具 OOS 资格、重复导入、坏行隔离、dry-run 零写入、提交幂等、敏感字段脱敏、Author/News 两类输入与 qualification 不误放行。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，清楚写明使用方式、证据契约、人工授权责任和仍存在的 blocker。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/evidence/**",
+      "src/monitoring/**",
+      "src/processors/**",
+      "src/common/**",
+      "scripts/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**",
+      "src/alpha/**"
+    ],
+    "note": "如现有 repository/model 需要最小复用接线，可修改对应非 migration 文件，但最终报告必须说明原因；禁止 schema/migration 变化。"
+  },
+  "constraints": [
+    "不新增第三方依赖，不新增或修改 migration/schema。",
+    "不主动抓取微博、Kitco 或任何未确认授权来源；不绕过 robots、条款、证书或认证限制。",
+    "不把公开可访问自动等同于可采集/可训练授权。",
+    "不伪造 published_at、collected_at、effective_at 或历史 availability。",
+    "不使用 Mock/合成数据解除 PHASE3_3_DATA。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不提交模拟盘或实盘订单。",
+    "LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "测试不得联网。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在独立、版本化、可审计的 Author/News Evidence Intake 契约与 CLI，默认 dry-run、默认零网络。",
+    "缺失授权/来源/时间证据的数据不会被错误认定为可信或 OOS eligible，且不会通过补当前时间伪造历史事实。",
+    "普通历史 CSV/JSONL 在没有独立 availability 证据时明确 NOT_OOS_ELIGIBLE。",
+    "重复 bundle/记录导入幂等，dry-run 零写入，坏行隔离且 reason code 稳定。",
+    "敏感字段与凭据不会出现在报告、manifest、日志或异常摘要中。",
+    "GOLD-004 qualification report 不会因 Mock/仅代码完成而误解除 PHASE3_3_DATA。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖、migration/schema、未授权采集、Alpha/交易代码。",
+    "README/TECH_DEBT/PROGRESS_LOG 与实现一致，并明确 PHASE3_3_DATA 仍保持 BLOCKED，直到真实授权证据实际达标。"
+  ]
+}
