@@ -88,49 +88,70 @@ def load_task(task_file):
 
 def run_cline(task_file):
 
-    cline_exe = shutil.which("cline")
+    # Windows npm 全局命令优先使用 .cmd
+    if os.name == "nt":
+        cline_exe = shutil.which("cline.cmd")
+    else:
+        cline_exe = shutil.which("cline")
 
     if not cline_exe:
-        raise RuntimeError("找不到 Cline CLI，请先执行 npm install -g cline")
+        cline_exe = shutil.which("cline")
+
+    if not cline_exe:
+        raise RuntimeError(
+            "找不到 Cline CLI，请先执行 npm install -g cline"
+        )
 
     relative_task = task_file.relative_to(ROOT)
 
-    prompt = f"""
-读取任务文件：
+    # 不再把整个 task 内容塞进命令行。
+    # Cline 自己读取 task 文件。
+    prompt = (
+        f"读取任务文件 {relative_task.as_posix()}，"
+        f"严格按照其中任务执行，同时遵守项目根目录 .clinerules。"
+        f"完成所有 requirements 和必要测试后输出结果并退出。"
+    )
 
-{relative_task}
-
-严格按照任务文件中的要求进行开发。
-
-同时遵守项目根目录 .clinerules。
-
-要求：
-
-1. 先分析现有代码
-2. 再进行修改
-3. 不要修改任务文件
-4. 不要修改 .ai/results
-5. 完成所有 requirements
-6. 执行必要测试
-7. 最后总结完成内容、修改文件、测试结果和遗留问题
-"""
-
-    command = [
-        cline_exe, 
+    args = [
+        cline_exe,
         "--json",
+        "--yolo",
+        "--timeout",
+        "3600",
         prompt
     ]
 
     print("Starting Cline...")
+    print(f"Cline executable: {cline_exe}")
+    print(f"Task file: {relative_task}")
 
-    result = subprocess.run(
-        command,
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace"
-    )
+    if os.name == "nt":
+
+        # npm 在 Windows 下安装的是 cline.cmd。
+        # 显式通过 cmd shell 执行，避免 subprocess 直接调用
+        # .cmd 时出现参数丢失/TTY 模式误判。
+        command_line = subprocess.list2cmdline(args)
+
+        result = subprocess.run(
+            command_line,
+            cwd=ROOT,
+            shell=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+
+    else:
+
+        result = subprocess.run(
+            args,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
 
     return {
         "returncode": result.returncode,
