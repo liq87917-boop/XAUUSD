@@ -1,0 +1,71 @@
+{
+  "task_id": "GOLD-009",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立 Phase 3.3 Evidence Readiness 状态变更通知闭环",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 仍需真实授权 evidence 与 L3 人工 Gate 的前提下，补齐 GOLD-008 明确遗留的阈值/状态告警能力：将现有 Evidence Handoff/Readiness 的状态变化转换为确定性、脱敏、可幂等投递的本地通知事件，使 operator 只在 blocker 状态、缺口或 ready_for_human_review 发生有意义变化时收到提示；不得联网发送消息、不得自动解除 blocker、不得进入 Phase 3.4。",
+  "recovery_context": [
+    "GOLD-008 已完成并通过工程验收：1849 passed / 1 skipped，ruff 全通过，mypy 154 source files 全通过。",
+    "GOLD-008 已提供只读 handoff JSON/Markdown，当前真实状态仍 BLOCKED：Author 0/30、News 0/200、coverage remaining 90，source_share_evaluable=false。",
+    "GOLD-008 明确遗留无阈值告警推送；PHASE3_3_DATA 属于不可由工程自动解除的人工作业 blocker。",
+    "任何数量达标最多只能 ready_for_human_review=true，Phase 切换仍为 DEVELOPMENT_PROTOCOL L3 人工 Gate。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-008 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 和最近 commits/diff；只处理 PHASE3_3_DATA blocker-facing tooling。",
+    "复用现有 EvidenceReadinessReport / handoff 唯一资格口径，不复制、不降低、不重写 Author>=30、News>=200、90 天覆盖、source-share 等阈值算法。",
+    "建立独立的 readiness state fingerprint/snapshot：只基于脱敏白名单字段（status、ready_for_human_review、各 scope eligible/required/remaining、coverage gap、source_share_evaluable、稳定 reason codes），输出必须确定性排序。",
+    "实现有意义变化检测：首次快照、BLOCKED 缺口变化、reason-code 集合变化、ready_for_human_review false→true/true→false 应产生事件；完全相同状态重复运行不得重复产生事件。",
+    "通知事件只写本地既有审计/JobRun/文件型安全出口中的合适路径；若现有 schema 不适合，优先使用显式 --out JSON 事件文件或现有日志抽象，不新增 migration/schema。不得在本任务接入邮件、短信、Webhook 或第三方推送服务。",
+    "提供默认只读/dry-run CLI（建议 scripts/evidence_readiness_watch.py 或等价入口）：默认不写数据库、不联网；只有显式 state/output 路径才允许持久化快照/事件，并采用原子写或等价安全方式避免半写状态。",
+    "事件内容不得包含正文、token/API key/Authorization、完整 source config、原始 evidence payload；异常信息必须沿用项目 redaction 规则。",
+    "当状态变为 ready_for_human_review=true 时，事件必须明确 human_gate_required=true、phase_transition_allowed=false；不得自动更新 PROJECT_STATE 为 PASS，不得创建 Phase 3.4/model task。",
+    "当真实 evidence 仍不达标时，事件/CLI 必须诚实保持 blocker_active=true；工程工具完成不能解释为数据资格通过。",
+    "新增 unit/integration tests，100% Mock/临时 SQLite/临时文件、禁止联网，覆盖首次事件、无变化幂等、缺口变化、reason-code 变化、ready 状态双向变化、敏感字段过滤、损坏 state 文件安全失败、显式写开关与原子替换。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，说明通知层只是减少 operator 盯盘/轮询，不解除 PHASE3_3_DATA。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/evidence/**",
+      "src/monitoring/**",
+      "src/common/redaction.py",
+      "scripts/evidence_*.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md",
+      ".gitignore"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**",
+      "src/alpha/**"
+    ]
+  },
+  "constraints": [
+    "不新增第三方依赖或 migration/schema。",
+    "不联网、不接第三方通知服务、不新增或启用未授权数据源。",
+    "不伪造 published_at/collected_at/effective_at/availability。",
+    "不用 Mock/模板/示例数据宣称真实数据资格。",
+    "不降低既有资格阈值或 human gate。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不启用实盘；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在确定性的 Evidence readiness 状态 fingerprint/snapshot 与变化检测，完全相同状态重复运行零重复事件。",
+    "首次状态、缺口/reason-code/ready 状态的有意义变化可产生脱敏事件；ready=true 事件仍明确要求 L3 human gate 且 phase_transition_allowed=false。",
+    "默认运行只读、零网络；任何快照/事件持久化均需显式参数且安全写入。",
+    "敏感字段/正文/原始 evidence 不进入 snapshot、事件或错误输出，回归测试通过。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖、migration/schema、第三方推送、未授权采集、Phase 3.4 或实盘代码。",
+    "README/TECH_DEBT/PROGRESS_LOG 明确 PHASE3_3_DATA 仍 BLOCKED，通知层不等于资格通过。"
+  ]
+}
