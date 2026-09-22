@@ -1,0 +1,68 @@
+{
+  "task_id": "GOLD-010",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立 Evidence Readiness 本地周期运行与防重入闭环",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 仍 BLOCKED 且 GOLD-009 已提供确定性 readiness 变化事件的基础上，补齐纯本地、零网络的周期运行工程能力，使 operator 无需手工反复执行 evidence_readiness_watch；必须防止并发重入、保持事件幂等与安全失败，不自动解除 blocker，不进入 Phase 3.4。",
+  "recovery_context": [
+    "GOLD-009 已完成并通过工程验收：1871 passed / 1 skipped，ruff 全通过，mypy 156 source files 全通过。",
+    "GOLD-009 已提供 deterministic/redacted/idempotent readiness snapshot 与本地事件输出；相同状态重复运行为 0 事件。",
+    "真实 PHASE3_3_DATA 仍 BLOCKED；Author/News 合法授权 evidence 与历史 availability/OOS 证据以及 L3 人工 Gate 不能由工程自动生成或解除。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-009 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 和最近 commits/diff；只处理 PHASE3_3_DATA blocker-facing tooling。",
+    "复用 scripts/evidence_readiness_watch.py 与 src/evidence/readiness_watch.py 的现有 fingerprint、事件和资格口径，不复制、不降低任何阈值算法。",
+    "提供一个纯本地 runner/CLI，可执行单次 tick，并适合由 Windows Task Scheduler、现有本地 orchestrator 或其他外部定时器调用；本任务不得自行常驻无限循环，也不得新增第三方 scheduler 依赖。",
+    "runner 必须使用单实例锁或等价机制防止并发重入；锁必须具备可审计的 owner/时间信息且不得包含敏感数据；正常退出释放锁，异常/陈旧锁必须安全处理，不能因强删活动锁造成并发写 state。",
+    "每个 tick 只能在显式配置的本地工作目录中维护 snapshot state、事件 artifact 与简洁 status；写入使用原子替换或现有安全原语。不得写数据库、不得联网。",
+    "无 readiness 变化时不得追加重复事件；有变化时只持久化 GOLD-009 定义的脱敏事件。允许对事件文件做有界保留/轮转，但必须确定性且不得丢失本次未确认的状态变化。",
+    "runner 对损坏 state、锁冲突、资格计算失败必须 fail-closed，返回稳定非零退出码并保留旧的有效 state；不得把错误当首次快照，不得自动重置资格状态。",
+    "输出 status 必须明确 blocker_active=true、human_gate_required=true、data_qualification_passed=false、phase_transition_allowed=false；即使 ready_for_human_review=true 也不得改变这些安全字段。",
+    "新增 unit/integration tests，100% Mock/临时 SQLite/临时文件、禁止联网，覆盖正常 tick、连续无变化、并发锁冲突、陈旧锁安全恢复、损坏 state、事件原子写、退出码和敏感信息过滤。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，给出 Windows Task Scheduler/外部定时器的安全调用示例，但不得自动修改用户系统计划任务。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/evidence/**",
+      "src/monitoring/**",
+      "src/common/redaction.py",
+      "scripts/evidence_*.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md",
+      ".gitignore"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".env",
+      "database/migrations/**",
+      "src/alpha/**"
+    ]
+  },
+  "constraints": [
+    "不新增第三方依赖或 migration/schema。",
+    "不联网、不接邮件/短信/Webhook/第三方推送、不自动修改 OS 计划任务。",
+    "不新增或启用未授权数据源，不伪造 published_at/collected_at/effective_at/availability。",
+    "不用 Mock/模板/示例数据宣称真实数据资格，不降低资格阈值或 human gate。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不启用实盘；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在可被外部定时器安全调用的单次本地 runner，零网络、零数据库写入、无常驻无限循环。",
+    "并发重入被安全拒绝，陈旧锁处理不会删除仍活动的锁；异常不会破坏旧 snapshot state。",
+    "相同 readiness 连续 tick 零重复事件；有意义变化仍沿用 GOLD-009 的脱敏事件与确定性 fingerprint。",
+    "status/事件始终保持 blocker_active=true、human_gate_required=true、data_qualification_passed=false、phase_transition_allowed=false。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过。",
+    "无新增依赖、migration/schema、第三方推送、未授权采集、Phase 3.4 或实盘代码。",
+    "README/TECH_DEBT/PROGRESS_LOG 明确 PHASE3_3_DATA 仍 BLOCKED，并给出仅供人工配置的本地定时调用方式。"
+  ]
+}
