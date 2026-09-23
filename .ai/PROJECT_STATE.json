@@ -26,9 +26,13 @@
     {
       "code": "CLINE_CLI_INSTALLATION",
       "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
+    },
+    {
+      "code": "CLINE_PROVIDER_BILLING_ROUTE",
+      "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; start_agent.bat now hard-pins AI_CLINE_PROVIDER=deepseek and Orchestrator passes --provider deepseek without exposing API keys. Non-retryable balance/auth/quota/model errors now fail fast, skip validation/retries, preserve local recovery artifacts, and stop the rolling queue."
     }
   ],
-  "next_action": "Rolling queue active: run GOLD-018 -> GOLD-019 -> GOLD-020 in order. GOLD-018 fixes the existing monitoring/evidence circular import; GOLD-019 hardens dependency-graph fail-closed behavior; GOLD-020 hardens non-fast-forward push recovery and result semantics. All three are auto_start L1 tasks. Do not enter Phase 3.4, lower PHASE3_3_DATA thresholds, fabricate evidence, or cross L3/L4 gates.",
+  "next_action": "Restart start_agent.bat once to load the new DeepSeek-pinned/fail-fast Orchestrator, then retry GOLD-018. Queue remains GOLD-018 -> GOLD-019 -> GOLD-020. GOLD-018 currently has no terminal result in GitHub, so the restarted agent should begin it again without inheriting a blocked result. Do not enter Phase 3.4 or cross L3/L4 gates.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
