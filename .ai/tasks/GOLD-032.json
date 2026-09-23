@@ -1,0 +1,37 @@
+{
+  "task_id": "GOLD-032",
+  "type": "PLANNER_TOOLING",
+  "title": "建立 GPT Review Ledger 完整性与连续性门禁",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-031"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "在不授予 Executor 任何 Review 权限的前提下，为 GPT_REVIEW_LEDGER 建立只读完整性、顺序连续性和 binding 一致性验证，防止 ledger 被静默删改、重排或与 Review Binding Manifest 脱节。",
+  "requirements": [
+    "新增只读 ledger integrity verifier/CLI；验证 schema、唯一 task_id、review 顺序、result SHA-256、reviewed commit identity 与 GOLD-031 manifest 的客观事实一致。",
+    "任何缺项、重复、顺序回退、hash/commit 不一致、未知 verdict/schema 必须 fail-closed 并返回稳定 reason code；不得自动修复 ledger。",
+    "Executor 只能验证客观绑定事实；不得创建/修改 PASS/FAIL verdict、acceptance_summary、reviewed_at，不得写 GPT_REVIEW_LEDGER 或 PROJECT_STATE。",
+    "验证器不得访问网络、数据库、真实业务证据，不得改变 rolling queue、Phase、L3/L4 或证据资格。",
+    "增加单元/集成回归，覆盖正常链、删项、改 hash、改 commit、重复 task、乱序以及 ledger/manifest 漂移。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 只实现验证工具，绝无 Review 签发或状态推进权限。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false；PHASE3_3_DATA 保持 BLOCKED。",
+    "不得进入 Phase 3.4 或跨 L3/L4。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "Ledger 与 GOLD-031 manifest 的客观身份绑定可确定性验证，任何删改/漂移 fail-closed。",
+    "工具只读，Executor 无 verdict/ledger/state 写权限。",
+    "全量 pytest/ruff/mypy 通过；PHASE3_3_DATA、L3/L4 与交易安全边界不变。"
+  ]
+}
