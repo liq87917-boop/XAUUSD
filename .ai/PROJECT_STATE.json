@@ -4,13 +4,13 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-024",
-  "last_completed_task": "GOLD-023",
-  "last_reviewed_task": "GOLD-023",
+  "current_task": "GOLD-025",
+  "last_completed_task": "GOLD-024",
+  "last_reviewed_task": "GOLD-024",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-021/022/023 已完成并经 GPT 工程审查：启动前自更新、异常中断安全恢复、GPT Planner 只读快照与职责边界均通过全量 pytest/ruff/mypy。真实授权 Author/News 证据仍不足，PHASE3_3_DATA 保持 BLOCKED；不得因此进入 Phase 3.4 或越过 L3/L4 Gate。",
+      "detail": "GOLD-024 已完成并经 GPT 工程审查：Planner Snapshot v2/CLI、Git identity、facts_digest 与受控只读交接输出通过 2867 passed / 1 skipped、ruff PASS、mypy 172 source files PASS。真实授权 Author/News 证据仍不足，PHASE3_3_DATA 保持 BLOCKED；不得因此进入 Phase 3.4 或越过 L3/L4 Gate。",
       "retryable": false
     }
   ],
@@ -20,7 +20,7 @@
     {"code": "CLINE_CLI_INSTALLATION", "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"},
     {"code": "CLINE_PROVIDER_BILLING_ROUTE", "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; launcher hard-pins AI_CLINE_PROVIDER=deepseek and provider fatal errors fail fast."}
   ],
-  "next_action": "Execute GPT-approved L1 queue GOLD-024 -> GOLD-025 -> GOLD-026. These tasks stabilize the planner snapshot handoff, enforce GPT review/state consistency, and expose PHASE3_3_DATA evidence gaps without changing qualification. PHASE3_3_DATA remains BLOCKED; do not enter Phase 3.4 or cross L3/L4 gates.",
+  "next_action": "Execute GPT-approved L1 queue GOLD-025 -> GOLD-026 -> GOLD-027. GOLD-025 establishes GPT review/state consistency, GOLD-026 exposes PHASE3_3_DATA evidence gaps read-only, and GOLD-027 creates a fail-closed authorized-evidence intake handoff. PHASE3_3_DATA remains BLOCKED; do not enter Phase 3.4 or cross L3/L4 gates.",
   "human_gates": [
     {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."},
     {"code": "PHASE3_3_L3_DECISION", "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."}
@@ -35,6 +35,6 @@
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ],
   "queue_target_size": 3,
-  "task_queue": ["GOLD-024", "GOLD-025", "GOLD-026"],
+  "task_queue": ["GOLD-025", "GOLD-026", "GOLD-027"],
   "queue_status": "ACTIVE"
 }
