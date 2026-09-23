@@ -1218,6 +1218,9 @@ NON_RETRYABLE_EXTERNAL_PATTERNS = {
     "credits balance is $0.00":
         "INSUFFICIENT_BALANCE",
 
+    "insufficient_credits":
+        "INSUFFICIENT_BALANCE",
+
     "payment required":
         "PAYMENT_REQUIRED",
 
@@ -1292,6 +1295,52 @@ def classify_cline_failure(
     cline_result
 ):
 
+    stderr_text = (
+        cline_result.get(
+            "stderr",
+            ""
+        )
+        or
+        ""
+    ).lower()
+
+    # Provider fatal errors are emitted on stderr by Cline.
+    # Check them even when the process happens to return 0,
+    # so validation cannot turn a billing/auth failure into a false success.
+    for pattern, code in (
+        NON_RETRYABLE_EXTERNAL_PATTERNS
+        .items()
+    ):
+
+        if pattern in stderr_text:
+
+            return (
+                "non_retryable_external",
+                code
+            )
+
+    for pattern, code in (
+        RETRYABLE_EXTERNAL_PATTERNS
+        .items()
+    ):
+
+        if pattern in stderr_text:
+
+            return (
+                "retryable_external",
+                code
+            )
+
+    if cline_result.get(
+        "timed_out",
+        False
+    ):
+
+        return (
+            "retryable_external",
+            "CLINE_TIMEOUT"
+        )
+
     if (
         cline_result.get(
             "returncode"
@@ -1305,36 +1354,14 @@ def classify_cline_failure(
             None
         )
 
-    if cline_result.get(
-        "timed_out",
-        False
-    ):
-
-        return (
-            "retryable_external",
-            "CLINE_TIMEOUT"
-        )
-
-    combined = (
-        (
-            cline_result.get(
-                "stderr",
-                ""
-            )
-            or
+    # Non-zero CLI exits may encode the fatal error as JSON on stdout.
+    stdout_text = (
+        cline_result.get(
+            "stdout",
             ""
         )
-        +
-        "\n"
-        +
-        (
-            cline_result.get(
-                "stdout",
-                ""
-            )
-            or
-            ""
-        )
+        or
+        ""
     ).lower()
 
     for pattern, code in (
@@ -1342,7 +1369,7 @@ def classify_cline_failure(
         .items()
     ):
 
-        if pattern in combined:
+        if pattern in stdout_text:
 
             return (
                 "non_retryable_external",
@@ -1354,7 +1381,7 @@ def classify_cline_failure(
         .items()
     ):
 
-        if pattern in combined:
+        if pattern in stdout_text:
 
             return (
                 "retryable_external",
@@ -1365,7 +1392,6 @@ def classify_cline_failure(
         "execution_failure",
         "CLINE_EXECUTION_FAILED"
     )
-
 
 def build_cline_args(
     cline_exe,
