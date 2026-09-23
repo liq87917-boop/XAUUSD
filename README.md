@@ -1853,6 +1853,47 @@ print(json.dumps(c.audit_follow_on_plan(tasks=[{'task_id':'GOLD-037','type':'CON
 blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
   ```
 
+### GPT Review Backlog 批量绑定事实清单（`orchestrator/review_backlog.py`，GOLD-037）
+
+> **合规红线**：本项**只读、只产事实** —— 不签发 verdict、不写
+> `.ai/GPT_REVIEW_LEDGER.json` / `.ai/PROJECT_STATE.json` / tasks / results，
+> 不推进 `last_reviewed_task`、不决定 Phase、不跨 L3/L4；`PHASE3_3_DATA` 保持 BLOCKED，
+> `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
+
+- **一句话**：把 `PROJECT_STATE.last_reviewed_task` 之后**所有** `completed` result 汇总成
+  一份确定性 backlog manifest，逐项**复用** `orchestrator.review_binding` 的客观事实
+  （result SHA-256 / 完成 commit identity），让 GPT 能安全、批量地完成实质审查与加密绑定；
+- **逐项字段**：`task_id` / `result.status` / `result.finished_at` / `result.sha256` /
+  `commit.sha` / `commit.branch` / `facts_complete` / `missing_reason_codes` /
+  `review_status`（**只有** `pending` / `bound` / `invalid` 三个客观取值，绝不是 PASS/FAIL）/
+  `ledger`（条目是否存在、是否唯一合法、hash 与 commit 是否一致）；顶层另有 `coverage` /
+  `ledger` / `chain` / `pointer` / `authority` / `issues` 与 `backlog_digest`
+  （wall-clock 不参与）；
+- **fail-closed（稳定 reason code）**：`LAST_REVIEWED_TASK_POINTER_MISSING`（边界不明 ⇒ 不猜）/
+  `BACKLOG_ITEM_FACTS_INCOMPLETE` / `BACKLOG_ITEM_MANIFEST_UNUSABLE` /
+  `BACKLOG_ITEM_LEDGER_INVALID` / `BACKLOG_ITEM_RESULT_HASH_DRIFT` /
+  `BACKLOG_ITEM_RESULT_STATUS_DRIFT` / `BACKLOG_ITEM_RESULT_FINISHED_AT_DRIFT` /
+  `BACKLOG_ITEM_COMMIT_SHA_DRIFT` / `BACKLOG_ITEM_COMMIT_BRANCH_DRIFT`，以及复用门禁的
+  `LEDGER_*`（顺序回退 / 覆盖窗口缺口 / 重复条目 / 不可用）与 `REVIEW_POINTER_*`
+  （指针 vs 台账 vs results）；任何 facts 不齐 / 漂移都**绝不猜测 commit 或 hash、
+  绝不自动修复、绝不推进状态**；
+- **退出码**：`0` 事实齐全且无漂移 / `2` fail-closed / `3` `PROJECT_STATE` 或台账不可用 /
+  `4` `--output` 目标被拒（该守卫只允许 `.ai/runtime/**` 或系统临时目录）；
+- **回归测试**：`tests/unit/test_ai_orchestrator_review_backlog.py`（18 项，含 GOLD-028~033
+  式连续 backlog、部分已绑定、hash 漂移、commit 不可绑定、台账缺口 / 重复 / 不可用、
+  指针缺失、CLI fail-closed、源码守卫「Executor 不能自签 review」）+
+  `tests/integration/test_review_backlog_regression.py`（7 项：真实仓库 result SHA-256 /
+  终态 commit 由 `git` 独立复算、前后零改写、CLI 幂等）；
+- **用法**（只读）：
+
+  ```bash
+  # ① 一次性看清全部 formal review backlog 与每项可绑定事实（纯 ASCII JSON；零写入）
+  .venv\Scripts\python.exe -m orchestrator.review_backlog --generated-at 2026-09-23T00:00:00+08:00
+
+  # ② 需要人工诊断时才写受控镜像（只允许 .ai/runtime/** 或系统临时目录）
+  .venv\Scripts\python.exe -m orchestrator.review_backlog --output .ai\runtime\review_backlog.json
+  ```
+
 
 ## 8. 数据模型
 

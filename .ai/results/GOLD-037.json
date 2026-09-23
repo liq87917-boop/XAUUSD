@@ -1,0 +1,74 @@
+{
+  "task_id": "GOLD-037",
+  "title": "建立 GPT Review Backlog 批量绑定事实清单",
+  "status": "completed",
+  "finished_at": "2026-09-23T20:51:53+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    "?? orchestrator/review_backlog.py",
+    "?? tests/integration/test_review_backlog_regression.py",
+    "?? tests/unit/test_ai_orchestrator_review_backlog.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 56 ++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 89 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                   | 41 +++++++++++++++++++++\n 3 files changed, 186 insertions(+)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T20:28:47+08:00",
+      "finished_at": "2026-09-23T20:51:53+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 151,
+      "duration_ms": 1006890,
+      "usage": {
+        "inputTokens": 28917824,
+        "outputTokens": 122954,
+        "cacheReadTokens": 28720896,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.18947428800000002
+      },
+      "cline_final_text": "Submission recorded (verified): ## 任务 GOLD-037 完成总结\n\n### 1. 完成内容\n新增**只读**的 GPT Review Backlog 批量绑定事实清单（层级：control-plane 事实，未越阶段、未进入 Phase 3.4）：\n\n- `orchestrator/review_backlog.py`（新建，builder + CLI，契约 `gold-ai/review-backlog-manifest/v1`）：\n  - backlog 范围唯一口径：`PROJECT_STATE.last_reviewed_task` 之后**所有** `completed` result（复用 `review_ledger.completed_result_ids` + `planner.is_newer`，按 `planner.task_rank` 排序）；指针缺失 ⇒ `LAST_REVIEWED_TASK_POINTER_MISSING` 且 backlog 为空（**不猜边界**）。\n  - 逐项**复用** `review_binding.build_review_binding_manifest` 取得 result SHA-256 / 完成 commit identity（**无第二套身份算法**）；逐项字段含 `task_id` / `result.{status,finished_at,sha256,bytes,worktree_*}` / `commit.{resolved,sha,branch,head,subject,committed_at}` / `facts_complete` / `missing_reason_codes` / `reason_codes` / `ledger.{entry_present,entry_valid,result_sha256_matches,commit_sha_matches}` / `review_status`。\n  - `review_status` **只有客观** `pending`/`bound`/`invalid`；manifest 内不存在 `verdict`/`acceptance_summary`/`reviewed_at`/`reviewer`/`reviewer_role`（`FORBIDDEN_MANIFEST_KEYS` 否定声明）；顶层 `coverage`/`ledger`/`chain`/`pointer`/`authority`/`determinism`/`issues`/`missing_reason_codes`/`reason_codes`/`summary`/`backlog_digest`（wall-clock 不参与 digest）。\n  - 检测复用既有只读门禁：`validate_review_ledger`（重复/非法条目 → `LEDGER_DUPLICATE_TASK`）、`pointer_section`（指针 vs 台账 vs results → `REVIEW_POINTER_*`）、`review_ledger_integrity.chain_section`（顺序回退/覆盖窗口缺口 → `LEDGER_CHAIN_GAP`）。\n  - fail-closed：`BACKLOG_ITEM_FACTS_INCOMPLETE`/`_MANIFEST_UNUSABLE`/`_LEDGER_INVALID`/`_RESULT_HASH_DRIFT`/`_RESULT_STATUS_DRIFT`/`_RESULT_FINISHED_AT_DRIFT`/`_COMMIT_SHA_DRIFT`/`_COMMIT_BRANCH_DRIFT`，绝不猜测 commit/hash、绝不自动修复、绝不推进状态；退出码 `0`/`2`/`3`/`4`。\n  - 默认零写入；`--output` 复用 `planner_snapshot_output` 的 fail-closed 守卫（仅 `.ai/runtime/**` 或系统临时目录；`.ai/tasks`/`.ai/results`/`PROJECT_STATE`/`GPT_REVIEW_LEDGER` 一律拒绝）。\n  - `authority` 段硬编码 `review_authority=gpt_only` / `tool_can_sign_review=false` / `tool_can_write_review_ledger=false` / `tool_can_advance_review_pointer=false` / `writes_*=false`。\n\n### 2. 修改的文件\n- `.ai/DEVELOPMENT_PROTOCOL.md`（新增 §2.11：契约/字段/稳定 code/退出码/职责边界）\n- `README.md`（新增「GPT Review Backlog 批量绑定事实清单（GOLD-037）」小节）\n- `PROGRESS_LOG.md`（新增 GOLD-037 记录：背景/变更/验证/遗留）\n\n### 3. 新增的文件\n- `orchestrator/review_backlog.py`\n- `tests/unit/test_ai_orchestrator_review_backlog.py`（18 项）\n- `tests/integration/test_review_backlog_regression.py`（7 项）\n\n### 4. 执行的测试与结果\n- `pytest tests/unit/test_ai_orchestrator_review_backlog.py tests/integration/test_review_backlog_regression.py -q` → **25 passed in 17.11s**\n- `pytest tests -q` → **3513 passed, 1 skipped in 377.46s**（stderr 空）\n- `ruff check .` → **All checks passed!**\n- `mypy config database src scripts` → **Success: no issues found in 183 source files**\n- 真实仓库只读试跑：`python -m orchestrator.review_backlog --generated-at …` → exit `0`，`[backlog] last_reviewed=GOLD-027 count=11 bound=0 pending=11 invalid=0 missing= codes=`，backlog = `TEST-001/TEST-002/GOLD-028..GOLD-036`，全部 `facts_complete=true`、`review_status=pending`；逐项 result SHA-256 与终态 commit 由测试用 `git cat-file`/`git log` 独立复算一致；`tree_digest`/`worktree_status`/`PROJECT_STATE`/`GPT_REVIEW_LEDGER` 前后逐字节不变。\n- `git status --porcelain` 仅显示上述 3 个修改 + 3 个新增，**未**触碰 `.ai/tasks`/`.ai/results`/`.ai/PROJECT_STATE.json`/`.ai/GPT_REVIEW_LEDGER.json`/`src/alpha/**`/`src/execution/**`/`database/**`/`.env`；未新增依赖、未改 `pyproject.toml`；测试写入全在 `tmp_path`；Cline 未执行任何 Git 写操作。\n\n### 5. 未解决的问题 / 已知边界\n- 复用门禁的人类可读 detail 文案中可能出现 “PASS review” 字样（指针漂移说明），因此测试锁死的是「无 verdict 字段 + 无任何值为 verdict」，而非全文不含该词。\n- backlog 采用与 `planner_refill_request.completed_but_unreviewed` 相同的 `is_newer` 口径，因此当前也包含 `TEST-*`（与既有 refill 事实包一致，未额外过滤）。\n- backlog 项出现 `bound` 且 `last_reviewed_task` 未推进属指针漂移（`REVIEW_POINTER_BEHIND_LEDGER`），工具只报告，需 GPT 修指针而非重复 review。\n\n### 6. 是否满足 acceptance\n满足：① GPT 可从单个确定性 manifest（含稳定 `backlog_digest`）看清全部 formal review backlog 与每项可绑定事实，工具结构上无法产生 PASS/FAIL（运行期 + 源码守卫双锁）；② result/commit/台账任何身份漂移（hash、status、finished_at、commit sha/branch、不可绑定、重复、顺序/覆盖缺口、指针缺失）都 fail-closed 且不猜测、不自动修复、不推进状态；③ 全量 pytest/ruff/mypy 通过，`PHASE3_3_DATA` blocker、L3/L4 与 `LIVE_TRADING=false`/`ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变，且待提交的新增/修改文件均在 task `scope_guard.allowed_primary_paths` 内。\n\n### 7. 建议下一步\n按 `PROJECT_STATE.next_action` 由 GPT 决定：GOLD-038（写队列前远端 HEAD 并发保护事实包）→ GOLD-039（result 顶层状态与 attempt 终态一致性门禁）；GPT 可先用本 manifest 逐项核对 `GOLD-028..GOLD-036` 的 result SHA-256 与完成 commit 身份，再写台账并推进 `last_reviewed_task`（Cline 不代签）。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        "?? orchestrator/review_backlog.py",
+        "?? tests/integration/test_review_backlog_regression.py",
+        "?? tests/unit/test_ai_orchestrator_review_backlog.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 56 ++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 89 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                   | 41 +++++++++++++++++++++\n 3 files changed, 186 insertions(+)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  6%]\n........................................................................ [  8%]\n........................................................................ [ 10%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 28%]\n........................................................................ [ 30%]\n........................................................................ [ 32%]\n........................................................................ [ 34%]\n........................................................................ [ 36%]\n........................................................................ [ 38%]\n........................................................................ [ 40%]\n........................................................................ [ 43%]\n........................................................................ [ 45%]\n........................................................................ [ 47%]\n........................................................................ [ 49%]\n........................................................................ [ 51%]\n........................................................................ [ 53%]\n........................................................................ [ 55%]\n........................................................................ [ 57%]\n........................................................................ [ 59%]\n........................................................................ [ 61%]\n........................................................................ [ 63%]\n........................................................................ [ 65%]\n........................................................................ [ 67%]\n........................................................................ [ 69%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 75%]\n........................................................................ [ 77%]\n........................................................................ [ 79%]\n........................................................................ [ 81%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 94%]\n........................................................................ [ 96%]\n........................................................................ [ 98%]\n.............s............................................               [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3513 passed, 1 skipped in 372.92s (0:06:12)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

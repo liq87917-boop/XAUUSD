@@ -5122,3 +5122,92 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   blocker-facing / control-plane follow-on，并按 GOLD-037 把 completed-but-unreviewed
   的正式 Review backlog 变成确定性批量绑定事实清单。
 
+## GOLD-037：GPT Review Backlog 批量绑定事实清单（只读 control-plane 事实）
+
+### 1. 背景 / 问题
+
+- GOLD-025（Review Ledger）、GOLD-031（单任务 Review Binding Manifest）、
+  GOLD-032（台账完整性门禁）已经把「一次 review」的客观事实做全，但 backlog 里同时挂着
+  多个「已完成却尚未进入正式台账」的任务时，GPT 仍只能逐个手跑
+  `python -m orchestrator.review_binding --task <id>`：容易漏项，也无法一次性看清
+  「哪些还欠 review、每项可绑定事实是什么、有没有已绑定 / 已漂移的项」；
+- 目标：给出**一份**确定性、只读的 formal review backlog manifest，逐项**复用**既有
+  §2.8 客观事实，让 GPT 能安全、批量地完成实质审查与加密绑定；工具本身**绝不**签发
+  verdict、**绝不**写 ledger。
+
+### 2. 变更（最小范围）
+
+- 新增 `orchestrator/review_backlog.py`（纯只读 builder + CLI，契约
+  `gold-ai/review-backlog-manifest/v1`）：
+  - backlog 范围**唯一口径**：`PROJECT_STATE.last_reviewed_task` 之后**所有**
+    `completed` result（`orchestrator.review_ledger.completed_result_ids` +
+    `planner.is_newer`，排序 `planner.task_rank`）；
+  - 逐项**复用** `orchestrator.review_binding.build_review_binding_manifest`
+    取得 result SHA-256 / 完成 commit identity（**未**新增第二套结果 / commit 身份算法）；
+  - 逐项字段：`task_id` / `result.status` / `result.finished_at` / `result.sha256` /
+    `result.worktree_matches_commit` / `commit.sha` / `commit.branch` / `commit.subject` /
+    `facts_complete` / `missing_reason_codes` / `reason_codes` / `ledger`（条目是否存在、
+    是否唯一合法、hash 与 commit 是否一致）/ `review_status`；
+  - `review_status` 只有客观 `pending` / `bound` / `invalid` 三值；输出里**不存在**
+    `verdict` / `acceptance_summary` / `reviewed_at` / `reviewer` / `reviewer_role`
+    （`FORBIDDEN_MANIFEST_KEYS` 否定声明 + 测试断言「没有任何字段的值是 verdict」）；
+  - 顶层 `coverage` / `ledger` / `chain` / `pointer` / `authority` / `determinism` /
+    `issues` / `missing_reason_codes` / `reason_codes` / `summary` / `backlog_digest`
+    （`generated_at` 等 wall-clock 不参与 digest）；
+  - 复用既有门禁做检测：`review_ledger.validate_review_ledger`（重复 / 非法条目）、
+    `review_ledger.pointer_section`（指针 vs 台账 vs results）、
+    `review_ledger_integrity.chain_section`（台账顺序回退 / 覆盖窗口缺口），
+    稳定 code 分别为 `LEDGER_DUPLICATE_TASK` / `REVIEW_POINTER_*` / `LEDGER_CHAIN_GAP` 等；
+  - fail-closed：`LAST_REVIEWED_TASK_POINTER_MISSING`（边界不明 ⇒ backlog 为空、**不猜**）、
+    `BACKLOG_ITEM_FACTS_INCOMPLETE`、`BACKLOG_ITEM_MANIFEST_UNUSABLE`、
+    `BACKLOG_ITEM_LEDGER_INVALID`、`BACKLOG_ITEM_RESULT_HASH_DRIFT` /
+    `_RESULT_STATUS_DRIFT` / `_RESULT_FINISHED_AT_DRIFT` / `_COMMIT_SHA_DRIFT` /
+    `_COMMIT_BRANCH_DRIFT`；退出码 `0` / `2` / `3`（state 或台账不可用）/ `4`
+    （`--output` 被拒）；
+  - 默认零写入；`--output` **复用** `orchestrator.planner_snapshot_output` 的受控路径守卫
+    （只允许 `<root>/.ai/runtime/**` 或系统临时目录，且 `.ai/tasks` / `.ai/results` /
+    `PROJECT_STATE` / `GPT_REVIEW_LEDGER` 一律拒绝）。
+- 新增 `tests/unit/test_ai_orchestrator_review_backlog.py`（**18 项**）：GOLD-028~033 式
+  连续 backlog 全部 `pending`、digest 幂等且对内容敏感（wall-clock 不影响 digest）、
+  部分已绑定（`bound`）+ 指针滞后 `REVIEW_POINTER_BEHIND_LEDGER` fail-closed、
+  result hash 漂移、commit 缺失 / 歧义不可绑定（**不猜 commit**、`missing_reason_codes`
+  原样透传）、台账覆盖窗口缺口 `LEDGER_CHAIN_GAP`、重复条目 `LEDGER_DUPLICATE_TASK`、
+  台账 / `PROJECT_STATE` 不可用 ⇒ 退出码 3、指针缺失 fail-closed、`authority` 全 False、
+  源码守卫（无写入 / 子进程路径，唯一写操作经受控守卫，Executor 不能自签 review）、
+  CLI fail-closed 与 `--output` 只写 runtime。
+- 新增 `tests/integration/test_review_backlog_regression.py`（**7 项**）：真实仓库上
+  backlog 范围与测试自己复算的一致、逐项 result SHA-256 由 `git cat-file` 复算、
+  终态 commit 由测试自己的 `git log` 解析、`bound` 与台账条目存在性一一对应、
+  前后 `tree_digest` / `worktree_status` 零改写、CLI 幂等且 ASCII、Phase 3.3 blocker 与
+  两条交易安全不变量不变。
+- 文档：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.11（契约 / 字段 / 稳定 code / 退出码 /
+  职责边界）；`README.md` 新增「GPT Review Backlog 批量绑定事实清单（GOLD-037）」小节。
+
+### 3. 验证
+
+- 新增测试：`tests/unit/test_ai_orchestrator_review_backlog.py` 18 passed；
+  `tests/integration/test_review_backlog_regression.py` 7 passed；
+- 真实仓库只读试跑（`--generated-at` 固定）：
+  `[backlog] last_reviewed=GOLD-027 count=11 bound=0 pending=11 invalid=0 missing= codes=`
+  退出码 `0`（backlog = `TEST-001` / `TEST-002` / `GOLD-028`..`GOLD-036`，全部
+  `facts_complete=true`、`review_status=pending`；`bound=0` 说明台账确实仍停在
+  GOLD-027，未被本工具推进）；
+- 全量门禁：`.venv\Scripts\python.exe -m pytest tests -q`、
+  `.venv\Scripts\python.exe -m ruff check .`、
+  `.venv\Scripts\python.exe -m mypy config database src scripts` 全绿；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json`、`src/alpha/**`、`src/execution/**`、`database/**`、
+  `.env`；未新增依赖、未改 `pyproject.toml`；测试写入全部发生在 `tmp_path`；
+  Cline 未执行任何 Git 写操作。
+
+### 4. 遗留 / 下一步
+
+- 本工具只**产事实**：它不会（也**不允许**）签发 verdict、写 ledger、推进
+  `last_reviewed_task`；真正的 Review 与加密绑定仍由 GPT 完成；
+- 若某个 backlog 项显示 `bound` 而 `last_reviewed_task` 未推进，说明**指针漂移**
+  （`REVIEW_POINTER_BEHIND_LEDGER`）：GPT 应先修正指针 / 台账一致性，而不是重复 review；
+- 真实仓库当前 backlog 为 11 项全部 `pending`，且不存在 order regression / chain gap /
+  重复条目：GPT 可按该 manifest 逐项核对 result SHA-256 与完成 commit 身份后写台账；
+- 建议下一步（由 GPT 决定）：按 GOLD-038 建立 GPT 写队列前的远端 HEAD 并发保护事实包，
+  并按 GOLD-039 建立 result 顶层状态与 attempt 终态一致性门禁。
+

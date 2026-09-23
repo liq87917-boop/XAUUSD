@@ -546,4 +546,60 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   造任务；Executor 侧发现 `PROJECT_STATE` 指针 / 队列声明漂移（或
   `STATE_RESULT_DRIFT`）时只报告、绝不修复。
 
+## 2.11 GPT Review Backlog 批量绑定事实清单（GOLD-037）
+
+- **为什么**：§2.7 让 review 变成机器可审计台账，§2.8 给出**单个**任务的客观内容身份，
+  §2.9 验证台账完整性。但当一个 backlog 里同时挂着**多个**已完成却尚未进入正式台账的任务时，
+  GPT 只能逐个手跑 §2.8：既容易漏项，也无法一次性看清「哪些还欠 review、每项的可绑定事实
+  是什么、有没有已经绑定 / 已经漂移的项」。§2.11 把这件事变成**一份**确定性 manifest。
+- **命令**：`python -m orchestrator.review_backlog`（只读；stdout 纯 ASCII JSON，stderr 只有
+  人类摘要）。契约 `schema=gold-ai/review-backlog-manifest/v1` + `schema_version=1`；
+  `--output` 复用 §2.6 的受控路径守卫（只允许 `<root>/.ai/runtime/**` 或系统临时目录）。
+- **backlog 范围（唯一口径）**：`PROJECT_STATE.last_reviewed_task` 之后**所有**
+  `completed` result（排序 `planner.task_rank`）。逐项**复用** §2.8 的
+  `orchestrator.review_binding.build_review_binding_manifest` 取得 result SHA-256 /
+  完成 commit identity —— **不存在第二套结果 / commit 身份算法**。
+- **逐项字段**：`task_id` / `result`（`status` / `finished_at` / `sha256` / `bytes` /
+  `worktree_sha256` / `worktree_matches_commit`）/ `commit`（`resolved` / `sha` / `branch` /
+  `head` / `subject` / `committed_at`）/ `facts_complete` / `missing_reason_codes` /
+  `reason_codes` / `ledger`（条目是否存在、是否唯一合法、hash 与 commit 是否一致）/
+  `review_status`。顶层另有 `coverage` / `ledger` / `chain` / `pointer` / `authority` /
+  `determinism` / `issues` / `missing_reason_codes` / `reason_codes` / `summary` 与
+  `backlog_digest`（`generated_at` 等 wall-clock 不参与 digest）。
+- **`review_status` 只有三个客观取值**（绝不是 verdict 词表）：
+  - `pending`：无 ledger 条目且 `facts_complete=true`（正常待 GPT review 的项）；
+  - `bound`：ledger 条目唯一、合法，且其客观身份与 manifest 事实逐项一致；出现 `bound`
+    意味着 `last_reviewed_task` 落后于台账（属**指针漂移**，GPT 应先修指针而非重复 review）；
+  - `invalid`：facts 不齐 / 条目非法或重复 / hash 或 commit 漂移，一律 fail-closed。
+  输出里**不存在** `verdict` / `acceptance_summary` / `reviewed_at` / `reviewer` /
+  `reviewer_role` 字段（见 `FORBIDDEN_MANIFEST_KEYS` 的否定声明）。
+- **检测（全部只报告，绝不修复）**：复用
+  `orchestrator.review_ledger.validate_review_ledger`（重复 / 非法条目）、
+  `orchestrator.review_ledger.pointer_section`（指针 vs ledger vs results）、
+  `orchestrator.review_ledger_integrity.chain_section`（台账顺序回退 / 覆盖窗口缺口）。
+- **fail-closed（稳定 reason code）**：`LAST_REVIEWED_TASK_POINTER_MISSING`
+  （指针缺失 ⇒ backlog 边界不明 ⇒ **不猜**、backlog 为空）、
+  `BACKLOG_ITEM_FACTS_INCOMPLETE`（facts 不齐）、`BACKLOG_ITEM_MANIFEST_UNUSABLE`
+  （builder 异常）、`BACKLOG_ITEM_LEDGER_INVALID`（条目重复 / 非法）、
+  `BACKLOG_ITEM_RESULT_HASH_DRIFT` / `_RESULT_STATUS_DRIFT` / `_RESULT_FINISHED_AT_DRIFT` /
+  `_COMMIT_SHA_DRIFT` / `_COMMIT_BRANCH_DRIFT`（身份漂移），以及复用的 `LEDGER_*` /
+  `REVIEW_POINTER_*`。任何缺失都给出稳定 code，**绝不猜测 commit / hash、绝不自动修复**。
+- **退出码**：`0` fact 齐全且无漂移 / `2` fail-closed / `3` `PROJECT_STATE` 或 ledger
+  不可用 / `4` `--output` 目标被 fail-closed 拒绝（此时绝不写文件）。
+- **职责边界（不可协商）**：本工具**只产事实**，绝不签发 verdict、绝不写
+  `.ai/GPT_REVIEW_LEDGER.json` / `.ai/PROJECT_STATE.json` / tasks / results，绝不推进
+  `last_reviewed_task`；`authority` 段硬编码 `review_authority=gpt_only` /
+  `tool_can_sign_review=false` / `tool_can_write_review_ledger=false` /
+  `tool_can_advance_review_pointer=false` / `writes_*=false`（源码守卫测试锁定）。
+- **只读保证**：外部进程调用只经由 §2.8 的只读 Git 白名单；本模块自身不启动任何外部进程，
+  零网络、零数据库、零业务证据、零模型调用；唯一写操作是显式 `--output` 到受控路径。
+- **回归测试**：`tests/unit/test_ai_orchestrator_review_backlog.py`（18 项：连续 backlog、
+  部分已绑定、hash 漂移、commit 不可绑定、台账缺口 / 重复 / 不可用、指针缺失、CLI fail-closed、
+  Executor 不能自签 review 的源码守卫）+
+  `tests/integration/test_review_backlog_regression.py`（7 项：真实仓库身份由 `git` 独立复算、
+  前后零改写、CLI 幂等）。
+- **边界不变**：§2.11 不改变 ledger schema、滚动队列、L1~L4 档位、Phase 3.3 data blocker、
+  Phase 3.4 边界与 `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
+
+
 
