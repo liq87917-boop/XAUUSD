@@ -168,3 +168,51 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
 - **可重试外部错误**：timeout、rate limit、临时 5xx/provider unavailable、网络 reset/refused 等；可进入受限 retry，但 Cline 非零退出时不浪费时间运行全量 validation。
 - 任意失败 attempt 在 rollback 前都应尽量保存 recovery snapshot；recovery artifact 只在本地 runtime，不进入 Git。
 - 外部错误绝不能自动降级到 Cline Usage-Billing、其它 Provider、其它模型或静默切换 API Key。
+
+## 2.4 异常中断任务的安全现场恢复状态机（GOLD-022）
+
+- **背景（GOLD-018 真实事故）**：进程被中断 / 重启后，工作区遗留一批**尚未进入 Git** 的修改。
+  旧实现只有两种反应：沉默 `deferred`（永久卡线，只能人工 `reset/clean`）或直接 `reset --hard` +
+  `clean -fd`（可能抹掉人工修改，连唯一的现场证据一起抹掉）。
+- **判定顺序（`recover_interrupted_worktree()`，固定跑在 Git sync 之前）**：
+  1) 干净 ⇒ 无需恢复；
+  2) 可证明属于「上一次**同一 task** 的中断现场」⇒ snapshot → 校验可恢复 → 清理 → 重试同一 task；
+  3) 其它 dirty ⇒ **严格停线**：绝不 snapshot、绝不 reset/clean、绝不写 result、绝不 commit。
+- **「可证明」的完整证据链（缺一即停线，绝不自动清理）**：
+  - runtime 恰好存在 **1** 条 `status=running` 的 attempt 记录（0 条 / 多条都不算证据）；
+  - 该记录的 `task_id` == rolling queue 当前真正会执行的 task
+    （依赖未满足 / 被 BLOCKED / 等待 Human Gate ⇒ 队列没有可执行任务 ⇒ 停线）；
+  - 记录带 `evidence_schema=gold-ai/interrupted-attempt/v1`（即本版本在**确认 clean 之后**写入的基线）；
+  - 记录里的 owner PID 已不存在（Windows 用 `tasklist` 精确匹配 PID 列；**探测失败按「存活」处理**）；
+  - 记录里的 `head` / `branch` 与当前完全一致（中断期间没有新 commit、没有切分支）；
+  - 该 task 至今没有终态 result（已有 `completed` / `blocked` ⇒ 不可能是「未完成的中断现场」）。
+- **现场基线**：每次 attempt 开始（工作区已确认 clean）时写入
+  `.ai/runtime/tasks/<task>.json`：`evidence_schema / pid / branch / head / worktree_clean / baseline_at`。
+  只有它能作为「这批 dirty 变化发生在本 attempt 期间」的证明。
+- **自动清理的唯一前置条件（fail-closed）**：先 `save_recovery_snapshot()`（tracked patch
+  `git diff --binary HEAD` + untracked 逐文件副本 + `patch_sha256` / `patch_bytes` /
+  `untracked_sha256` / `head` / `branch` / `pid` metadata），再
+  `verify_recovery_snapshot(..., require_worktree_match=True)`：
+  patch 哈希与字节数一致、untracked 副本哈希一致、patch 能被**反向应用**到当前工作区
+  （证明它与现存现场互为逆操作）、untracked 副本与工作区文件内容一致。
+  任一项不成立 ⇒ 只停线并保留现场，**绝不清理**；snapshot 写入失败同样只停线。
+- **证据一次性消费**：恢复成功后 runtime 状态改写为 `recovered`（含 snapshot 路径），
+  该 `running` 证据立即失效——否则同一条证据之后可能被用来清理**另一次**（可能来自人工）的 dirty 现场。
+- **审计与边界**：每次判定都写入 `.ai/runtime/recovery/recovery_state.json`（有界、原子写，含
+  `decision` / `outcome` / `snapshot` / `snapshot_verified` / `cleaned` / `evidence`）；
+  陈旧 lock 原文归档到 `.ai/runtime/recovery/locks/`。恢复**只写 runtime**：绝不写
+  `.ai/results/**`、绝不 commit、绝不把恢复当任务完成（恢复后同一 task 仍从 `attempt 1` 开始），
+  也绝不触碰 Phase、数据资格 Gate 或 `LIVE_TRADING`。
+- **单实例 lock（三态 fail-closed）**：
+  - `active`：owner PID 仍在运行（含本进程）⇒ 停线，绝不删除；
+  - `unknown`：JSON 损坏、`pid` / `project` / `started_at` 缺失或不可用、`schema` 不认识、
+    来源非本项目 ⇒ 停线并给出明确人工动作（确认无其它 Orchestrator 后手工删除 lock 再重启），
+    绝不自动删除；
+  - `stale`：来源可证明（`project` == 本项目）+ owner PID 已不存在 ⇒ 才归档留痕并清理。
+  - 判活探测失败（`tasklist` 不可用 / 超时 / 非 0 退出）一律按 `active` 处理。
+- **决策边界**：恢复判定是**纯确定性代码**，绝不调用 Cline、绝不询问 LLM；
+  「是否丢弃现场」「是否继续」「下一个 task 是谁」全部由证据与 rolling queue 决定（见 §2.1）。
+- **已知范围**：snapshot 记录的是 tracked patch + untracked 文件内容；恢复（`restore_recovery_snapshot`）
+  把 tracked 修改还原回工作区，**不**重建原来的 staged 状态；恢复不覆盖历史 result，
+  也不改写历史 attempt 语义。
+

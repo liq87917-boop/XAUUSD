@@ -166,6 +166,28 @@ def test_recovery_snapshot_keeps_patch_and_untracked_files(
                 "stderr": "",
                 "timed_out": False,
             }
+        # GOLD-022：snapshot metadata 追加可恢复性证据所需的只读探测。
+        if command == "status --porcelain":
+            return {
+                "returncode": 0,
+                "stdout": " M tracked.py\n?? new_file.py\n",
+                "stderr": "",
+                "timed_out": False,
+            }
+        if command == "rev-parse HEAD":
+            return {
+                "returncode": 0,
+                "stdout": "b" * 40 + "\n",
+                "stderr": "",
+                "timed_out": False,
+            }
+        if command == "branch --show-current":
+            return {
+                "returncode": 0,
+                "stdout": "cline-agent\n",
+                "stderr": "",
+                "timed_out": False,
+            }
         raise AssertionError(command)
 
     monkeypatch.setattr(orch, "git", fake_git)
@@ -189,6 +211,16 @@ def test_recovery_snapshot_keeps_patch_and_untracked_files(
     )
     assert metadata["failure_code"] == "INSUFFICIENT_BALANCE"
     assert metadata["untracked_files"] == ["new_file.py"]
+
+    # GOLD-022：快照必须自带可恢复性证据，且可被校验函数判定为可恢复。
+    assert metadata["schema"] == orch.RECOVERY_SNAPSHOT_SCHEMA
+    assert metadata["tracked_files"] == ["tracked.py"]
+    assert metadata["patch_bytes"] == (snapshot / "changes.patch").stat().st_size
+    assert metadata["patch_sha256"] == orch.sha256_file(snapshot / "changes.patch")
+    assert metadata["untracked_sha256"] == {
+        "new_file.py": orch.sha256_file(snapshot / "untracked" / "new_file.py")
+    }
+    assert orch.verify_recovery_snapshot(snapshot)[0] is True
 
 
 def test_non_retryable_external_stops_before_validation_and_retry(

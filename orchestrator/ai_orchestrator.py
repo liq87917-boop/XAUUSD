@@ -1,5 +1,6 @@
 import atexit
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -25,6 +26,12 @@ LOG_DIR = ROOT / ".ai" / "logs"
 
 TASK_STATE_DIR = RUNTIME_DIR / "tasks"
 RECOVERY_DIR = RUNTIME_DIR / "recovery"
+
+# 恢复状态机的 runtime 审计文件（只落 runtime，绝不进 Git、绝不写 result）。
+RECOVERY_STATE_FILE = RECOVERY_DIR / "recovery_state.json"
+
+# 陈旧 lock 原文的归档目录（审计留痕，绝不进 Git）。
+RECOVERY_LOCK_ARCHIVE_DIR = RECOVERY_DIR / "locks"
 
 LOCK_FILE = RUNTIME_DIR / "orchestrator.lock"
 LOG_FILE = LOG_DIR / "orchestrator.log"
@@ -184,6 +191,76 @@ REMOTE_NAME = os.getenv(
 
 
 # ============================================================
+# 异常中断恢复状态机（GOLD-022）
+# ============================================================
+#
+# 背景（GOLD-018 真实事故）：
+#   进程被中断/重启后，工作区遗留一批**没有进入 Git**的修改。
+#   旧实现对此只有两种反应：要么沉默 defer，要么直接 reset/clean。
+#   前者会永久卡线，后者可能抹掉人工修改（也抹掉唯一的现场证据）。
+#
+# 新的确定性状态机（绝不交给 Cline / LLM 决定）：
+#   1) 只有能**证明**「属于上一次同一 task 的中断现场」时才允许 snapshot + 清理；
+#   2) 自动清理的前置条件是 snapshot 完整且**可恢复**（校验通过）；
+#   3) 证据不足（人工改动 / 来源不明 / 多重证据）一律 fail-closed 停线；
+#   4) 恢复动作只写 runtime 审计，绝不写 result、绝不把恢复当任务完成。
+
+# attempt 启动时写入 runtime 的现场基线证据 schema。
+ATTEMPT_EVIDENCE_SCHEMA = "gold-ai/interrupted-attempt/v1"
+
+# recovery snapshot / 恢复审计文件 schema。
+RECOVERY_SNAPSHOT_SCHEMA = "gold-ai/recovery-snapshot/v1"
+
+RECOVERY_STATE_SCHEMA = "gold-ai/recovery-state/v1"
+
+# 单实例 lock 的 schema（旧版 lock 无此字段，仍按其他证据判定）。
+LOCK_SCHEMA = "gold-ai/orchestrator-lock/v1"
+
+# 恢复审计保留的事件条数上限（有界，避免 runtime 无限增长）。
+RECOVERY_EVENT_HISTORY_LIMIT = 20
+
+# 工作区状态分类词表。
+WORKTREE_CLEAN = "clean"
+
+WORKTREE_INTERRUPTED_TASK = "interrupted_task"
+
+WORKTREE_UNKNOWN = "unknown_dirty_worktree"
+
+# 中断现场使用的 failure_class / failure_code
+# （沿用 GOLD-018 事故手工恢复时写入的稳定词表，便于审计对齐）。
+INTERRUPTED_FAILURE_CLASS = "interrupted_previous_process"
+
+INTERRUPTED_FAILURE_CODE = "OLD_PROCESS_INTERRUPTED"
+
+# 恢复动作结果词表。
+RECOVERY_OUTCOME_CLEAN = "no_recovery_needed"
+
+RECOVERY_OUTCOME_RECOVERED = "recovered"
+
+RECOVERY_OUTCOME_MANUAL = "manual_intervention_required"
+
+RECOVERY_OUTCOME_SNAPSHOT_UNVERIFIED = "snapshot_unverified"
+
+RECOVERY_OUTCOME_SNAPSHOT_FAILED = "snapshot_failed"
+
+RECOVERY_OUTCOME_CLEANUP_FAILED = "cleanup_failed"
+
+# 恢复审计事件类型。
+RECOVERY_EVENT_WORKTREE = "worktree_recovery"
+
+RECOVERY_EVENT_LOCK = "stale_lock_recovery"
+
+RECOVERY_EVENT_BLOCKED = "manual_intervention"
+
+# lock 分类词表。
+LOCK_ACTIVE = "active"
+
+LOCK_STALE = "stale"
+
+LOCK_UNKNOWN = "unknown"
+
+
+# ============================================================
 # 全局状态
 # ============================================================
 
@@ -192,6 +269,9 @@ _logger = logging.getLogger(
 )
 
 _lock_owned = False
+
+# 人工介入告警限流时间戳（只影响日志噪声，绝不降低检测频率）。
+_last_worktree_block_log_at: float | None = None
 
 
 # ============================================================
@@ -242,6 +322,11 @@ def ensure_directories():
     )
 
     RECOVERY_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    RECOVERY_LOCK_ARCHIVE_DIR.mkdir(
         parents=True,
         exist_ok=True
     )
@@ -358,6 +443,41 @@ def read_json(
         )
 
         return default
+
+
+def sha256_file(
+    path: Path
+) -> str | None:
+    """计算文件的 SHA-256（用于 snapshot 完整性/可恢复性校验）。
+
+    文件不存在或不可读时返回 None（调用方必须 fail-closed）。
+    """
+
+    digest = hashlib.sha256()
+
+    try:
+
+        with open(
+            path,
+            "rb"
+        ) as handle:
+
+            for chunk in iter(
+                lambda: handle.read(
+                    1024 * 1024
+                ),
+                b""
+            ):
+
+                digest.update(
+                    chunk
+                )
+
+    except OSError:
+
+        return None
+
+    return digest.hexdigest()
 
 
 # ============================================================
@@ -512,6 +632,99 @@ def git_is_dirty():
     return bool(
         get_git_status_lines()
     )
+
+
+def head_full_sha() -> str | None:
+    """当前 HEAD 的完整 SHA（用于中断现场的 HEAD 基线比对）。"""
+
+    result = git(
+        "rev-parse HEAD"
+    )
+
+    if (
+        result["returncode"]
+        != 0
+    ):
+
+        return None
+
+    value = (
+        result["stdout"]
+        .strip()
+    )
+
+    return value or None
+
+
+def parse_status_line(
+    line: str
+) -> tuple[str, str] | None:
+    """解析 `git status --porcelain` 单行 → (XY 状态码, 路径)。
+
+    无法解析时返回 None（调用方只把它当同类信息，不做任何清理决策）。
+    """
+
+    if len(line) < 4:
+
+        return None
+
+    code = line[:2]
+
+    raw_path = line[3:].strip()
+
+    if not raw_path:
+
+        return None
+
+    # rename / copy 形式：`XY OLD -> NEW`，只保留目标路径。
+    if " -> " in raw_path:
+
+        raw_path = (
+            raw_path
+            .split(" -> ")[-1]
+            .strip()
+        )
+
+    if not raw_path:
+
+        return None
+
+    return code, raw_path
+
+
+def split_dirty_paths(
+    lines: list[str]
+) -> tuple[list[str], list[str]]:
+    """把 dirty 状态行拆成 (tracked 修改文件, untracked 文件)。"""
+
+    tracked: list[str] = []
+    untracked: list[str] = []
+
+    for line in lines:
+
+        parsed = parse_status_line(
+            line
+        )
+
+        if parsed is None:
+
+            continue
+
+        code, path = parsed
+
+        if code == "??":
+
+            untracked.append(
+                path
+            )
+
+        else:
+
+            tracked.append(
+                path
+            )
+
+    return tracked, untracked
 
 
 # ============================================================
@@ -2329,6 +2542,8 @@ def save_recovery_snapshot(
 
     untracked_files = []
 
+    untracked_hashes: dict[str, str] = {}
+
     if (
         untracked_result.get(
             "returncode"
@@ -2408,6 +2623,30 @@ def save_recovery_snapshot(
                 relative
             )
 
+            copied_hash = sha256_file(
+                destination
+            )
+
+            if copied_hash is None:
+
+                raise RuntimeError(
+
+                    "恢复快照写入后无法校验: "
+                    f"{relative}"
+                )
+
+            untracked_hashes[
+                relative
+            ] = copied_hash
+
+    tracked_files, _ = split_dirty_paths(
+        get_git_status_lines()
+    )
+
+    patch_bytes = (
+        patch_path.stat().st_size
+    )
+
     metadata = {
         "task_id":
             task_id,
@@ -2424,14 +2663,40 @@ def save_recovery_snapshot(
         "failure_code":
             failure_code,
 
+        # 可恢复性证据（GOLD-022）：schema + 逐文件哈希，
+        # 让「清理前必须先证明 snapshot 可恢复」有确定依据。
+        "schema":
+            RECOVERY_SNAPSHOT_SCHEMA,
+
+        "head":
+            head_full_sha(),
+
+        "branch":
+            current_branch(),
+
+        "pid":
+            os.getpid(),
+
         "changed_files":
             get_changed_files(),
+
+        "tracked_files":
+            tracked_files,
 
         "untracked_files":
             untracked_files,
 
+        "untracked_sha256":
+            untracked_hashes,
+
         "patch_file":
-            "changes.patch"
+            "changes.patch",
+
+        "patch_bytes":
+            patch_bytes,
+
+        "patch_sha256":
+            sha256_file(patch_path)
     }
 
     atomic_write_json(
@@ -2442,6 +2707,1261 @@ def save_recovery_snapshot(
     )
 
     return snapshot_dir
+
+
+# ============================================================
+# 中断现场判定（GOLD-022）
+# ============================================================
+#
+# 「可证明属于上一次同一 task 的中断现场」的完整证据链：
+#   1) runtime 恰好存在 1 条 `status=running` 的 attempt 记录；
+#   2) 该记录的 task_id 与 rolling queue 当前真正会执行的 task 完全一致；
+#   3) 记录带 `ATTEMPT_EVIDENCE_SCHEMA`（即由本版本在 clean 工作区上写入的现场基线）；
+#   4) 记录里的 owner PID 已不存在（能证明 owner 进程已消失）；
+#   5) 记录里的 HEAD / branch 与当前完全一致（中断期间没有任何新 commit / 分支切换）；
+#   6) 该 task 至今没有终态 result（否则现场不可能是「未完成的中断现场」）。
+# 任何一条不成立 ⇒ WORKTREE_UNKNOWN ⇒ 严格停线，绝不 snapshot、绝不清理。
+
+
+def current_attempt_baseline() -> dict[str, Any]:
+    """attempt 启动时的现场基线（中断证据的唯一合法来源）。
+
+    调用时机固定在「工作区已确认 clean」之后，
+    因此这份基线可以证明：dirty 变化发生在该 attempt 期间。
+    """
+
+    return {
+        "evidence_schema":
+            ATTEMPT_EVIDENCE_SCHEMA,
+
+        "pid":
+            os.getpid(),
+
+        "branch":
+            current_branch(),
+
+        "head":
+            head_full_sha(),
+
+        "worktree_clean":
+            True,
+
+        "baseline_at":
+            now_iso()
+    }
+
+
+def running_attempt_states() -> list[dict[str, Any]]:
+    """列出 runtime 中所有 `status=running` 的 attempt 记录。
+
+    只做只读枚举；损坏文件 / 非 running 状态一律不计入。
+    """
+
+    states: list[dict[str, Any]] = []
+
+    if not TASK_STATE_DIR.exists():
+
+        return states
+
+    for path in sorted(
+        TASK_STATE_DIR.glob(
+            "*.json"
+        )
+    ):
+
+        state = read_json(
+            path,
+            default=None
+        )
+
+        if not isinstance(state, dict):
+
+            continue
+
+        if state.get("status") != "running":
+
+            continue
+
+        states.append(
+            state
+        )
+
+    return states
+
+
+def interrupted_scene_assessment(
+    ready_task_id: str | None
+) -> tuple[str, str, dict[str, Any] | None]:
+    """判定 dirty worktree 是否**可证明**属于上一次同一 task 的中断现场。
+
+    返回 `(classification, reason, state)`；
+    `classification == WORKTREE_INTERRUPTED_TASK` 时 `state` 为那份证据记录。
+    """
+
+    states = running_attempt_states()
+
+    if not states:
+
+        return (
+            WORKTREE_UNKNOWN,
+            "no running attempt record in runtime: "
+            "dirty worktree cannot be attributed",
+            None
+        )
+
+    if len(states) > 1:
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"{len(states)} running attempt records in runtime "
+            "(expected exactly 1)",
+            None
+        )
+
+    state = states[0]
+
+    recorded_task = str(
+        state.get(
+            "task_id",
+            ""
+        )
+    ).strip()
+
+    if not recorded_task:
+
+        return (
+            WORKTREE_UNKNOWN,
+            "running attempt record has no task_id",
+            None
+        )
+
+    if ready_task_id is None:
+
+        return (
+            WORKTREE_UNKNOWN,
+
+            f"running attempt record is {recorded_task} "
+            "but rolling queue has no runnable task",
+
+            None
+        )
+
+    if recorded_task != ready_task_id:
+
+        return (
+            WORKTREE_UNKNOWN,
+
+            f"running attempt record is {recorded_task} "
+            f"but rolling queue would run {ready_task_id}",
+
+            None
+        )
+
+    if (
+        state.get("evidence_schema")
+        !=
+        ATTEMPT_EVIDENCE_SCHEMA
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"running attempt record for {recorded_task} "
+            "has no compatible evidence schema",
+            None
+        )
+
+    attempt = state.get(
+        "attempt"
+    )
+
+    if (
+        isinstance(attempt, bool)
+        or
+        not isinstance(attempt, int)
+        or
+        attempt < 1
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"running attempt record for {recorded_task} "
+            "has an invalid attempt number",
+            None
+        )
+
+    started_at = state.get(
+        "started_at"
+    )
+
+    if (
+        not isinstance(started_at, str)
+        or
+        not started_at.strip()
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"running attempt record for {recorded_task} "
+            "has no started_at timestamp",
+            None
+        )
+
+    pid = state.get(
+        "pid"
+    )
+
+    if (
+        isinstance(pid, bool)
+        or
+        not isinstance(pid, int)
+        or
+        pid <= 0
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"running attempt record for {recorded_task} "
+            "has no usable owner pid",
+            None
+        )
+
+    if pid == os.getpid():
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"running attempt record for {recorded_task} "
+            "is owned by the current process",
+            None
+        )
+
+    if is_pid_running(
+        pid
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"attempt owner pid {pid} is still running",
+            None
+        )
+
+    recorded_head = state.get(
+        "head"
+    )
+
+    if (
+        not isinstance(recorded_head, str)
+        or
+        not recorded_head.strip()
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"running attempt record for {recorded_task} "
+            "has no HEAD baseline",
+            None
+        )
+
+    current_head = head_full_sha()
+
+    if (
+        not current_head
+        or
+        recorded_head.strip().lower()
+        !=
+        current_head.strip().lower()
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+
+            "HEAD changed since attempt start "
+            f"(recorded={abbrev_sha(recorded_head)}, "
+            f"current={abbrev_sha(current_head)})",
+
+            None
+        )
+
+    recorded_branch = state.get(
+        "branch"
+    )
+
+    if (
+        not isinstance(recorded_branch, str)
+        or
+        not recorded_branch.strip()
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"running attempt record for {recorded_task} "
+            "has no branch baseline",
+            None
+        )
+
+    current_branch_name = current_branch()
+
+    if (
+        not current_branch_name
+        or
+        recorded_branch.strip()
+        !=
+        current_branch_name.strip()
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+
+            "branch changed since attempt start "
+            f"(recorded={recorded_branch}, "
+            f"current={current_branch_name or '<unknown>'})",
+
+            None
+        )
+
+    if (
+        task_result_status(
+            recorded_task
+        )
+        in
+        TERMINAL_RESULT_STATUSES
+    ):
+
+        return (
+            WORKTREE_UNKNOWN,
+            f"{recorded_task} already has a terminal result: "
+            "dirty worktree cannot be an interrupted scene",
+            None
+        )
+
+    describe = (
+        f"interrupted attempt {recorded_task}#{attempt} "
+        f"(pid={pid}, started_at={started_at}, "
+        f"head={abbrev_sha(recorded_head)}): "
+        "owner process gone, HEAD/branch unchanged, no terminal result"
+    )
+
+    return (
+        WORKTREE_INTERRUPTED_TASK,
+        describe,
+        state
+    )
+
+
+# ============================================================
+# Snapshot 可恢复性校验与安全清理（GOLD-022）
+# ============================================================
+
+
+def snapshot_relative_path(
+    path: Path
+) -> str:
+    """把 snapshot 路径转成相对仓库根的稳定可读形式。"""
+
+    try:
+
+        return str(
+            path.relative_to(
+                ROOT
+            )
+        )
+
+    except ValueError:
+
+        return str(path)
+
+
+def verify_recovery_snapshot(
+    snapshot_dir: Path,
+    require_worktree_match: bool = False
+) -> tuple[bool, str]:
+    """校验 recovery snapshot 是否完整且**可恢复**。
+
+    这是任何自动清理之前的**唯一前置条件**（fail-closed）：
+    - metadata 必须是本版本 schema，且 SHA-256 / 字节数与磁盘文件逐项一致；
+    - untracked 副本必须存在且哈希与记录一致；
+    - `require_worktree_match=True` 时还要求 patch 与**当前**工作区互为逆操作、
+      且 untracked 副本与工作区现存文件内容一致（证明快照确实记录了现场）。
+    """
+
+    if not snapshot_dir.is_dir():
+
+        return False, f"snapshot directory missing: {snapshot_dir}"
+
+    metadata = read_json(
+        snapshot_dir
+        /
+        "recovery.json",
+        default=None
+    )
+
+    if not isinstance(metadata, dict):
+
+        return False, "snapshot metadata unreadable"
+
+    if (
+        metadata.get("schema")
+        !=
+        RECOVERY_SNAPSHOT_SCHEMA
+    ):
+
+        return False, "snapshot metadata has no compatible schema"
+
+    task_id = metadata.get("task_id")
+
+    if (
+        not isinstance(task_id, str)
+        or
+        not task_id.strip()
+    ):
+
+        return False, "snapshot metadata has no task_id"
+
+    attempt = metadata.get("attempt")
+
+    if (
+        isinstance(attempt, bool)
+        or
+        not isinstance(attempt, int)
+        or
+        attempt < 0
+    ):
+
+        return False, "snapshot metadata has an invalid attempt number"
+
+    created_at = metadata.get("created_at")
+
+    if (
+        not isinstance(created_at, str)
+        or
+        not created_at.strip()
+    ):
+
+        return False, "snapshot metadata has no created_at"
+
+    tracked_files = metadata.get("tracked_files")
+
+    if (
+        not isinstance(tracked_files, list)
+        or
+        not all(
+            isinstance(item, str)
+            for item in tracked_files
+        )
+    ):
+
+        return False, "snapshot metadata has an invalid tracked_files list"
+
+    untracked_hashes = metadata.get("untracked_sha256")
+
+    if (
+        not isinstance(untracked_hashes, dict)
+        or
+        not all(
+            isinstance(key, str)
+            and
+            isinstance(value, str)
+            for key, value in untracked_hashes.items()
+        )
+    ):
+
+        return False, "snapshot metadata has an invalid untracked_sha256 map"
+
+    patch_path = (
+        snapshot_dir
+        /
+        str(
+            metadata.get(
+                "patch_file",
+                "changes.patch"
+            )
+        )
+    )
+
+    if not patch_path.is_file():
+
+        return False, f"snapshot patch missing: {patch_path.name}"
+
+    patch_size = patch_path.stat().st_size
+
+    patch_hash = sha256_file(
+        patch_path
+    )
+
+    if patch_hash is None:
+
+        return False, f"snapshot patch unreadable: {patch_path.name}"
+
+    if patch_hash != metadata.get("patch_sha256"):
+
+        return False, "snapshot patch sha256 mismatch"
+
+    if patch_size != metadata.get("patch_bytes"):
+
+        return False, "snapshot patch size mismatch"
+
+    if bool(tracked_files) != (patch_size > 0):
+
+        return False, "snapshot patch does not match recorded tracked files"
+
+    for relative, expected in sorted(
+        untracked_hashes.items()
+    ):
+
+        copied = sha256_file(
+            snapshot_dir
+            /
+            "untracked"
+            /
+            relative
+        )
+
+        if copied is None:
+
+            return False, (
+                "snapshot copy missing for untracked file: "
+                f"{relative}"
+            )
+
+        if copied != expected:
+
+            return False, (
+                "snapshot copy sha256 mismatch for untracked file: "
+                f"{relative}"
+            )
+
+    if not tracked_files and not untracked_hashes:
+
+        return False, "snapshot records no recoverable change"
+
+    if require_worktree_match:
+
+        if tracked_files:
+
+            check = git(
+                f'apply --check --reverse --binary "{patch_path}"'
+            )
+
+            if check["returncode"] != 0:
+
+                message = (
+                    check["stderr"].strip()
+                    or
+                    check["stdout"].strip()
+                )
+
+                return False, (
+                    "snapshot patch does not match the current worktree: "
+                    f"{message}"
+                )
+
+        for relative, expected in sorted(
+            untracked_hashes.items()
+        ):
+
+            workspace_hash = sha256_file(
+                ROOT
+                /
+                relative
+            )
+
+            if workspace_hash is None:
+
+                return False, (
+                    "workspace file missing for untracked snapshot: "
+                    f"{relative}"
+                )
+
+            if workspace_hash != expected:
+
+                return False, (
+                    "workspace file differs from untracked snapshot: "
+                    f"{relative}"
+                )
+
+    return True, "verified"
+
+
+def restore_recovery_snapshot(
+    snapshot_dir: Path
+) -> list[str]:
+    """把已验证的 recovery snapshot 恢复到工作区（人工 / 测试用，fail-closed）。
+
+    - 未通过 `verify_recovery_snapshot()` 一律拒绝恢复；
+    - 已存在且内容不同的人工文件**绝不覆盖**（抛错，交由人工判断）；
+    - 只写工作区，绝不写 result、绝不 commit。
+    """
+
+    verified, reason = verify_recovery_snapshot(
+        snapshot_dir
+    )
+
+    if not verified:
+
+        raise RuntimeError(
+            f"recovery snapshot 不可恢复，拒绝 restore: {reason}"
+        )
+
+    metadata = read_json(
+        snapshot_dir
+        /
+        "recovery.json",
+        default={}
+    )
+
+    if not isinstance(metadata, dict):
+
+        raise RuntimeError(
+            "recovery snapshot metadata 损坏，拒绝 restore"
+        )
+
+    restored: list[str] = []
+
+    tracked_files = metadata.get(
+        "tracked_files",
+        []
+    )
+
+    if tracked_files:
+
+        patch_path = (
+            snapshot_dir
+            /
+            str(
+                metadata.get(
+                    "patch_file",
+                    "changes.patch"
+                )
+            )
+        )
+
+        applied = git(
+            f'apply --binary "{patch_path}"'
+        )
+
+        if applied["returncode"] != 0:
+
+            message = (
+                applied["stderr"].strip()
+                or
+                applied["stdout"].strip()
+            )
+
+            raise RuntimeError(
+                "恢复 tracked 修改失败: " + message
+            )
+
+        restored.extend(
+            tracked_files
+        )
+
+    untracked_hashes = metadata.get(
+        "untracked_sha256",
+        {}
+    )
+
+    if not isinstance(untracked_hashes, dict):
+
+        raise RuntimeError(
+            "recovery snapshot untracked 记录损坏，拒绝 restore"
+        )
+
+    for relative in sorted(
+        untracked_hashes
+    ):
+
+        source = (
+            snapshot_dir
+            /
+            "untracked"
+            /
+            relative
+        )
+
+        destination = (
+            ROOT
+            /
+            relative
+        )
+
+        if destination.exists():
+
+            if (
+                sha256_file(destination)
+                !=
+                sha256_file(source)
+            ):
+
+                raise RuntimeError(
+                    f"拒绝覆盖内容不同的已存在文件: {relative}"
+                )
+
+            continue
+
+        destination.parent.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        shutil.copy2(
+            source,
+            destination
+        )
+
+        restored.append(
+            relative
+        )
+
+    return restored
+
+
+def record_recovery_event(
+    event: dict[str, Any]
+) -> dict[str, Any]:
+    """把一次恢复决策写入 runtime 审计文件（有界、原子写）。
+
+    只写 `.ai/runtime/recovery/recovery_state.json`：
+    绝不写 `.ai/results/**`，绝不 commit，绝不把恢复当成任务完成。
+    """
+
+    state = read_json(
+        RECOVERY_STATE_FILE,
+        default=None
+    )
+
+    events: list[Any] = []
+
+    if (
+        isinstance(state, dict)
+        and
+        isinstance(state.get("events"), list)
+    ):
+
+        events = [
+            item
+            for item in state["events"]
+            if isinstance(item, dict)
+        ]
+
+    record = {
+        "recorded_at": now_iso(),
+        **event
+    }
+
+    events.append(
+        record
+    )
+
+    atomic_write_json(
+
+        RECOVERY_STATE_FILE,
+
+        {
+            "schema":
+                RECOVERY_STATE_SCHEMA,
+
+            "updated_at":
+                now_iso(),
+
+            "events":
+                events[-RECOVERY_EVENT_HISTORY_LIMIT:]
+        }
+    )
+
+    return record
+
+
+def should_log_worktree_block() -> bool:
+    """人工介入告警限流（默认 IDLE_LOG_SECONDS），检测频率不变。"""
+
+    global _last_worktree_block_log_at
+
+    now = time.monotonic()
+
+    if (
+        _last_worktree_block_log_at
+        is not None
+        and
+        (now - _last_worktree_block_log_at)
+        <
+        IDLE_LOG_SECONDS
+    ):
+
+        return False
+
+    _last_worktree_block_log_at = now
+
+    return True
+
+
+def cleanup_interrupted_scene(
+    task_id: str,
+    state: dict[str, Any],
+    dirty_lines: list[str],
+    assessment: str
+) -> dict[str, Any]:
+    """保存 → 校验 → 清理「可证明属于本 task 的中断现场」。
+
+    顺序固定：先 snapshot，再校验可恢复，**只有校验通过**才清理并允许重试同一 task。
+    校验失败 / 清理失败都停线，绝不在证据不足时动工作区。
+    """
+
+    attempt = state.get(
+        "attempt"
+    )
+
+    tracked_files, untracked_files = split_dirty_paths(
+        dirty_lines
+    )
+
+    snapshot_dir: Path
+
+    try:
+
+        snapshot_dir = save_recovery_snapshot(
+
+            task_id,
+
+            attempt,
+
+            INTERRUPTED_FAILURE_CLASS,
+
+            INTERRUPTED_FAILURE_CODE
+        )
+
+    except (
+        OSError,
+        RuntimeError
+    ) as exc:
+
+        _logger.error(
+            "中断现场 snapshot 写入失败（%s）：严格停线，"
+            "绝不清理工作区，请人工处理现场。",
+            exc
+        )
+
+        record_recovery_event(
+
+            {
+                "kind":
+                    RECOVERY_EVENT_WORKTREE,
+
+                "decision":
+                    "auto_recover",
+
+                "outcome":
+                    RECOVERY_OUTCOME_SNAPSHOT_FAILED,
+
+                "task_id":
+                    task_id,
+
+                "attempt":
+                    attempt,
+
+                "assessment":
+                    assessment,
+
+                "dirty_files":
+                    list(dirty_lines),
+
+                "reason":
+                    str(exc),
+
+                "snapshot":
+                    None,
+
+                "snapshot_verified":
+                    False,
+
+                "cleaned":
+                    False
+            }
+        )
+
+        return {
+
+            "status":
+                RECOVERY_OUTCOME_SNAPSHOT_FAILED,
+
+            "action":
+                ITERATION_STOP,
+
+            "outcome":
+                RECOVERY_OUTCOME_SNAPSHOT_FAILED,
+
+            "reason":
+                str(exc),
+
+            "snapshot":
+                None
+        }
+
+    snapshot_path = snapshot_relative_path(
+        snapshot_dir
+    )
+
+    verified, verification = verify_recovery_snapshot(
+
+        snapshot_dir,
+
+        require_worktree_match=True
+    )
+
+    _logger.warning(
+        "中断现场 snapshot: dir=%s verified=%s detail=%s",
+        snapshot_path,
+        verified,
+        verification
+    )
+
+    event: dict[str, Any] = {
+
+        "kind":
+            RECOVERY_EVENT_WORKTREE,
+
+        "decision":
+            "auto_recover",
+
+        "task_id":
+            task_id,
+
+        "attempt":
+            attempt,
+
+        "assessment":
+            assessment,
+
+        "dirty_files":
+            list(dirty_lines),
+
+        "tracked_files":
+            tracked_files,
+
+        "untracked_files":
+            untracked_files,
+
+        "snapshot":
+            snapshot_path,
+
+        "snapshot_verified":
+            verified,
+
+        "verification":
+            verification,
+
+        "cleaned":
+            False,
+
+        "failure_class":
+            INTERRUPTED_FAILURE_CLASS,
+
+        "failure_code":
+            INTERRUPTED_FAILURE_CODE,
+
+        "evidence": {
+            key: state.get(key)
+            for key in (
+                "pid",
+                "branch",
+                "head",
+                "started_at",
+                "evidence_schema"
+            )
+        }
+    }
+
+    if not verified:
+
+        record_recovery_event(
+
+            {
+                **event,
+
+                "outcome":
+                    RECOVERY_OUTCOME_SNAPSHOT_UNVERIFIED
+            }
+        )
+
+        _logger.error(
+            "中断现场 snapshot 校验失败（%s）："
+            "严格停线，绝不清理工作区；snapshot=%s，请人工判断后再启动。",
+            verification,
+            snapshot_path
+        )
+
+        return {
+
+            "status":
+                RECOVERY_OUTCOME_SNAPSHOT_UNVERIFIED,
+
+            "action":
+                ITERATION_STOP,
+
+            "outcome":
+                RECOVERY_OUTCOME_SNAPSHOT_UNVERIFIED,
+
+            "reason":
+                verification,
+
+            "snapshot":
+                snapshot_path
+        }
+
+    try:
+
+        reset_task_changes()
+
+    except RuntimeError as exc:
+
+        record_recovery_event(
+
+            {
+                **event,
+
+                "outcome":
+                    RECOVERY_OUTCOME_CLEANUP_FAILED,
+
+                "reason":
+                    str(exc)
+            }
+        )
+
+        _logger.error(
+            "中断现场清理失败（%s）：停线；snapshot 已保留在 %s。",
+            exc,
+            snapshot_path
+        )
+
+        return {
+
+            "status":
+                RECOVERY_OUTCOME_CLEANUP_FAILED,
+
+            "action":
+                ITERATION_STOP,
+
+            "outcome":
+                RECOVERY_OUTCOME_CLEANUP_FAILED,
+
+            "reason":
+                str(exc),
+
+            "snapshot":
+                snapshot_path
+        }
+
+    record_recovery_event(
+
+        {
+            **event,
+
+            "outcome":
+                RECOVERY_OUTCOME_RECOVERED,
+
+            "cleaned":
+                True,
+
+            "cleaned_at":
+                now_iso()
+        }
+    )
+
+    # 证据一次性消费：中断现场已被 snapshot 记录并清理，
+    # 必须让这份 `running` 证据失效，否则之后**同一条**证据会被
+    # 用来清理另一次（可能来自人工）的 dirty 现场。
+    write_task_state(
+
+        task_id,
+
+        "recovered",
+
+        attempt=
+            attempt,
+
+        recovery_snapshot=
+            snapshot_path,
+
+        failure_class=
+            INTERRUPTED_FAILURE_CLASS,
+
+        failure_code=
+            INTERRUPTED_FAILURE_CODE,
+
+        recovered_at=
+            now_iso()
+    )
+
+    _logger.warning(
+        "中断任务现场已安全恢复: task=%s attempt=%s snapshot=%s "
+        "verified=%s files=%s；同一 task 将重新从 attempt 1 开始"
+        "（本轮不算完成任务，也不写 result）。",
+        task_id,
+        attempt,
+        snapshot_path,
+        verified,
+        len(tracked_files) + len(untracked_files)
+    )
+
+    return {
+
+        "status":
+            RECOVERY_OUTCOME_RECOVERED,
+
+        "action":
+            ITERATION_CONTINUE,
+
+        "outcome":
+            RECOVERY_OUTCOME_RECOVERED,
+
+        "reason":
+            assessment,
+
+        "snapshot":
+            snapshot_path
+    }
+
+
+def recover_interrupted_worktree() -> dict[str, Any]:
+    """单轮恢复状态机入口（Git sync 之前执行）。
+
+    决策完全由确定性证据决定：
+    - 干净 ⇒ 无需恢复；
+    - 可证明属于上一次同一 task 的中断现场 ⇒ snapshot + 校验 + 清理 + 重试同一 task；
+    - 其它 dirty ⇒ 严格停线（绝不自动 reset / clean），并留下 runtime 审计。
+
+    这里**绝不调用 Cline、绝不询问 LLM、绝不规划下一任务**。
+    """
+
+    if not git_is_dirty():
+
+        return {
+
+            "status":
+                RECOVERY_OUTCOME_CLEAN,
+
+            "action":
+                ITERATION_CONTINUE,
+
+            "outcome":
+                RECOVERY_OUTCOME_CLEAN,
+
+            "reason":
+                "worktree_clean"
+        }
+
+    dirty_lines = get_git_status_lines()
+
+    ready_task_file, wait_reason = find_next_task_with_reason()
+
+    ready_task_id = (
+        ready_task_file.stem
+        if ready_task_file is not None
+        else None
+    )
+
+    (
+        assessment,
+        reason,
+        state
+    ) = interrupted_scene_assessment(
+        ready_task_id
+    )
+
+    if (
+        assessment
+        ==
+        WORKTREE_INTERRUPTED_TASK
+        and
+        state is not None
+    ):
+
+        _logger.warning(
+            "检测到可证明的中断任务现场：%s",
+            reason
+        )
+
+        return cleanup_interrupted_scene(
+
+            ready_task_id
+            or
+            "",
+
+            state,
+
+            dirty_lines,
+
+            reason
+        )
+
+    if should_log_worktree_block():
+
+        _logger.error(
+            "工作区存在无法证明属于「上一次同一 task 中断现场」的未提交修改："
+            "严格停线，绝不自动 reset/clean，也绝不写入任何 result。reason=%s",
+            reason
+        )
+
+        for line in dirty_lines:
+
+            _logger.error(
+                "  %s",
+                line
+            )
+
+        _logger.error(
+            "等待人工判断：若确认是上一次中断任务的现场，"
+            "Orchestrator 会在证据齐全时自动 snapshot 恢复；"
+            "其它情况请人工处理（手工提交 / 手工备份后再清理）。"
+        )
+
+        record_recovery_event(
+
+            {
+                "kind":
+                    RECOVERY_EVENT_BLOCKED,
+
+                "decision":
+                    "manual_intervention",
+
+                "outcome":
+                    RECOVERY_OUTCOME_MANUAL,
+
+                "task_id":
+                    ready_task_id,
+
+                "queue_wait_reason":
+                    wait_reason,
+
+                "reason":
+                    reason,
+
+                "dirty_files":
+                    list(dirty_lines),
+
+                "snapshot":
+                    None,
+
+                "snapshot_verified":
+                    False,
+
+                "cleaned":
+                    False
+            }
+        )
+
+    return {
+
+        "status":
+            RECOVERY_OUTCOME_MANUAL,
+
+        "action":
+            ITERATION_STOP,
+
+        "outcome":
+            RECOVERY_OUTCOME_MANUAL,
+
+        "reason":
+            reason
+    }
 
 
 # ============================================================
@@ -3573,6 +5093,63 @@ def process_task(
 
         if git_is_dirty():
 
+            # 只有能证明「属于本 task 中断现场」时才允许清理；
+            # 证据不足一律 fail-closed 停线，绝不 reset/clean 未知修改。
+            (
+                dirty_assessment,
+                dirty_reason,
+                dirty_state
+            ) = interrupted_scene_assessment(
+                task_id
+            )
+
+            if (
+                dirty_assessment
+                !=
+                WORKTREE_INTERRUPTED_TASK
+                or
+                dirty_state is None
+            ):
+
+                _logger.error(
+                    "Task %s 达到最大尝试次数，但工作区存在无法证明"
+                    "属于本任务中断现场的修改（%s）："
+                    "严格停线，绝不自动 reset/clean，也不写 result。",
+                    task_id,
+                    dirty_reason
+                )
+
+                record_recovery_event(
+
+                    {
+                        "kind":
+                            RECOVERY_EVENT_BLOCKED,
+
+                        "decision":
+                            "manual_intervention",
+
+                        "outcome":
+                            RECOVERY_OUTCOME_MANUAL,
+
+                        "context":
+                            "max_attempts_reached",
+
+                        "task_id":
+                            task_id,
+
+                        "reason":
+                            dirty_reason,
+
+                        "dirty_files":
+                            get_git_status_lines(),
+
+                        "cleaned":
+                            False
+                    }
+                )
+
+                return "deferred"
+
             reset_task_changes()
 
         write_final_result(
@@ -3679,7 +5256,11 @@ def process_task(
                 max_attempts,
 
             started_at=
-                started_at
+                started_at,
+
+            # 现场基线证据（GOLD-022）：只有能证明「dirty 变化发生在
+            # 这次 attempt 期间」时才允许中断后自动 snapshot + 清理。
+            **current_attempt_baseline()
         )
 
         _logger.info(
@@ -4231,9 +5812,82 @@ def process_task(
 # 单实例锁
 # ============================================================
 
+def running_process_image(
+    pid: int
+) -> str | None:
+    """返回 PID 对应进程的映像名（仅 Windows 可查）。
+
+    - 探测成功且命中 ⇒ 返回映像名；
+    - 探测成功但没有该 PID ⇒ 返回 None（**确实不存在**）；
+    - 探测本身失败（tasklist 缺失 / 超时 / 非 0 退出）⇒ 抛 `OSError`，
+      调用方必须 fail-closed，绝不把它当成「进程不存在」。
+    """
+
+    if os.name != "nt":
+
+        return None
+
+    try:
+
+        result = subprocess.run(
+
+            [
+                "tasklist",
+
+                "/FI",
+
+                f"PID eq {pid}",
+
+                "/NH"
+            ],
+
+            capture_output=True,
+
+            text=True,
+
+            encoding="utf-8",
+
+            errors="replace",
+
+            timeout=30
+        )
+
+    except (
+        OSError,
+        subprocess.SubprocessError
+    ) as exc:
+
+        raise OSError(f"tasklist 探测失败: {exc}") from exc
+
+    if result.returncode != 0:
+
+        raise OSError(
+            f"tasklist 返回 {result.returncode}: {result.stderr.strip()}"
+        )
+
+    for line in result.stdout.splitlines():
+
+        parts = line.split()
+
+        # 形态：`python.exe  12345  Console  1  123,456 K`
+        # 只有 PID 列**精确相等**才算命中（避免子串误判）。
+        if (
+            len(parts) >= 2
+            and
+            parts[1].isdigit()
+            and
+            int(parts[1]) == pid
+        ):
+
+            return parts[0]
+
+    return None
+
+
 def is_pid_running(
     pid
-):
+) -> bool:
+    """判断 PID 是否仍在运行（fail-closed：无法判断时按「存活」处理）。"""
 
     if (
         not pid
@@ -4257,37 +5911,29 @@ def is_pid_running(
 
     if os.name == "nt":
 
-        result = subprocess.run(
+        try:
 
-            [
-                "tasklist",
+            if (
+                running_process_image(
+                    pid
+                )
+                is not None
+            ):
 
-                "/FI",
+                return True
 
-                f"PID eq {pid}",
+        except OSError as exc:
 
-                "/NH"
-            ],
+            # 无法证明 owner 不存在 ⇒ 必须按存活处理（绝不放行清理）。
+            _logger.warning(
+                "无法确认 PID %s 是否存活（%s）：按存活处理。",
+                pid,
+                exc
+            )
 
-            capture_output=True,
+            return True
 
-            text=True,
-
-            encoding="utf-8",
-
-            errors="replace"
-        )
-
-        output = (
-            result.stdout
-            .lower()
-        )
-
-        return (
-            str(pid)
-            in
-            output
-        )
+        return False
 
     # ========================================================
     # Linux / macOS
@@ -4300,11 +5946,219 @@ def is_pid_running(
             0
         )
 
-        return True
+    except ProcessLookupError:
+
+        return False
 
     except OSError:
 
-        return False
+        # 权限不足 / 其它异常同样无法证明进程不存在 ⇒ 按存活处理。
+        return True
+
+    return True
+
+
+def read_lock_evidence() -> tuple[dict[str, Any] | None, str]:
+    """读取 lock 文件并校验**来源**（fail-closed）。
+
+    返回 `(payload, reason)`：
+
+    - `payload` 非 None ⇒ 来源可证明属于本项目（project 一致 + pid 可用 + started_at 齐全）；
+    - `payload` 为 None ⇒ 来源不明（损坏 / 缺字段 / 非本项目 / schema 不认识），
+      调用方必须停线，**绝不自动删除**。
+    """
+
+    if not LOCK_FILE.exists():
+
+        return None, "lock file missing"
+
+    payload = read_json(
+        LOCK_FILE,
+        default=None
+    )
+
+    if not isinstance(payload, dict):
+
+        return None, "lock payload is not a readable JSON object"
+
+    schema = payload.get("schema")
+
+    # 旧版 lock 没有 schema 字段：其余证据齐全时仍可判定；
+    # 一旦出现**不认识**的 schema，来源不明，必须停线。
+    if (
+        schema is not None
+        and
+        schema != LOCK_SCHEMA
+    ):
+
+        return None, f"lock schema unknown: {schema!r}"
+
+    project = payload.get("project")
+
+    if (
+        not isinstance(project, str)
+        or
+        not project.strip()
+    ):
+
+        return None, "lock has no project owner"
+
+    try:
+
+        owned = (
+            Path(project).resolve()
+            ==
+            ROOT.resolve()
+        )
+
+    except OSError:
+
+        return None, f"lock project path is unusable: {project}"
+
+    if not owned:
+
+        return None, f"lock belongs to another project: {project}"
+
+    started_at = payload.get("started_at")
+
+    if (
+        not isinstance(started_at, str)
+        or
+        not started_at.strip()
+    ):
+
+        return None, "lock has no started_at timestamp"
+
+    raw_pid = payload.get("pid")
+
+    if isinstance(raw_pid, bool):
+
+        return None, f"lock has no usable pid: {raw_pid!r}"
+
+    try:
+
+        pid = int(raw_pid)
+
+    except (
+        TypeError,
+        ValueError
+    ):
+
+        return None, f"lock has no usable pid: {raw_pid!r}"
+
+    if pid <= 0:
+
+        return None, f"lock has no usable pid: {raw_pid!r}"
+
+    evidence = dict(payload)
+
+    evidence["pid"] = pid
+
+    return evidence, "lock provenance verified"
+
+
+def classify_lock_state() -> tuple[str, str, dict[str, Any] | None]:
+    """把 lock 分类成 active / stale / unknown（fail-closed）。
+
+    - `active`：owner PID 仍在运行 ⇒ 停线，绝不删除；
+    - `unknown`：来源不明 ⇒ 停线，绝不删除，要求人工确认；
+    - `stale`：来源可证明且 owner PID 已不存在 ⇒ 才允许归档 + 清理。
+    """
+
+    payload, reason = read_lock_evidence()
+
+    if payload is None:
+
+        return LOCK_UNKNOWN, reason, None
+
+    pid = payload["pid"]
+
+    if pid == os.getpid():
+
+        return (
+            LOCK_ACTIVE,
+            f"lock is held by the current process (pid={pid})",
+            payload
+        )
+
+    if is_pid_running(pid):
+
+        try:
+
+            image = (
+                running_process_image(pid)
+                or
+                "unknown process"
+            )
+
+        except OSError as exc:
+
+            image = f"unknown process ({exc})"
+
+        return (
+            LOCK_ACTIVE,
+            f"lock owner pid={pid} is still running ({image})",
+            payload
+        )
+
+    return (
+        LOCK_STALE,
+        f"lock owner pid={pid} is not running "
+        "(provably stale lock, provenance verified)",
+        payload
+    )
+
+
+def archive_stale_lock(
+    payload: dict[str, Any]
+) -> str | None:
+    """把陈旧 lock 原文归档到 runtime（审计留痕，绝不进 Git）。
+
+    归档失败只告警，不阻止清理——「可清理」的证据来自 PID 判活，
+    与归档成败无关。
+    """
+
+    try:
+
+        RECOVERY_LOCK_ARCHIVE_DIR.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        stamp = (
+            datetime
+            .now()
+            .astimezone()
+            .strftime("%Y%m%dT%H%M%S%z")
+        )
+
+        destination = (
+            RECOVERY_LOCK_ARCHIVE_DIR
+            /
+            f"orchestrator.lock.stale-{stamp}.json"
+        )
+
+        atomic_write_json(
+            destination,
+            payload
+        )
+
+    except (
+        OSError,
+        TypeError,
+        ValueError
+    ) as exc:
+
+        _logger.error(
+            "陈旧 lock 归档失败（仍继续清理，审计留痕缺失）: %s",
+            exc
+        )
+
+        return None
+
+    return snapshot_relative_path(
+        destination
+    )
 
 
 def acquire_lock():
@@ -4319,59 +6173,75 @@ def acquire_lock():
 
     if LOCK_FILE.exists():
 
-        existing = (
-            read_json(
-                LOCK_FILE,
-                default={}
-            )
-            or
-            {}
-        )
-
-        pid = existing.get(
-            "pid"
-        )
-
-        try:
-
-            pid = int(
-                pid
-            )
-
-        except (
-            TypeError,
-            ValueError
-        ):
-
-            pid = None
+        state, reason, payload = classify_lock_state()
 
         # ----------------------------------------------------
-        # 另一个 Orchestrator 正在运行
+        # 来源不明：停线（绝不猜测、绝不自动删除）
         # ----------------------------------------------------
 
-        if (
-            pid
-            and
-            is_pid_running(
-                pid
+        if state == LOCK_UNKNOWN:
+
+            message = (
+
+                "发现来源不明的 lock 文件，严格停线，绝不自动删除："
+
+                f"{LOCK_FILE}（{reason}）。"
+
+                "请人工确认没有其它 Orchestrator 正在运行后，"
+
+                "手动删除该 lock 并重启 start_agent.bat。"
             )
-        ):
+
+            _logger.error(
+                "%s",
+                message
+            )
+
+            record_recovery_event(
+
+                {
+                    "kind":
+                        RECOVERY_EVENT_LOCK,
+
+                    "decision":
+                        "manual_intervention",
+
+                    "outcome":
+                        RECOVERY_OUTCOME_MANUAL,
+
+                    "lock":
+                        str(LOCK_FILE),
+
+                    "reason":
+                        reason,
+
+                    "cleaned":
+                        False
+                }
+            )
 
             raise RuntimeError(
-
-                "已有 Orchestrator "
-                "正在运行，"
-
-                f"PID={pid}。"
+                message
             )
 
         # ----------------------------------------------------
-        # 上一次异常结束留下的 lock
+        # 另一个 Orchestrator 正在运行：停线
         # ----------------------------------------------------
 
-        _logger.warning(
-            "发现陈旧 lock 文件，"
-            "自动清理。"
+        if state == LOCK_ACTIVE:
+
+            raise RuntimeError(
+                f"已有 Orchestrator 正在运行（{reason}）。"
+            )
+
+        # ----------------------------------------------------
+        # 陈旧 lock：能证明无活动 owner ⇒ 归档留痕后清理
+        # ----------------------------------------------------
+
+        archived = archive_stale_lock(
+            payload
+            or
+            {}
         )
 
         try:
@@ -4385,6 +6255,46 @@ def acquire_lock():
                 "无法清理陈旧 "
                 f"lock 文件: {exc}"
             ) from exc
+
+        record_recovery_event(
+
+            {
+                "kind":
+                    RECOVERY_EVENT_LOCK,
+
+                "decision":
+                    "auto_recover",
+
+                "outcome":
+                    RECOVERY_OUTCOME_RECOVERED,
+
+                "lock":
+                    str(LOCK_FILE),
+
+                "reason":
+                    reason,
+
+                "archive":
+                    archived,
+
+                "evidence":
+                    payload,
+
+                "cleaned":
+                    True,
+
+                "cleaned_at":
+                    now_iso()
+            }
+        )
+
+        _logger.warning(
+            "陈旧 lock 已清理（已证明 owner 进程不存在）：%s；归档=%s",
+            reason,
+            archived
+            or
+            "未归档"
+        )
 
     # ========================================================
     # 创建 Lock
@@ -4406,6 +6316,9 @@ def acquire_lock():
         data = json.dumps(
 
             {
+                "schema":
+                    LOCK_SCHEMA,
+
                 "pid":
                     os.getpid(),
 
@@ -4506,13 +6419,40 @@ def run_iteration(
 ):
     """执行一轮 Orchestrator 循环，返回本轮动作。
 
-    顺序与旧 main loop 完全一致，并显式固化 push recovery 契约：
+    顺序：
+    0) 异常中断现场恢复（GOLD-022）：dirty worktree 只有在能被证明是
+       「上一次同一 task 的中断现场」时才 snapshot + 校验 + 清理；
+       否则严格停线；
     1) 先 Git sync（pull --rebase + retry push pending commits）；
     2) 同步失败 => fail-closed：本轮不执行任何任务
        （completed locally + push pending 时绝不重跑 Cline，
         本地 commit/result 一律保留）；
     3) 只有 remote synced 之后，rolling queue 才允许检查/执行下一个 task。
     """
+
+    # ========================================================
+    # 异常中断现场恢复（GOLD-022）
+    # ========================================================
+    #
+    # 必须在 Git sync 之前判定 dirty worktree 的来源，
+    # 否则会永久卡在「dirty ⇒ 不同步 ⇒ 不恢复」的死循环里。
+    # 该判定是纯确定性代码：绝不调用 Cline，也绝不让 LLM 决定丢弃现场。
+
+    recovery = recover_interrupted_worktree()
+
+    if recovery["action"] == ITERATION_STOP:
+
+        return {
+
+            "action":
+                ITERATION_SLEEP,
+
+            "outcome":
+                recovery["outcome"],
+
+            "last_idle_log_at":
+                last_idle_log_at
+        }
 
     # ========================================================
     # Git Sync

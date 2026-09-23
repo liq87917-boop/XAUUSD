@@ -741,6 +741,9 @@ class FakeGit:
         self.push_queue: list[dict[str, object]] = []
         self.ahead_queue: list[int | None] = []
         self.status_stdout = ""
+        # GOLD-022：attempt 现场基线需要 HEAD / branch 只读探测。
+        self.branch = "cline-agent"
+        self.head = "a" * 40
 
     def __call__(self, command: str, timeout: int = 120) -> dict[str, object]:
         del timeout
@@ -750,6 +753,22 @@ class FakeGit:
             return {
                 "returncode": 0,
                 "stdout": self.status_stdout,
+                "stderr": "",
+                "timed_out": False,
+            }
+
+        if command.startswith("branch --show-current"):
+            return {
+                "returncode": 0,
+                "stdout": f"{self.branch}\n",
+                "stderr": "",
+                "timed_out": False,
+            }
+
+        if command.startswith("rev-parse HEAD"):
+            return {
+                "returncode": 0,
+                "stdout": f"{self.head}\n",
                 "stderr": "",
                 "timed_out": False,
             }

@@ -3802,3 +3802,73 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
 - 建议下一步：真实语料继续按 Evidence 九步路径推进（授权 → inbox → review → plan → 显式落库 →
   receipt → 决策包 → L3 Gate），Phase 切换仍需人工 L3。
 
+## 第八十五轮（2026-09-23）：GOLD-022 —— 异常中断任务的安全现场恢复状态机
+
+### 1. 背景（GOLD-018 重启后遗留 dirty worktree 的真实事故）
+
+- 进程被中断 / 重启后，工作区遗留一批**没有进入 Git** 的修改，现场证据只存在于工作区本身。
+- 旧实现的两个问题：① `run_iteration()` 第一步 `sync_repository()` 一遇 dirty 就 fail-closed
+  （outcome `deferred`）⇒ rolling queue 永久卡住，只能人工处理；② `process_task()` 中两处
+  `if git_is_dirty(): reset_task_changes()` 会无条件 `git reset --hard HEAD` + `git clean -fd`
+  ⇒ 既可能抹掉人工修改，也会把唯一的现场证据一并删除。
+- 现实痕迹（仓库内可见）：`.ai/runtime/recovery/GOLD-018-attempt-0-20260923T110004+0800/`
+  是**人工**抢救出来的现场；旧代码里没有任何可复现的状态机来做这件事。
+
+### 2. 交付内容
+
+- `orchestrator/ai_orchestrator.py`（只加不减，业务与队列语义不变）：
+  - 新增恢复状态机常量与稳定词表：`ATTEMPT_EVIDENCE_SCHEMA` / `RECOVERY_SNAPSHOT_SCHEMA` /
+    `RECOVERY_STATE_SCHEMA` / `LOCK_SCHEMA` / `WORKTREE_*` / `RECOVERY_OUTCOME_*` /
+    `RECOVERY_EVENT_*` / `LOCK_ACTIVE|STALE|UNKNOWN`；
+  - `current_attempt_baseline()`：attempt 开始时（工作区已确认 clean）写入现场基线
+    `evidence_schema / pid / branch / head / worktree_clean / baseline_at`；
+  - `interrupted_scene_assessment()`：6 条证据链的确定性判定——runtime **恰好 1 条** `running` 记录、
+    记录 task == rolling queue 当前真正会执行的 task、带本版本 `evidence_schema`、
+    owner PID 已不存在、HEAD/branch 与基线一致、该 task 无终态 result；缺一即 `WORKTREE_UNKNOWN`；
+  - `recover_interrupted_worktree()`：单轮入口，固定跑在 Git sync 之前；干净 ⇒ 继续；
+    可证明的中断现场 ⇒ snapshot → 校验 → 清理 → 重试**同一** task；其它 dirty ⇒ 停线
+    （限流日志 + runtime 审计），绝不 reset / clean；
+  - `save_recovery_snapshot()`：metadata 增补 `schema` / `tracked_files` / `untracked_sha256` /
+    `patch_bytes` / `patch_sha256` / `head` / `branch` / `pid`（原字段全部保留，向后兼容）；
+  - `verify_recovery_snapshot()` / `restore_recovery_snapshot()`：可恢复性校验（patch 哈希与字节数、
+    untracked 副本哈希、patch 能被**反向应用**到当前工作区、副本与工作区内容一致）与 fail-closed 还原
+    （拒绝覆盖内容不同的人工文件、拒绝恢复未通过校验的快照）；
+  - `record_recovery_event()`：`.ai/runtime/recovery/recovery_state.json`（有界 20 条、原子写）；
+  - `cleanup_interrupted_scene()`：snapshot 写入失败 / 校验失败 / 清理失败一律只停线并保留现场；
+    成功后把 runtime 证据状态改写为 `recovered`（**证据一次性消费**，防止同一条证据之后被复用于
+    清理另一次可能来自人工的 dirty 现场）；
+  - `process_task()`：达到最大尝试次数时的清理不再是无条件动作——只有同一 task 的中断证据成立才允许
+    清理，否则 `deferred` + 审计事件，历史 result 绝不改写；
+  - lock：新增 `read_lock_evidence()` / `classify_lock_state()` / `archive_stale_lock()` /
+    `running_process_image()`；`acquire_lock()` 改为三态 **fail-closed**（`active` / `unknown` 停线且
+    **绝不删除**；`stale` 才归档留痕后清理）；新建 lock 带 `schema`；`is_pid_running()` 改为 PID 列
+    **精确匹配**，且判活探测失败（tasklist 不可用 / 超时 / 非 0 退出）一律按「存活」处理。
+- `tests/unit/test_ai_orchestrator_recovery_state_machine.py`（**新增 51 项**，全部在 `tmp_path` 内运行，
+  对真实工作区零影响）：crash/restart 恢复全链路（快照内容、审计事件、**绝不写 result**）、
+  证据一次性消费、未知 dirty worktree 绝不清理、证据链逐项缺失（多记录 / 异 task / PID 存活 /
+  HEAD 漂移 / 分支漂移 / 缺 schema / 缺基线段 / 终态 result / 无可执行 task）、snapshot 写入失败、
+  校验失败、清理失败、patch 被篡改、untracked 副本缺失 / 被改、`require_worktree_match`、空快照、
+  restore 拒绝不可恢复快照；lock 的 stale 归档清理、旧版无 schema lock、active / 本进程 lock、
+  9 类来源不明 lock（含判活探测失败、PID 精确匹配）、release 不删外来 lock；
+  `run_iteration` 端到端（恢复后重跑**同一** task 并成功收口 / 未知 dirty 停线且不调用 Cline）；
+  最大尝试次数分支（有证据才清理 / 无证据 `deferred`）；
+  以及**真实 git** 临时仓库 round trip（snapshot → verify（反向 apply + 逐字节）→ reset/clean →
+  restore 1:1 还原现场）。
+- `tests/unit/test_ai_orchestrator_queue.py` / `tests/unit/test_ai_orchestrator_external_failures.py`：
+  仅为新探测命令（`branch --show-current` / `rev-parse HEAD` / `status --porcelain`）扩展 fake git，
+  并新增对 snapshot 可恢复性证据的断言（原有断言一条未删）。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.4「异常中断任务的安全现场恢复状态机（GOLD-022）」。
+
+### 3. 范围守规
+
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`src/**`、`database/**`；
+- 未改业务 Phase、数据资格 Gate、`LIVE_TRADING`；未新增任何依赖；
+- Cline 未执行任何 git 写操作；清理 / 恢复行为的测试全部发生在 `tmp_path` 的 fake git 或临时仓库内；
+- 恢复判定是纯确定性代码，**不调用 Cline、不询问 LLM**，也不规划下一任务。
+
+### 4. 遗留 / 下一步
+
+- 无法证明来源的 dirty worktree（人工修改、多重证据、缺基线）仍然**必须人工处理**（设计如此）；
+- snapshot 记录 tracked patch + untracked 内容：恢复不重建原来的 staged 状态（已在 §2.4 注明）；
+- 建议下一步：按队列继续 GOLD-023（GPT planner / executor 边界契约）。
+
