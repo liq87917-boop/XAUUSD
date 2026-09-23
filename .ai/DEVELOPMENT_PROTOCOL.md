@@ -458,4 +458,18 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
 - **仓库侧职责**：Orchestrator 只负责产生确定性的“队列低水位 / Planner refill required”
   事实与运行时提示；真正的 follow-on task 内容仍必须由 GPT 根据 task/result/commit/diff/tests
   做 Review 后规划。
+- **只读事实包（GOLD-034 起）**：`python -m orchestrator.planner_refill_request`
+  输出单一确定性 JSON（`gold-ai/planner-refill-request/v1`），**复用**
+  `orchestrator.planner_snapshot` 的只读事实，供 GPT 判断“是否缺后续任务、缺几个”：
+  - 关键字段：`queue_head` / `follow_on_count` / `lookahead_target`（默认 3）/
+    `deficit` / `refill_required` / `hard_gate_tail_allowed` / `latest_completed` /
+    `completed_but_unreviewed` / `blockers` / `human_gates` / `safety_invariants` /
+    `reason_codes`（稳定词表）/ `facts_digest`（wall-clock 不参与）；
+  - `refill_required` 只是 `deficit > 0` 的计数事实，**不是**任务内容、**不是** Phase 决定；
+    `hard_gate_tail_allowed=true` 表示只剩 human-only hard gate，GPT 可停在 gated tail；
+  - 退出码：`0` 足量无漂移 / `2` 需要 GPT 规划或检出漂移 / `3` PROJECT_STATE 不可读 /
+    `4` `--output` 目标被 fail-closed 拒绝；
+  - `--output` 只允许写 `<root>/.ai/runtime/**` 或系统临时目录，**绝不**写
+    `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`；
+  - 本工具**没有任何**生成任务、补队列、改状态或跨 Gate 的能力（Executor 权限不变）。
 

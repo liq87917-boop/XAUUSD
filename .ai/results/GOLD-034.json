@@ -1,0 +1,72 @@
+{
+  "task_id": "GOLD-034",
+  "title": "建立 GPT Planner 队列补给请求事实包",
+  "status": "completed",
+  "finished_at": "2026-09-23T19:39:44+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    "?? orchestrator/planner_refill_request.py",
+    "?? tests/integration/test_planner_refill_request_regression.py",
+    "?? tests/unit/test_ai_orchestrator_planner_refill_request.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md |  14 +++++++\n PROGRESS_LOG.md             | 100 ++++++++++++++++++++++++++++++++++++++++++++\n 2 files changed, 114 insertions(+)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T19:17:34+08:00",
+      "finished_at": "2026-09-23T19:39:44+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 117,
+      "duration_ms": 948455,
+      "usage": {
+        "inputTokens": 20455005,
+        "outputTokens": 126617,
+        "cacheReadTokens": 20304000,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.15953294999999998
+      },
+      "cline_final_text": "Submission recorded (verified): ## 完成内容（GOLD-034：建立 GPT Planner 队列补给请求事实包）\n\n**新增只读 builder/CLI：`orchestrator/planner_refill_request.py`（979 行）**\n- 复用 `orchestrator.planner_snapshot` 的只读事实（queue/pointer/gates/results/tasks）派生，**不复制第二套** readiness/依赖/终态/漂移判断；支持注入已构建 snapshot。\n- 输出 29 个顶层字段（版本化 `gold-ai/planner-refill-request/v1`，冻结在测试中）：`queue_head`、`queue_head_runnable`、`follow_on_count`、`lookahead_target`(默认 3，`planner_lookahead_size`/显式参数可覆盖，非法值 fail-safe 回落 3)、`deficit`、`refill_required`、`hard_gate_tail_allowed`、`latest_completed`、`completed_but_unreviewed`、`state_result_drift`、`blockers`、`human_gates`、`safety_invariants`、`phase`、`planner_authority`、14 个稳定 `reason_codes`、`snapshot_ref`、`issues`、`summary`、`facts_digest`、`determinism`。\n- 边界：`refill_required == (deficit > 0)` 只是计数事实，不含任何后续任务内容/标题/Phase 决定/Review 结论（`FORBIDDEN_REQUEST_KEYS` + 源码/API 守卫）；`hard_gate_tail_allowed=true` 表示只剩 human-only hard gate；`facts_digest` 排除 `generated_at`（wall-clock 不参与资格判断、可独立复算）。\n- 默认零写入；`--output` 复用 `planner_snapshot_output` 的 fail-closed 守卫（只允许 `<root>/.ai/runtime/**` 或系统临时目录），禁止路径返回退出码 4 且不写文件；退出码 `0/2/3/4`；stdout 纯 ASCII JSON。\n- 无网络/数据库/子进程/LLM 调用，不新增依赖，不规划、不改 task/state/ledger/result。\n\n**修改的文件**\n- `.ai/DEVELOPMENT_PROTOCOL.md` §2.10：新增「只读事实包（GOLD-034 起）」契约条目（字段、`refill_required` 语义、退出码、`--output` 守卫）。\n- `PROGRESS_LOG.md`：新增 GOLD-034 条目（背景/变更/验证/范围守规/遗留）。\n\n**新增的文件**\n- `orchestrator/planner_refill_request.py`\n- `tests/unit/test_ai_orchestrator_planner_refill_request.py`（54 项）\n- `tests/integration/test_planner_refill_request_regression.py`（12 项）\n\n## 执行的测试与结果\n- `.venv\\Scripts\\python.exe -m pytest tests -q` → **3383 passed, 1 skipped in 378.20s**（唯一 skip 为既有 `test_text_similarity.py` jieba 分支）。该次运行后我又补了 1 个 `--output` 临时目录单测，故再次单独运行两个新文件：`pytest tests/unit/test_ai_orchestrator_planner_refill_request.py tests/integration/test_planner_refill_request_regression.py -q` → **66 passed in 2.49s**。\n- `.venv\\Scripts\\python.exe -m ruff check .` → **All checks passed!**（最终编辑后重跑）\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts` → **Success: no issues found in 183 source files**\n- 真实仓库 CLI 冒烟：退出码 2、stdout 纯 ASCII；`lookahead_target=3`、`queue_head=GOLD-034`、`follow_on_count=2`、`deficit=1`、`refill_required=True`、`hard_gate_tail_allowed=False`、`reason_codes=[ACTIVE_BLOCKERS_PRESENT, COMPLETED_BUT_UNREVIEWED, PLANNER_SNAPSHOT_DRIFT, QUEUE_HEAD_RUNNABLE, REFILL_REQUIRED, STATE_RESULT_DRIFT]`；`missing: []`（任务要求的字段全部存在）。\n- 零写入证据：`git status --porcelain` 仅显示预期改动（`M .ai/DEVELOPMENT_PROTOCOL.md`、`M PROGRESS_LOG.md` + 3 个新增文件）；集成测试在真实仓库断言 `.ai/tasks`/`.ai/results` 逐字节、`PROJECT_STATE`/`GPT_REVIEW_LEDGER` 逐字节、`git status` 前后一致。\n\n## 遗留问题\n- 未做 Orchestrator 生命周期接入（commit+push/idle 后主动提示与节流）→ 属 GOLD-035；三任务前瞻契约的机器化门禁矩阵 → 属 GOLD-036（未越界实现）。\n- 当前真实仓库 `deficit=1`：需要 GPT 依据该 JSON 自行补 1 个 follow-on（Executor 不生成任务）。\n\n## 是否满足 acceptance\n- ✅「GPT 能从单个确定性 JSON 判断是否缺后续任务及缺几个，但 Executor 无任何规划/写任务能力」：字段齐备 + `planner_authority` 全 false + 源码/`dir()` 守卫 + 测试锁定。\n- ✅「相同仓库事实产生相同核心 facts/digest；wall-clock 不参与资格判断」：不同 `generated_at` digest 相同且可独立复算、对事实变化敏感（单元 + 真实仓库双重验证）。\n- ✅「全量 pytest/ruff/mypy 通过；Phase/Human Gate/交易安全边界不变」：`PHASE3_3_DATA` 仍 BLOCKED、`phase.transition_allowed=false`、L3/L4 不可跨、`LIVE_TRADING=false` 与 `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 只读呈现且未被改动。\n- 建议下一步：由 GPT 依 GOLD-034 事实补 1 个 follow-on，然后执行 GOLD-035 → GOLD-036。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        "?? orchestrator/planner_refill_request.py",
+        "?? tests/integration/test_planner_refill_request_regression.py",
+        "?? tests/unit/test_ai_orchestrator_planner_refill_request.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md |  14 +++++++\n PROGRESS_LOG.md             | 100 ++++++++++++++++++++++++++++++++++++++++++++\n 2 files changed, 114 insertions(+)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  6%]\n........................................................................ [  8%]\n........................................................................ [ 10%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 17%]\n........................................................................ [ 19%]\n........................................................................ [ 21%]\n........................................................................ [ 23%]\n........................................................................ [ 25%]\n........................................................................ [ 27%]\n........................................................................ [ 29%]\n........................................................................ [ 31%]\n........................................................................ [ 34%]\n........................................................................ [ 36%]\n........................................................................ [ 38%]\n........................................................................ [ 40%]\n........................................................................ [ 42%]\n........................................................................ [ 44%]\n........................................................................ [ 46%]\n........................................................................ [ 48%]\n........................................................................ [ 51%]\n........................................................................ [ 53%]\n........................................................................ [ 55%]\n........................................................................ [ 57%]\n........................................................................ [ 59%]\n........................................................................ [ 61%]\n........................................................................ [ 63%]\n........................................................................ [ 65%]\n........................................................................ [ 68%]\n........................................................................ [ 70%]\n........................................................................ [ 72%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 78%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 85%]\n........................................................................ [ 87%]\n........................................................................ [ 89%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 95%]\n........................................................................ [ 97%]\n............................s........................................... [ 99%]\n.                                                                        [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3384 passed, 1 skipped in 371.85s (0:06:11)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

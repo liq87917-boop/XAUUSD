@@ -4868,3 +4868,103 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   验证工具链健康，再用 `--inbox-dir` / `--attestation` / `--chain-audit` 读取真实缺口并据此补齐材料。
 
 
+
+## GOLD-034：GPT Planner 队列补给请求事实包（只读 control-plane 事实）
+
+### 1. 背景 / 问题
+
+- `.ai/DEVELOPMENT_PROTOCOL.md` §2.10 要求 GPT Planner 在「当前任务之外的 queue head」
+  默认维持 **3 个已批准 follow-on tasks**，但仓库侧此前只有 `planner_snapshot` 的通用状态快照
+  （§2.9），**没有**一个直接回答「当前任务之外还剩几个已批准任务、缺几个」的确定性事实包，
+  于是低水位只能等到 `No runnable task` 才发现断粮；
+- 与此同时红线不变：只有 GPT 能规划 / 补队列 / 改 `PROJECT_STATE`，Cline / DeepSeek
+  只是 Executor。若让 Executor 顺手「补一下队列」，等于把规划权下放。
+
+### 2. 变更（最小范围）
+
+- `orchestrator/planner_refill_request.py`（新增，只读 builder + CLI，~980 行含文档）：
+  - **复用** `orchestrator.planner_snapshot` 的只读事实（queue / pointer / gates /
+    results / tasks），**不复制第二套** readiness / 依赖 / 终态 / 漂移判断；
+  - 版本化契约 `gold-ai/planner-refill-request/v1`（`schema` + 整数 `schema_version`），
+    核心事实：`queue_head` / `queue_head_runnable` / `follow_on_count` /
+    `lookahead_target`（默认 3，可由 `planner_lookahead_size` 或显式参数覆盖，
+    非法值一律 fail-safe 回落 3）/ `deficit` / `refill_required` /
+    `hard_gate_tail_allowed` / `latest_completed` / `completed_but_unreviewed` /
+    `state_result_drift` / `blockers` / `human_gates` / `safety_invariants` / `phase`
+    （只读事实，`transition_allowed=false`）/ `reason_codes`（14 个稳定 code）/
+    `snapshot_ref` / `issues` / `summary`；
+  - **语义边界**：`refill_required` 只是 `deficit > 0` 的**计数事实**，不是任务内容、
+    不是下一任务、不是 Phase 决定；`hard_gate_tail_allowed=true` 表示只剩 human-only
+    hard gate，GPT 可停在 gated tail 而不制造 filler；载荷里不存在任何后续任务内容 /
+    标题 / Phase 决定 / Review 结论字段（`FORBIDDEN_REQUEST_KEYS` 守卫）；
+  - **确定性**：`facts_digest` 只覆盖状态事实，`generated_at` 被显式排除
+    （`determinism.wall_clock_in_facts=false`），相同仓库事实 ⇒ 相同 digest 且可独立复算；
+  - **默认零写入**：唯一写路径是显式 `--output`，且**复用**
+    `orchestrator.planner_snapshot_output` 的 fail-closed 守卫（只允许
+    `<root>/.ai/runtime/**` 或系统临时目录；禁止 `.ai/tasks` / `.ai/results` /
+    `.ai/PROJECT_STATE.json` / 业务路径；父目录不存在也不创建）；
+  - 退出码 `0` 足量无漂移 / `2` 需要 GPT 规划或检出漂移 / `3` PROJECT_STATE 不可读 /
+    `4` `--output` 目标被拒（此时绝不写文件）；`stdout` 为纯 ASCII JSON，
+    人类摘要只在 `stderr`；
+  - 无网络 / 数据库 / 子进程 / LLM 调用，不新增依赖。
+- `.ai/DEVELOPMENT_PROTOCOL.md` §2.10：新增「只读事实包（GOLD-034 起）」条目，
+  写清关键字段、`refill_required` 语义、退出码与 `--output` 守卫边界；
+- 未改 `pyproject.toml`、未改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json`，未进入 Phase 3.4、未跨 L3/L4。
+
+### 3. 验证
+
+- 新增单元回归 `tests/unit/test_ai_orchestrator_planner_refill_request.py`（**54 项**）：
+  版本化契约与 29 个顶层字段冻结、**队列足量 / 低水位（缺 1）/ 只有 head（缺 3）/
+  空队列**、head 处 L3/L4（`blocking_gate_at_head` + 不得误判 hard gate）、
+  **仅剩 human-only hard gate**（`hard_gate_tail_allowed=true` 且计数事实保留）、
+  `auto_start=false` / `requires_human_approval=true` / L4 三类人工依赖、
+  state/result 漂移（`STATE_RESULT_DRIFT` + 指针事实）与「无漂移」、
+  completed-but-unreviewed（含 review 指针缺失）、blocker / Human Gate / 安全不变量镜像、
+  `lookahead_target` 默认 3 / `planner_lookahead_size` 覆盖 / 8 类非法值回落 3 +
+  warning issue、显式参数只改缺口、`facts_digest` wall-clock 无关且可复算 / 对事实敏感、
+  构建前后工作树逐字节不变、载荷无任务内容 / Phase 决定键、模块无规划 / 写状态 API +
+  源码级守卫（无 `write_text` / `open(` / `subprocess` / 网络 / `mkdir`）、
+  CLI 选项契约（无 `--plan` / `--next-task` / `--create-task` / `--update-state`）、
+  ASCII stdout + 退出码 0/2/3/4、`--output` 只写 runtime 或系统临时目录、
+  禁止路径（`.ai/tasks` / `.ai/results` / `PROJECT_STATE` / tracked 文件）被拒且零写入、
+  父目录缺失被拒、默认运行零写入、fresh subprocess 字节稳定；
+- 新增集成回归 `tests/integration/test_planner_refill_request_regression.py`（**12 项**，
+  真实仓库）：queue 事实与 `planner_snapshot` **逐项一致**（含 `snapshot_ref.facts_digest`
+  与 issue codes）、低水位数学自洽（`deficit == max(0, target - follow_on)`）、
+  latest_completed / completed_but_unreviewed 与 results 一致、顶层契约冻结 +
+  reason codes 只在词表内、载荷无规划内容 / 无 refill 权限、`PHASE3_3_DATA` blocker 与
+  `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` / L3-L4 边界不变、
+  构建与 CLI 在真实仓库上 **deterministic + 零写入**（`.ai/tasks` / `.ai/results` /
+  `PROJECT_STATE` / `GPT_REVIEW_LEDGER` 逐字节、`git status --porcelain` 前后一致）、
+  `--output` 指向 tracked planner 路径一律退出码 4 且零写入；
+- 全量回归：`pytest tests`（unit + integration）**3383 passed / 1 skipped**（378.20s）；
+  `ruff check .` → **All checks passed!**；
+  `mypy config database src scripts` → **Success: no issues found in 183 source files**。
+
+### 4. 范围守规
+
+- 只读、零网络、零数据库、零子进程（除测试自身的只读 `git status`）、零 LLM 调用；
+  未进入 Phase 3.4、未跨 L3/L4；`PHASE3_3_DATA` 保持 BLOCKED；
+  `LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json`、`src/alpha/**`、`src/execution/**`、`database/**`、
+  `.env`、`config/rss_sources.json`；未新增依赖、未改 `pyproject.toml`；
+- 测试写入全部发生在 `tmp_path`（受控 `--output` 断言也只在 fake root 内）；
+  Cline 未执行任何 Git 写操作。
+
+### 5. 遗留 / 下一步
+
+- 本工具只产**事实**：`refill_required=true` 只表示「当前 queue head 之外的已批准
+  follow-on 少于 `lookahead_target`」，**不**产出任何后续任务内容，也**不**决定 Phase；
+  `hard_gate_tail_allowed=true` 是「允许停在 gated tail」的合法例外；
+- Orchestrator 生命周期接入（成功 commit+push 后与 idle 时主动提示
+  `GPT_PLANNER_REFILL_REQUIRED`、去重/节流、只读镜像写 `.ai/runtime/**`）留给
+  **GOLD-035**；三任务前瞻契约的机器化门禁（含「不得把 target 降为 0」「可运行任务
+  必须排在 human-gated tail 之前」矩阵）留给 **GOLD-036**；
+- 建议下一步（由 GPT 决定）：先跑
+  `python -m orchestrator.planner_refill_request --generated-at <fixed>` 读取真实
+  `queue_head` / `follow_on_count` / `deficit` / `reason_codes`，据此补足 follow-on；
+  再按 GOLD-035 / GOLD-036 把提示与契约固化。
+
+
