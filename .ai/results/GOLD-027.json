@@ -1,0 +1,80 @@
+{
+  "task_id": "GOLD-027",
+  "title": "建立授权证据人工 Intake Handoff 与预检契约",
+  "status": "completed",
+  "finished_at": "2026-09-23T15:47:50+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    " M tests/integration/test_evidence_cli_smoke.py",
+    "?? scripts/evidence_intake_handoff.py",
+    "?? src/evidence/intake_handoff.py",
+    "?? tests/integration/test_evidence_intake_handoff_integration.py",
+    "?? tests/unit/test_evidence_intake_handoff.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md                              | 113 +++++++++++++++++++++++++++\n README.md                                    |  56 ++++++++++++-\n TECH_DEBT.md                                 |  56 +++++++++++++\n src/evidence/__init__.py                     |  29 +++++++\n tests/integration/test_evidence_cli_smoke.py |   1 +\n 5 files changed, 254 insertions(+), 1 deletion(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T15:08:03+08:00",
+      "finished_at": "2026-09-23T15:47:50+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 165,
+      "duration_ms": 2065084,
+      "usage": {
+        "inputTokens": 35501891,
+        "outputTokens": 150914,
+        "cacheReadTokens": 35334784,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.22161880199999995
+      },
+      "cline_final_text": "Submission recorded (verified): GOLD-027 已完成并验证。交付：①`src/evidence/intake_handoff.py`（版本化 intake handoff schema + 纯本地只读预检：10 条材料契约、6 条独立时间语义要求、五态状态 MISSING/PRESENT_UNVERIFIED/HUMAN_VERIFICATION_REQUIRED/NON_QUALIFYING/GATE_BLOCKED、`preflight_pass` 仅表示结构完整的机器字段与文档语义；安全布尔与 counts_toward_eligibility 硬编码；不新增/不降低任何阈值，阈值只引用 evidence_gate）；②`scripts/evidence_intake_handoff.py`（`--schema` 打印契约、`--inbox-dir` 只读预检、`--as-of`/`--json`/`--out` 唯一写开关；无 intake/写库/qualify/approve/advance 参数；退出码 0/2/4/5）；③新增 45 项回归测试（单元 32 + 集成 13），覆盖缺授权证明、缺独立时间语义、缺独立可用证据、Mock/模板（行级与 manifest 级）、结构完整但未人工验证、L3/L4 停线（advance_allowed/l3_l4_auto_advance_allowed=false）、历史 evidence 内容与 mtime 零改写，以及源码级禁网络/禁写库/禁 open/stat/getmtime/utime；④`src/evidence/__init__.py` 惰性导出 20 个新名；⑤`tests/integration/test_evidence_cli_smoke.py` 登记新 CLI；⑥文档 README/TECH_DEBT(TD-62+变更日志)/PROGRESS_LOG(第九十轮)。\n验证证据（本人工具输出）：`pytest tests/unit/test_evidence_intake_handoff.py` → 32 passed；`pytest tests/integration/test_evidence_intake_handoff_integration.py` → 13 passed；全量 `pytest tests -q` → **2996 passed, 1 skipped in 325.06s**（skip 为 test_text_similarity 的 jieba 分支，与基线一致；`--collect-only` 计数 2997 吻合）；`ruff check .` → All checks passed!；`mypy config database src scripts` → Success: no issues found in 176 source files；CLI 端到端（本地临时候选包，含 clean/缺授权引用/缺时间语义/缺 available_at/合成 5 个包）→ exit 0、preflight_pass_count=1、五态计数齐全、evidence_qualified=false、blocker_active=true、l3_l4_auto_advance_allowed=false、合成包 preflight_pass=false，且 `--out` 只写 artifact、候选证据内容与 mtime 零变化。\n守规：`PHASE3_3_DATA` 保持 BLOCKED、L3/L4 未推进、LIVE_TRADING/ALLOW_EXTERNAL_ORDER_SUBMISSION 仍为 false；零网络/零数据库/零 intake；未改 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`src/alpha/**`、`src/execution/**`、`docs/**`、`.env`；未新增依赖/migration；未执行任何 Git 写操作。\n遗留：预检非资格判定器；行级具体原因码未透传到材料级，\"存在被隔离行\"统一按 PRESENT_UNVERIFIED 报告（fail-closed，已登记 TD-62）。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        " M tests/integration/test_evidence_cli_smoke.py",
+        "?? scripts/evidence_intake_handoff.py",
+        "?? src/evidence/intake_handoff.py",
+        "?? tests/integration/test_evidence_intake_handoff_integration.py",
+        "?? tests/unit/test_evidence_intake_handoff.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md                              | 113 +++++++++++++++++++++++++++\n README.md                                    |  56 ++++++++++++-\n TECH_DEBT.md                                 |  56 +++++++++++++\n src/evidence/__init__.py                     |  29 +++++++\n tests/integration/test_evidence_cli_smoke.py |   1 +\n 5 files changed, 254 insertions(+), 1 deletion(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 16%]\n........................................................................ [ 19%]\n........................................................................ [ 21%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 28%]\n........................................................................ [ 31%]\n........................................................................ [ 33%]\n........................................................................ [ 36%]\n........................................................................ [ 38%]\n........................................................................ [ 40%]\n........................................................................ [ 43%]\n........................................................................ [ 45%]\n........................................................................ [ 48%]\n........................................................................ [ 50%]\n........................................................................ [ 52%]\n........................................................................ [ 55%]\n........................................................................ [ 57%]\n........................................................................ [ 60%]\n........................................................................ [ 62%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 69%]\n........................................................................ [ 72%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 79%]\n........................................................................ [ 81%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 96%]\n........................................................................ [ 98%]\ns............................................                            [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2996 passed, 1 skipped in 316.34s (0:05:16)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 176 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

@@ -4171,3 +4171,116 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
   `EVIDENCE_MISSING` 项清单补齐真实授权证据；补齐后重跑
   `scripts.evidence_gap_diagnostic --json` 复核，再走 `evidence_handoff` / 决策包与 **L3 人工 Gate**。
 
+
+## 第九十轮（2026-09-23）：GOLD-027 — 人工证据 Intake Handoff 契约与只读预检
+
+### 1. 背景
+
+- GOLD-026 已经能"只读诊断还缺什么"，但**业务方仍不知道按什么契约准备材料**：
+  Author / News 需要哪些来源身份、授权证明、原始证据引用、`published_at` / `collected_at` /
+  `effective_at` / `available_at` / OOS 与独立时间语义要求，此前分散在
+  `src/evidence/contracts.py`、`src/evidence/handoff.py` 的 checklist、GOLD-011 的 inbox manifest
+  与多个 CLI 里，每轮都要人工重建"提交格式"；
+- 本轮把缺口诊断转成**单一、版本化**的人工证据提交 / 预检 handoff：业务人员按同一契约准备材料，
+  预检只回答"材料是否齐全、字段是否可解析、来源 / 时间声明是否带独立证据引用"，
+  **绝不**回答"是否合格"；`PHASE3_3_DATA` **保持 BLOCKED**，L3 / L4 只能人工推进。
+
+### 2. 交付内容
+
+- `src/evidence/intake_handoff.py`（新增，**纯本地只读**）：
+  - **版本化 schema** `intake_handoff_schema()`：`kind=phase33_evidence_intake_handoff` /
+    `schema_version=1` / `contract_version=evidence-intake-v1` / 目录契约（沿用 GOLD-011 inbox：
+    `manifest.json` 必填声明 + `files[path, sha256]`）/ Author + News 必需契约字段
+    （`required_field_names`，Author 额外 `author_name` / `external_account_id`）/
+    **10 条材料契约**（`evidence_records` / `source_identity` / `authorization_declaration` /
+    `time_semantics` / `published_at` / `collected_at` / `effective_at` / `availability_oos` /
+    `author_identity` / `phase33_data_gate`，`category` 与 GOLD-026 缺口分类**同一词表**）/
+    **6 条独立时间语义要求** / 状态词表 + 释义 / `preflight_pass` 的诚实语义与
+    `preflight_pass_does_not_imply` 列表；阈值**只引用** `src.alpha.evidence_gate`
+    （经 `src.evidence.handoff.thresholds`），**不新增、不降低**任何资格门槛；
+  - `MaterialSpec` + `MATERIAL_SPECS`：每条材料声明 `requirement` / `contract_fields` /
+    `reference_fields`（独立证据引用）/ `declaration_fields`（manifest 声明）；
+    `unknown_contract_fields()` 提供"只引用既有契约字段、不偷偷加列"的机器可检查断言（健康树为空）；
+  - `IntakeStatus` **五态**（稳定字符串）：`MISSING`（缺失或机械校验未通过）/
+    `PRESENT_UNVERIFIED`（已提交但独立证据引用 / 机械校验不足，不能进入人工核验队列）/
+    `HUMAN_VERIFICATION_REQUIRED`（结构完整：法律效力 / 出处 / 时间语义只能人工核验）/
+    `NON_QUALIFYING`（Mock / 模板 / 示例 / 合成：**永远**不计资格）/
+    `GATE_BLOCKED`（`PHASE3_3_DATA` 与 L3 / L4 人工 Gate，Gate 材料恒为此态）；
+  - `HandoffMaterial` / `PackageHandoff` / `IntakeHandoffDocument`：每个材料带
+    `present_fields` / `missing_fields` / `machine_fact` / `human_next_step`，
+    `counts_toward_eligibility` **恒 false**；`preflight_pass` **只**表示 package 结构完整
+    （无 `MISSING` / 无 `PRESENT_UNVERIFIED` / 非合成 / GOLD-011 预检零原因码），
+    并通过 `preflight_pass_meaning`（每包）/ schema 段 / notes 显式写明
+    "**结构完整 ≠ evidence qualified ≠ 解除 PHASE3_3_DATA ≠ L3/L4 通过**"；
+    `evidence_qualified` / `data_qualification_passed` / `phase_transition_allowed` /
+    `advance_allowed` / `l3_l4_auto_advance_allowed` **恒 false**，
+    `blocker_active` / `human_gate_required` / `gate_blocked` **恒 true**（**硬编码**）；
+  - `build_intake_handoff`（纯函数）/ `load_intake_handoff`（只读复用 GOLD-011 `scan_inbox` +
+    GOLD-026 `build_manifest_diagnostic`；缺目录 fail-closed）/ `render_intake_handoff_markdown`；
+    `_check_spec_coverage()` 在运行期对"材料新增却忘记判定器"做 fail-closed；
+  - **不伪造时间事实**：缺 `time_semantics` / 缺 `available_at` 时只报告字段名与人工下一步，
+    `url` 等**可选**字段绝不误报为缺失；绝不使用当前时间 / 文件 mtime / 抓取时间 / 推断值；
+- `scripts/evidence_intake_handoff.py`（新增）：`--schema`（打印版本化契约，不需要 `--inbox-dir`）/
+  `--inbox-dir`（除 `--schema` 外必填）/ `--as-of` / `--json` / `--out`（**唯一**写开关，
+  复用 `atomic_write_text` 原子写）；**没有**任何 intake / 写库 / `qualify` / `approve` /
+  `advance` / `--no-dry-run` 参数；退出码 `0` 至少一个包结构完整（**不是**资格通过）/
+  `2` 参数或输入错误 / `4` `--out` 不可写 / `5` 没有任何结构完整的包（预期 BLOCKED）；
+- `src/evidence/__init__.py`：新增 `intake_handoff` 惰性导出（20 个新公开名），
+  `__all__` 与惰性表保持同源（既有门禁用例覆盖）；
+- `tests/unit/test_evidence_intake_handoff.py`（新增 32 项）+
+  `tests/integration/test_evidence_intake_handoff_integration.py`（新增 13 项），并把新 CLI 登记进
+  `tests/integration/test_evidence_cli_smoke.py`（现覆盖 14 个 `scripts/evidence_*.py`）；
+- `README.md` / `TECH_DEBT.md`（新增 **TD-62**）/ `PROGRESS_LOG.md` 同步登记。
+
+
+### 3. 测试结果
+
+- `pytest tests/unit/test_evidence_intake_handoff.py -q` → **32 passed**：
+  schema 版本化且只引用既有契约字段（`unknown_contract_fields() == ()`、`category ∈ GAP_CATEGORIES`、
+  `field_by_name` 全部可解析、阈值同源）/ Author 与 News 材料范围差异 / 五态判定 /
+  "结构完整 ≠ 资格通过"（`preflight_pass=true` 与 `evidence_qualified=false` 并存）/
+  缺授权证明 / 缺独立时间语义 / 缺独立可用证据（`PRESENT_UNVERIFIED`）/
+  行级授权证据缺失（`PRESENT_UNVERIFIED`）/ Mock 行与 Mock manifest 全部 `NON_QUALIFYING` /
+  无 manifest fail-closed / 计数与查表助手 / "除 `as_of` 外无任何时间戳"且 mtime（2019-01-02）绝不出现 /
+  naive `as_of` 拒绝 / 重复构造 byte-stable / 候选包内容与 mtime 零变化 /
+  Markdown 保留 blocker 且不回显正文 / 源码级守卫（只 import 既有模块；无 `open` / `os.stat` /
+  `getmtime` / `utime` / 网络 / `intake_evidence` / 直接 `write_text`；安全布尔硬编码）；
+- `pytest tests/integration/test_evidence_intake_handoff_integration.py -q` → **13 passed**：
+  `--help` 仅暴露只读开关（参数集合精确断言）/ 五类禁止参数退出 `2` / 缺 `--inbox-dir` 与
+  naive `--as-of` fail-closed（stdout 为空）/ `--schema` 契约输出且默认零写入 /
+  `--schema --out` 是唯一写开关 / 结构完整 → 退出 `0` 但全部安全布尔为 false /
+  空目录与 Mock → 退出 `5` / `--out` 只写 artifact 且候选证据内容 + mtime 零变化 /
+  `--out` 不可写 → 退出 `4` / Markdown 保留 blocker / **fresh subprocess** 端到端 cwd 零写入；
+- `pytest tests/unit/test_lazy_package_exports.py -q` → **15 passed**（包边界未漂移）；
+- 全量 `pytest tests -q` → **2996 passed / 1 skipped in 325.06s**（1 skipped 仍为
+  `tests/unit/test_text_similarity.py` 的"本环境已安装 jieba"分支——与基线一致）；
+  新 CLI 已登记进 `tests/integration/test_evidence_cli_smoke.py`，因此
+  `scripts.evidence_intake_handoff` 的 fresh-subprocess import / `--help` / 空 cwd
+  **零写入**门禁也包含在内；
+- `ruff check .` → **All checks passed!**；`mypy config database src scripts` →
+  **Success: no issues found in 176 source files**（GOLD-026 为 174，新增本模块 + 本 CLI）。
+
+### 4. 范围守规
+
+- 只读：零网络（不抓取、不绕过 robots / 证书）、零数据库访问（本 CLI 不建 engine、不 import
+  `sqlalchemy`）、零模型训练、零交易；默认只打印 stdout，唯一写开关是显式 `--out`（原子写）；
+- 未新增 / 未升级任何依赖，未新增 migration / schema，未修改 `.ai/**`、`src/alpha/**`、
+  `src/execution/**`、`config/rss_sources.json`、`docs/**`；
+- 未改 Phase 3.3 blocker / 数据资格阈值 / L3-L4 Gate / `LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+- 写入测试全部发生在 `tmp_path`（临时候选包 / 临时输出），对真实仓库零写入；
+- Cline 未执行任何 Git 写操作（提交由 Orchestrator 负责）。
+
+### 5. 遗留 / 下一步
+
+- 预检**不是**资格判定器：`preflight_pass` 只表示"材料齐全、字段可解析、声明带独立引用"，
+  授权法律效力、许可范围、签认人身份与独立可用时间出处仍**只能人工核验**（TD-62）；
+- 材料级判定只消费既有 inbox 预检的字段级事实：行级具体原因码未透传，因此"存在被隔离行"
+  统一按 `PRESENT_UNVERIFIED` 报告（fail-closed）；逐行原因码仍看 `evidence_inbox` /
+  `evidence_gap_diagnostic` 的产物；
+- 建议下一步：业务方用 `scripts.evidence_intake_handoff --schema` 作为**单一契约**准备真实授权
+  Author / News 材料 → 放入显式 `--inbox-dir` → 跑 `--json` 预检修正缺失项 →
+  再走 `evidence_inbox` / `evidence_review` / `evidence_intake_plan` /
+  `evidence_operator workflow --no-dry-run` / `evidence_gap_diagnostic` 与 **L3 人工 Gate**；
+  `PHASE3_3_DATA` 仍 BLOCKED。
+

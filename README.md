@@ -1445,7 +1445,7 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   from-import / star-import / 重复与交错导入）在 **fresh subprocess** 中全部成功，且包初始化不再
   拉入对方包（`tests/integration/test_evidence_import_order.py`）；`__all__` 与惰性表同源、每个
   公开名 `is` 其定义子模块上的对象、源码级禁止 eager 子模块导入
-  （`tests/unit/test_lazy_package_exports.py`）；13 个 `scripts/evidence_*.py` +
+  （`tests/unit/test_lazy_package_exports.py`）；14 个 `scripts/evidence_*.py` +
   `scripts/intake_evidence.py` + `scripts/report_collector_health.py` 均可 import + `--help`
   可用，且 cwd 为空的临时目录 → 断言**零文件写入**（`tests/integration/test_evidence_cli_smoke.py`）。
 
@@ -1488,6 +1488,60 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   `tests/integration/test_evidence_gap_diagnostic_integration.py`（8 项），其中包含
   "量化门槛全达标仍 BLOCKED"、"mtime 绝不作为证据时间"、"无网络 / 无写库 / 无 `os.stat`"
   等源码级与运行期守卫。
+
+### 人工证据 Intake Handoff 契约与只读预检（`scripts/evidence_intake_handoff.py`，GOLD-027）
+
+> **合规红线**：本项**只做纯本地只读预检** —— 不采集、不写库、不联网、不绕过 robots / 证书、
+> 不放宽任何资格门槛；`preflight_pass` **只**表示 package 结构完整，`PHASE3_3_DATA`
+> **保持 BLOCKED**，L3 / L4 只能人工推进。
+
+- **一句话**：把 GOLD-026 的只读缺口诊断变成**单一、版本化**的人工证据提交 / 预检 handoff ——
+  业务人员按**同一契约**准备真实授权 Author / News 材料，预检只回答"材料是否齐全、
+  字段是否可解析、来源 / 时间声明是否带独立证据引用"，**绝不**回答"是否合格"；
+- **版本化 schema**（`--schema` / `intake_handoff_schema()`）：`kind` +
+  `schema_version=1` + `contract_version=evidence-intake-v1` + 目录契约（沿用 GOLD-011 inbox
+  布局：`manifest.json` 必填声明 + `files[path, sha256]`）+ Author / News 必需契约字段
+  （Author 额外 `author_name` / `external_account_id`）+ 10 条材料契约 + 6 条独立时间语义要求
+  + 状态词表；阈值**只引用** `src.alpha.evidence_gate`（经 `handoff.thresholds`），
+  **不新增、不降低**任何资格门槛；
+- **五态状态**（每个材料机器可读）：`MISSING`（缺失或机械校验未通过）/
+  `PRESENT_UNVERIFIED`（已提交但独立证据引用不足，不能进入人工核验队列）/
+  `HUMAN_VERIFICATION_REQUIRED`（结构完整：法律效力 / 出处 / 时间语义只能人工核验）/
+  `NON_QUALIFYING`（Mock / 模板 / 示例 / 合成：**永远**不计资格）/
+  `GATE_BLOCKED`（`PHASE3_3_DATA` 与 L3 / L4 人工 Gate，Gate 材料恒为此态）；
+- **必看结论**：`preflight_pass` **只**表示结构完整（无缺失、无待核验缺口、非合成、
+  GOLD-011 预检零原因码）；`evidence_qualified` / `data_qualification_passed` /
+  `phase_transition_allowed` / `advance_allowed` / `l3_l4_auto_advance_allowed` 恒为 `false`；
+  `blocker_active` / `human_gate_required` / `gate_blocked` 恒为 `true`；
+- **不伪造时间事实**：缺 `time_semantics` / 缺 `available_at` 时只报告字段名与人工下一步，
+  **绝不**用当前时间 / 文件 mtime / 抓取时间 / 推断值填补；
+- 用法：
+
+  ```bash
+  # ① 打印版本化 handoff 契约（人工 / 业务方据此准备材料；零写入）
+  .venv\Scripts\python.exe -m scripts.evidence_intake_handoff --schema
+
+  # ② 只读预检显式本地候选目录（默认只打印 stdout；零写入、零数据库）
+  .venv\Scripts\python.exe -m scripts.evidence_intake_handoff \
+      --inbox-dir logs/evidence/inbox --json
+
+  # ③ 固定审计时点（ISO8601 必须带时区）
+  .venv\Scripts\python.exe -m scripts.evidence_intake_handoff \
+      --inbox-dir logs/evidence/inbox --as-of 2026-09-23T00:00:00+00:00
+
+  # ④ 唯一写开关：显式 --out 原子落盘预检本身（不写库、不 intake、不解除 BLOCKED）
+  .venv\Scripts\python.exe -m scripts.evidence_intake_handoff \
+      --inbox-dir logs/evidence/inbox --json \
+      --out logs/evidence/intake_handoff.json
+  ```
+
+- 退出码：`0` 至少一个候选包**结构完整**（仍**不是**资格通过）/ `2` 参数或输入错误 /
+  `4` `--out` 不可写 / `5` 没有任何结构完整的候选包（**当前预期**：`PHASE3_3_DATA` 保持 BLOCKED）；
+- 回归测试：`tests/unit/test_evidence_intake_handoff.py`（32 项）+
+  `tests/integration/test_evidence_intake_handoff_integration.py`（13 项），其中包含
+  "结构完整 ≠ 资格通过"、"Mock / 缺授权 / 缺独立时间语义 / 缺独立可用证据全部 fail-closed"、
+  "除 `as_of` 外无任何时间戳、mtime 绝不出现"、"候选证据内容与 mtime 零变化"、
+  "无网络 / 无写库 / 无 `open` / 无 `os.stat`"等源码级与运行期守卫。
 
 ## 8. 数据模型
 
