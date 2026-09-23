@@ -1,6 +1,7 @@
 import atexit
 import contextlib
 import hashlib
+import importlib
 import json
 import logging
 import os
@@ -23,6 +24,9 @@ TASK_DIR = ROOT / ".ai" / "tasks"
 RESULT_DIR = ROOT / ".ai" / "results"
 RUNTIME_DIR = ROOT / ".ai" / "runtime"
 LOG_DIR = ROOT / ".ai" / "logs"
+
+# GPT 唯一拥有写权限的项目状态；本模块只**只读**呈现，绝不修改（GOLD-035）。
+PROJECT_STATE_PATH = ROOT / ".ai" / "PROJECT_STATE.json"
 
 TASK_STATE_DIR = RUNTIME_DIR / "tasks"
 RECOVERY_DIR = RUNTIME_DIR / "recovery"
@@ -2067,6 +2071,552 @@ def should_log_idle(
         >=
         IDLE_LOG_SECONDS
     )
+
+
+# ============================================================
+# GPT Planner refill 低水位提示（GOLD-035）
+# ============================================================
+#
+# 背景（.ai/DEVELOPMENT_PROTOCOL.md §2.10）：
+#   除「当前正在执行 / 即将执行的 queue head」之外，GPT Planner 默认维持
+#   3 个已批准 follow-on task。低水位必须在**队列耗尽之前**被明确看到，
+#   而不是等到 `No runnable task` 才发现断粮。
+#
+# 职责边界（与 GOLD-034 只读事实包完全一致）：
+#   1) 只读：复用 orchestrator.planner_refill_request 的确定性事实，
+#      这里绝不复制第二套 readiness / 依赖 / 终态 / 漂移判断；
+#   2) 只报告：绝不生成任务、绝不补队列、绝不改 PROJECT_STATE /
+#      GPT_REVIEW_LEDGER / result，也绝不跳过 blocked / human-gated 的 queue head；
+#   3) 节流：同一事实状态在 REFILL_HINT_SECONDS 内只提示一次；事实一变立即重新提示；
+#   4) 唯一写操作：把同一份只读事实镜像到受控 runtime 路径（复用
+#      planner_snapshot_output 的 fail-closed 守卫），供人工诊断。
+
+# 低水位提示的稳定标记（供人类 / GPT grep 与测试断言；只报告，不含任何决定）。
+PLANNER_REFILL_REQUIRED_CODE = "GPT_PLANNER_REFILL_REQUIRED"
+
+# 队列足量 / 只剩合法 human-gated tail 时的标记：同一通道的状态翻转。
+PLANNER_REFILL_SATISFIED_CODE = "GPT_PLANNER_REFILL_SATISFIED"
+
+# 提示上下文（机器可读）。
+REFILL_HINT_CONTEXT_POST_PUSH = "post_successful_commit_push"
+
+REFILL_HINT_CONTEXT_IDLE = "idle_no_runnable_task"
+
+# 只读事实镜像的文件名（落在 RUNTIME_DIR 下；runtime 不进 Git）。
+REFILL_REQUEST_RUNTIME_NAME = "planner_refill_request.json"
+
+# 低水位提示节流：同一事实状态在此秒数内只提示一次（避免每 20 秒刷屏）。
+REFILL_HINT_SECONDS = max(
+    POLL_SECONDS,
+    int(
+        os.getenv(
+            "AI_REFILL_HINT_SECONDS",
+            "1800"
+        )
+    )
+)
+
+# 按需加载过的 orchestrator.* 只读模块（只导入一次，绝不重复执行模块级代码）。
+_REPO_SCOPED_MODULES: dict[str, Any] = {}
+
+
+def repo_scoped_import(
+    module_name: str
+) -> Any | None:
+    """按需导入 ``orchestrator.*`` 只读模块（必要时把仓库根临时放进 ``sys.path``）。
+
+    为什么需要它：本模块在生产环境以 ``py -u orchestrator/ai_orchestrator.py``
+    方式启动，此时 ``sys.path[0]`` 是 ``orchestrator/`` 而不是仓库根，
+    ``import orchestrator.X`` 只有在仓库根位于 ``sys.path`` 上时才成立。
+    这里只在必要时临时补上仓库根，导入结束后立即还原，**只读**、不留副作用；
+    导入失败一律返回 ``None``（只读提示降级，绝不阻塞 rolling queue）。
+    """
+
+    cached = _REPO_SCOPED_MODULES.get(
+        module_name
+    )
+
+    if cached is not None:
+
+        return cached
+
+    root = str(
+        ROOT
+    )
+
+    inserted = (
+        root
+        not in
+        sys.path
+    )
+
+    if inserted:
+
+        sys.path.insert(
+            0,
+            root
+        )
+
+    try:
+
+        module = importlib.import_module(
+            module_name
+        )
+
+    except Exception as exc:
+
+        _logger.warning(
+            "导入只读模块 %s 失败（只读提示降级）: %s",
+            module_name,
+            exc
+        )
+
+        return None
+
+    finally:
+
+        if inserted:
+
+            with contextlib.suppress(
+                ValueError
+            ):
+
+                sys.path.remove(
+                    root
+                )
+
+    _REPO_SCOPED_MODULES[
+        module_name
+    ] = module
+
+    return module
+
+
+def planner_refill_facts() -> dict[str, Any] | None:
+    """只读构建 GOLD-034 refill 事实包；任何失败都降级为 ``None``。
+
+    降级即「本轮不出提示」，绝不影响 rolling queue 的推进；事实包本身只读，
+    绝不写 ``.ai/tasks`` / ``.ai/results`` / ``PROJECT_STATE`` / review ledger。
+    """
+
+    refill = repo_scoped_import(
+        "orchestrator.planner_refill_request"
+    )
+
+    if refill is None:
+
+        return None
+
+    try:
+
+        return refill.build_planner_refill_request(
+            root=ROOT,
+            state_path=PROJECT_STATE_PATH,
+            tasks_dir=TASK_DIR,
+            results_dir=RESULT_DIR,
+        )
+
+    except Exception as exc:
+
+        _logger.warning(
+            "Planner refill 事实构建失败（只读提示降级）: %s",
+            exc
+        )
+
+        return None
+
+
+def planner_refill_hint_state(
+    state: dict[str, Any] | None
+) -> tuple[str | None, float | None]:
+    """从跨轮状态里读出 ``(signature, emitted_at)``；缺失 / 非法一律视为空。"""
+
+    if not isinstance(state, dict):
+
+        return None, None
+
+    signature = state.get(
+        "signature"
+    )
+
+    emitted_at = state.get(
+        "emitted_at"
+    )
+
+    valid_emitted_at = (
+        emitted_at
+        if (
+            isinstance(emitted_at, (int, float))
+            and
+            not isinstance(emitted_at, bool)
+        )
+        else
+        None
+    )
+
+    return (
+        signature if isinstance(signature, str) else None,
+        valid_emitted_at
+    )
+
+
+def should_emit_refill_hint(
+    signature: str,
+    last_signature: str | None,
+    last_emitted_at: float | None,
+    current_time: float | None = None
+) -> bool:
+    """低水位提示节流：状态变化立即提示；同一状态只在 ``REFILL_HINT_SECONDS`` 后重复。
+
+    与 :func:`should_log_idle` 同构：节流只影响日志噪声，
+    绝不降低检测频率，也绝不改变任何队列决策。
+    """
+
+    if signature != last_signature:
+
+        return True
+
+    if last_emitted_at is None:
+
+        return True
+
+    now = (
+        time.monotonic()
+        if current_time is None
+        else current_time
+    )
+
+    return (
+        now
+        -
+        last_emitted_at
+    ) >= REFILL_HINT_SECONDS
+
+
+def planner_refill_hint_signature(
+    payload: dict[str, Any]
+) -> str:
+    """低水位提示的稳定状态签名（只由确定性事实派生，wall-clock 不参与）。"""
+
+    codes = payload.get(
+        "reason_codes"
+    )
+
+    reasons = (
+        ",".join(
+            str(item)
+            for item in codes
+        )
+        if isinstance(codes, list)
+        else
+        ""
+    )
+
+    return (
+        f"digest={payload.get('facts_digest')}"
+        f"|head={payload.get('queue_head')}"
+        f"|follow_on={payload.get('follow_on_count')}"
+        f"|target={payload.get('lookahead_target')}"
+        f"|deficit={payload.get('deficit')}"
+        f"|required={payload.get('refill_required')}"
+        f"|codes={reasons}"
+    )
+
+
+def planner_refill_hint_line(
+    payload: dict[str, Any],
+    *,
+    context: str
+) -> str:
+    """构建结构化 refill 提示行。
+
+    稳定字段名：`head` / `follow_on_count` / `target` / `deficit` / `reason_codes`。
+    提示里**只有事实**：缺几个、卡在哪个 queue head、为什么，以及
+    `executor_can_refill=false`（规划权仍只属于 GPT）。不含任何后续任务内容。
+    """
+
+    code = (
+        PLANNER_REFILL_REQUIRED_CODE
+        if payload.get("refill_required")
+        else PLANNER_REFILL_SATISFIED_CODE
+    )
+
+    codes = payload.get(
+        "reason_codes"
+    )
+
+    reasons = (
+        ",".join(
+            str(item)
+            for item in codes
+        )
+        if isinstance(codes, list)
+        else
+        ""
+    )
+
+    return (
+        f"{code}"
+        f" context={context}"
+        f" head={payload.get('queue_head') or '-'}"
+        f" follow_on_count={payload.get('follow_on_count')}"
+        f" target={payload.get('lookahead_target')}"
+        f" deficit={payload.get('deficit')}"
+        f" hard_gate_tail_allowed={payload.get('hard_gate_tail_allowed')}"
+        f" reason_codes=[{reasons}]"
+        f" facts_digest={payload.get('facts_digest')}"
+        f" executor_can_refill=false"
+    )
+
+
+def planner_refill_mirror_allowed() -> bool:
+    """runtime 镜像的前置条件：只读事实必须来自**本仓库自己的** tasks / results。
+
+    这不是权限判断，而是「镜像内容可信」判断：只有 Orchestrator 正在观察自己的
+    ``<root>/.ai/tasks`` / ``.ai/results`` 时，写进 ``.ai/runtime/**`` 的 refill
+    事实才对人工诊断有意义；路径被重定向时只输出日志、不写镜像文件。
+    """
+
+    try:
+
+        root = Path(
+            ROOT
+        ).resolve()
+
+        directories = (
+            Path(TASK_DIR),
+            Path(RESULT_DIR)
+        )
+
+        return all(
+
+            root == directory.resolve()
+
+            or
+
+            root in directory.resolve().parents
+
+            for directory in directories
+        )
+
+    except Exception:
+
+        return False
+
+
+def mirror_planner_refill_request(
+    payload: dict[str, Any],
+    *,
+    root: Path | None = None,
+    target: Path | None = None
+) -> Path | None:
+    """把只读 refill 事实镜像写入受控 runtime 路径。
+
+    写入**唯一**复用 :mod:`orchestrator.planner_snapshot_output` 的 fail-closed
+    守卫：只允许 ``<root>/.ai/runtime/**`` 或系统临时目录，其余位置一律拒绝且
+    不写任何文件（因此绝不写 ``.ai/tasks`` / ``.ai/results`` /
+    ``.ai/PROJECT_STATE.json`` / ``.ai/GPT_REVIEW_LEDGER.json``）。
+    """
+
+    snapshot_output = repo_scoped_import(
+        "orchestrator.planner_snapshot_output"
+    )
+
+    refill = repo_scoped_import(
+        "orchestrator.planner_refill_request"
+    )
+
+    if snapshot_output is None or refill is None:
+
+        return None
+
+    resolved_root = (
+        Path(root)
+        if root is not None
+        else ROOT
+    )
+
+    resolved_target = (
+        Path(target)
+        if target is not None
+        else RUNTIME_DIR / REFILL_REQUEST_RUNTIME_NAME
+    )
+
+    output_target, reason = snapshot_output.resolve_output_target(
+        resolved_root,
+        resolved_target
+    )
+
+    if output_target is None:
+
+        _logger.warning(
+            "Planner refill 事实未镜像（fail-closed）: %s",
+            reason
+        )
+
+        return None
+
+    try:
+
+        snapshot_output.write_snapshot_output(
+            output_target,
+            refill.render_planner_refill_request(
+                payload
+            )
+        )
+
+    except Exception as exc:
+
+        # 镜像只是「人工诊断副本」：任何 I/O 失败都必须降级为日志，
+        # 绝不允许影响 rolling queue 的推进。
+        _logger.warning(
+            "Planner refill 事实镜像写入失败（忽略，不影响队列）: %s",
+            exc
+        )
+
+        return None
+
+    return output_target
+
+
+def planner_refill_report(
+    *,
+    context: str,
+    only_when_required: bool = False,
+    throttle: bool = True,
+    last_signature: str | None = None,
+    last_emitted_at: float | None = None,
+    current_time: float | None = None
+) -> dict[str, Any]:
+    """只读计算 refill 事实并按需输出结构化提示（+ runtime 镜像）。
+
+    返回值永远是**新的提示状态**，因此调用方即使本轮没输出提示也能正确推进
+    节流窗口：
+
+    - ``payload``：只读事实包；事实不可读时为 ``None``（只读提示降级）；
+    - ``signature``：当前事实的稳定签名；
+    - ``emitted``：本轮是否真的输出了提示；
+    - ``line``：本轮的提示行（未输出时为 ``None``）；
+    - ``emitted_at``：最近一次输出提示的 monotonic 时间。
+
+    ``only_when_required=True`` 用于「成功 commit+push 之后」路径：只有
+    ``deficit > 0`` 才提示（队列足量时保持安静）；idle 路径则两种状态都提示，
+    但受 :func:`should_emit_refill_hint` 节流保护。
+    """
+
+    payload = planner_refill_facts()
+
+    if payload is None:
+
+        return {
+            "payload": None,
+            "signature": last_signature,
+            "emitted": False,
+            "line": None,
+            "emitted_at": last_emitted_at,
+        }
+
+    signature = planner_refill_hint_signature(
+        payload
+    )
+
+    now = (
+        time.monotonic()
+        if current_time is None
+        else current_time
+    )
+
+    required = bool(
+        payload.get(
+            "refill_required"
+        )
+    )
+
+    suppressed_by_requirement = only_when_required and not required
+
+    suppressed_by_throttle = throttle and not should_emit_refill_hint(
+        signature,
+        last_signature,
+        last_emitted_at,
+        current_time=now
+    )
+
+    emit = not (
+        suppressed_by_requirement
+        or
+        suppressed_by_throttle
+    )
+
+    line = None
+
+    if emit:
+
+        line = planner_refill_hint_line(
+            payload,
+            context=context
+        )
+
+        _logger.info(
+            "%s",
+            line
+        )
+
+        if planner_refill_mirror_allowed():
+
+            mirror_planner_refill_request(
+                payload
+            )
+
+        else:
+
+            _logger.info(
+                "Planner refill 事实未镜像："
+                "只读事实不来自本仓库 queue（只报告，不写文件）"
+            )
+
+    return {
+        "payload": payload,
+        "signature": signature,
+        "emitted": emit,
+        "line": line,
+        "emitted_at": (
+            now
+            if emit
+            else last_emitted_at
+        ),
+    }
+
+
+def planner_refill_idle_hint(
+    state: dict[str, Any] | None = None,
+    *,
+    current_time: float | None = None
+) -> dict[str, Any]:
+    """idle / no-runnable 路径的**节流**低水位提示，返回可跨轮传递的新状态。
+
+    - 队列足量时也会提示一次 ``GPT_PLANNER_REFILL_SATISFIED``（状态翻转可见），
+      之后同样按 ``REFILL_HINT_SECONDS`` 节流；
+    - 事实一变（例如刚完成 / 阻塞一个 task）签名就变，立即重新提示，
+      因此「队列耗尽之前」始终能看到 ``GPT_PLANNER_REFILL_REQUIRED``；
+    - 只报告：绝不生成任务、绝不改状态，也绝不改变本轮停线判定。
+    """
+
+    last_signature, last_emitted_at = planner_refill_hint_state(
+        state
+    )
+
+    report = planner_refill_report(
+        context=REFILL_HINT_CONTEXT_IDLE,
+        throttle=True,
+        last_signature=last_signature,
+        last_emitted_at=last_emitted_at,
+        current_time=current_time,
+    )
+
+    return {
+        "signature": report["signature"],
+        "emitted_at": report["emitted_at"],
+    }
 
 
 # ============================================================
@@ -5546,6 +6096,24 @@ def process_task(
                     task_id
                 )
 
+                # ================================================
+                # GPT Planner 低水位提示（GOLD-035）
+                # ================================================
+                #
+                # 「任务完成 + commit + push 全部成功（远端可见）」之后，
+                # 立即用同一份只读事实包重算「当前任务之外还剩几个已批准
+                # follow-on」；不足 lookahead_target 时明确请求 GPT 补队列，
+                # 而不是等下一次断粮才发现。
+                #
+                # 只报告：绝不生成任务、绝不改状态、绝不跨越 Gate，
+                # 也绝不阻塞下面 rolling queue 的推进。
+
+                planner_refill_report(
+                    context=REFILL_HINT_CONTEXT_POST_PUSH,
+                    only_when_required=True,
+                    throttle=False
+                )
+
                 return "completed"
 
             # ====================================================
@@ -6415,7 +6983,8 @@ def sleep_interruptibly(
 # ============================================================
 
 def run_iteration(
-    last_idle_log_at
+    last_idle_log_at,
+    refill_hint_state=None
 ):
     """执行一轮 Orchestrator 循环，返回本轮动作。
 
@@ -6428,6 +6997,11 @@ def run_iteration(
        （completed locally + push pending 时绝不重跑 Cline，
         本地 commit/result 一律保留）；
     3) 只有 remote synced 之后，rolling queue 才允许检查/执行下一个 task。
+
+    另外（GOLD-035）：idle / no-runnable 路径会用**只读** refill 事实包提示
+    `GPT_PLANNER_REFILL_REQUIRED`（队列足量时是 `..._SATISFIED`），提示受
+    `REFILL_HINT_SECONDS` 节流保护，跨轮状态通过返回值的
+    ``refill_hint_state`` 传递。提示只报告，绝不改变任何停线 / 执行判定。
     """
 
     # ========================================================
@@ -6451,7 +7025,10 @@ def run_iteration(
                 recovery["outcome"],
 
             "last_idle_log_at":
-                last_idle_log_at
+                last_idle_log_at,
+
+            "refill_hint_state":
+                refill_hint_state
         }
 
     # ========================================================
@@ -6480,7 +7057,10 @@ def run_iteration(
                 "sync_pending",
 
             "last_idle_log_at":
-                last_idle_log_at
+                last_idle_log_at,
+
+            "refill_hint_state":
+                refill_hint_state
         }
 
     # ========================================================
@@ -6514,6 +7094,10 @@ def run_iteration(
                     outcome,
 
                 "last_idle_log_at":
+                    None,
+
+                # 刚完成一个 task：事实已变，下一轮 idle 时允许立即重新提示。
+                "refill_hint_state":
                     None
             }
 
@@ -6535,6 +7119,9 @@ def run_iteration(
                     outcome,
 
                 "last_idle_log_at":
+                    None,
+
+                "refill_hint_state":
                     None
             }
 
@@ -6549,8 +7136,13 @@ def run_iteration(
                 outcome,
 
             "last_idle_log_at":
+                None,
+
+            # 任务 outcome 会改变队列事实：允许下一轮 idle 立即重新提示。
+            "refill_hint_state":
                 None
         }
+
 
     now = time.monotonic()
 
@@ -6567,6 +7159,22 @@ def run_iteration(
 
         last_idle_log_at = now
 
+    # ========================================================
+    # GPT Planner 低水位提示（GOLD-035）
+    # ========================================================
+    #
+    # idle / no-runnable 同样必须在队列**耗尽之前**看到「需要补队列」，
+    # 而不是等 `No runnable task` 反复出现才发现断粮。
+    #
+    # 只报告：绝不生成任务、绝不补队列、绝不改状态，也绝不绕过
+    # blocked / human-gated 的 queue head（上面的停线判定完全不变）。
+    # 提示本身去重 / 节流，避免每 20 秒刷屏；事实一变立即重新提示。
+
+    refill_hint_state = planner_refill_idle_hint(
+        refill_hint_state,
+        current_time=now
+    )
+
     return {
 
         "action":
@@ -6576,7 +7184,10 @@ def run_iteration(
             "idle",
 
         "last_idle_log_at":
-            last_idle_log_at
+            last_idle_log_at,
+
+        "refill_hint_state":
+            refill_hint_state
     }
 
 
@@ -6739,10 +7350,18 @@ def main():
     )
 
     _logger.info(
+        "Refill hint: %ss (GPT_PLANNER_REFILL_REQUIRED throttle)",
+        REFILL_HINT_SECONDS
+    )
+
+    _logger.info(
         ""
     )
 
     last_idle_log_at = None
+
+    # GOLD-035：低水位提示的跨轮节流状态（只在 idle 路径推进）。
+    refill_hint_state = None
 
     # ========================================================
     # Main Loop
@@ -6755,12 +7374,19 @@ def main():
             try:
 
                 step = run_iteration(
-                    last_idle_log_at
+                    last_idle_log_at,
+                    refill_hint_state
                 )
 
                 last_idle_log_at = step[
                     "last_idle_log_at"
                 ]
+
+                # GOLD-035：跨轮保留低水位提示的节流状态，
+                # 避免 idle / no-runnable 时每 20 秒重复刷屏。
+                refill_hint_state = step.get(
+                    "refill_hint_state"
+                )
 
                 # ============================================
                 # 版本漂移可见性（GOLD-021）

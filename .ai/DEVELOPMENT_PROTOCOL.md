@@ -472,4 +472,29 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   - `--output` 只允许写 `<root>/.ai/runtime/**` 或系统临时目录，**绝不**写
     `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`；
   - 本工具**没有任何**生成任务、补队列、改状态或跨 Gate 的能力（Executor 权限不变）。
+- **Orchestrator 生命周期接入（GOLD-035 起）**：低水位不再等到「队列耗尽」才发现，
+  但规划权依旧 100% 属于 GPT：
+  - **成功 push 之后立即提示**：每个 task 在 validation + commit + push 全部成功
+    （远端可见）后，Orchestrator 立即用同一份只读事实包重算
+    `follow_on_count` / `lookahead_target` / `deficit` / `reason_codes`；`deficit > 0` 时输出
+    结构化日志
+    `GPT_PLANNER_REFILL_REQUIRED context=post_successful_commit_push head=... follow_on_count=... target=... deficit=... reason_codes=[...] executor_can_refill=false`；
+    队列足量时该路径保持安静（不制造噪声）；
+  - **idle / `No runnable task` 同样提示**：`context=idle_no_runnable_task`；
+    队列足量（或只剩合法 human-gated tail）时输出 `GPT_PLANNER_REFILL_SATISFIED`，
+    让「状态翻转」在日志里可见；
+  - **去重 / 节流**：同一事实状态（`facts_digest` + 计数派生签名）在
+    `AI_REFILL_HINT_SECONDS`（默认 `1800`s，下限 = `AI_POLL_SECONDS`）内只提示一次；
+    事实一变（完成 / 阻塞 / 队列增删）立即重新提示 —— 既保证「耗尽之前」能看到，
+    又绝不每 20 秒刷屏；节流状态跨轮传递，且不改变检测频率；
+  - **只读镜像（人工诊断）**：每次实际提示时把同一份事实包写到
+    `<root>/.ai/runtime/planner_refill_request.json`（复用
+    `orchestrator.planner_snapshot_output` 的 fail-closed 守卫：只允许
+    `<root>/.ai/runtime/**` 或系统临时目录；事实不来自本仓库自身 queue 时只记日志、不写文件）。
+    **绝不**写 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+    `.ai/GPT_REVIEW_LEDGER.json` / result；
+  - **提示只报告**：不生成任务、不补队列、不改项目状态、不决定 Phase、不跨 Gate；
+    既不阻塞当前合法任务（`find_next_task_with_reason` 的 ready 判定与停线语义完全不变），
+    也绝不绕过 blocked / human-gated 的 queue head —— 提示里只有「缺几个 / 卡在谁 / 为什么 /
+    `executor_can_refill=false`」这类事实。
 

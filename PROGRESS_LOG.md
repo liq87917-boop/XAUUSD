@@ -4967,4 +4967,53 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   `queue_head` / `follow_on_count` / `deficit` / `reason_codes`，据此补足 follow-on；
   再按 GOLD-035 / GOLD-036 把提示与契约固化。
 
+## GOLD-035：Orchestrator 在队列低水位主动请求 GPT Planner（只读提示接入生命周期）
+
+### 1. 背景 / 问题
+
+- GOLD-034 已经把「当前任务之外还剩几个已批准任务、缺几个」变成确定性只读事实包，
+  但它只是一个**离线 CLI**：Orchestrator 的运行循环里没有任何调用点，于是实际运行中
+  仍然只能在 `No runnable task` 反复出现后才发现断粮；
+- 红线不变：只有 GPT 能规划 / 补队列 / 改 `PROJECT_STATE`；Cline / DeepSeek 只是
+  Executor，任何「顺手补一下队列」都是把规划权下放，必须 fail-closed。
+
+### 2. 变更（最小范围）
+
+- `orchestrator/ai_orchestrator.py`（唯一改动的主代码文件，新增 §GPT Planner refill
+  低水位提示）：
+  - 新增 `PROJECT_STATE_PATH` 只读常量与 `repo_scoped_import`：生产以
+    `py -u orchestrator/ai_orchestrator.py` 启动时 `sys.path[0]` 是 `orchestrator/`，
+    因此这里只在必要时把仓库根临时放入 `sys.path`（导入后立即还原）并缓存模块，
+    绝不留副作用、绝不改任何项目状态；
+  - `planner_refill_facts()`：**复用** GOLD-034 `build_planner_refill_request`（只读），
+    任何异常 / 模块不可用一律降级为 `None`（只读提示降级，绝不阻塞 rolling queue）；
+  - `planner_refill_hint_line()`：结构化提示行，稳定字段
+    `head` / `follow_on_count` / `target` / `deficit` / `reason_codes` /
+    `executor_can_refill=false`；`PLANNER_REFILL_REQUIRED_CODE =
+    "GPT_PLANNER_REFILL_REQUIRED"`，队列足量时为 `GPT_PLANNER_REFILL_SATISFIED`；
+  - `planner_refill_report()`：只读计算 + 按需提示（`only_when_required` / `throttle`），
+    返回新的节流状态；提示时把同一份事实镜像到
+    `<root>/.ai/runtime/planner_refill_request.json`，复用
+    `orchestrator.planner_snapshot_output` 的 fail-closed 守卫（只允许运行时/临时路径，
+    路径被重定向时只记日志不写文件 —— 避免写出误导性的诊断镜像）；
+  - `should_emit_refill_hint()` / `planner_refill_idle_hint()`：与 `should_log_idle`
+    同构的节流（同一事实状态在 `REFILL_HINT_SECONDS` 内只提示一次；
+    `REFILL_HINT_SECONDS = max(POLL_SECONDS, AI_REFILL_HINT_SECONDS 或 1800)`），
+    事实一变（签名变化）立即重新提示；
+  - `process_task()`：validation + commit + push **全部成功（远端可见）** 之后立即
+    `planner_refill_report(context=post_successful_commit_push, only_when_required=True,
+    throttle=False)`，然后再 `return "completed"`；
+  - `run_iteration()`：新增可选入参 `refill_hint_state`，idle / no-runnable 路径在原有
+    停线判定**之后**额外调用 `planner_refill_idle_hint(...)`，并把新的节流状态放进返回值
+    `refill_hint_state`（其余 return 分支显式置 None 或原样透传）；
+  - `main()`：跨轮传递 `refill_hint_state`（`step.get(...)`，兼容旧结构）并在启动信息里
+    打印 `Refill hint: <s> (GPT_PLANNER_REFILL_REQUIRED throttle)`。
+  - **未改变**：`find_next_task_with_reason` / `evaluate_task_readiness` / 依赖顺序 /
+    Git sync / 恢复状态机 / push-pending 语义 / Gate 判定一律保持原样，提示只发生在
+    「合法任务已执行完」或「已经停线 idle」之后。
+- `.ai/DEVELOPMENT_PROTOCOL.md` §2.10：新增「Orchestrator 生命周期接入（GOLD-035 起）」
+  条目（两个 context、节流口径、镜像边界、只报告不规划）。
+- 未新增依赖、未改 `pyproject.toml`、未改 `start_agent.bat`（默认节流值已足够，且该文件
+  不在本任务允许的主路径内）。
+
 
