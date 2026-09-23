@@ -4423,3 +4423,82 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
   `evidence_operator workflow --no-dry-run` / `evidence_gap_diagnostic` 与 **L3 人工 Gate**；
   `PHASE3_3_DATA` 仍 BLOCKED。
 
+
+---
+
+## 第九十二轮（2026-09-23）：GOLD-029 — 把 Human Verification Attestation 接入 Evidence APPROVE 门禁
+
+### 1. 背景 / 问题
+
+GOLD-028 交付了**材料级人工核验凭证**（`phase33_human_verification_attestation`），但 GOLD-012 的
+`APPROVE` 仍然只凭"人工填一个受控 reason code"就能把候选包放进 `approved-for-explicit-intake`：
+**凭证与批准之间没有强制绑定**，一份陈旧 / 漂移 / 被篡改 / 只核验了一半的凭证也照样能"批准"。
+
+### 2. 变更（最小范围）
+
+- `src/evidence/review.py`：
+  - 新增 `build_attestation_binding()`：`APPROVE` 记录前**必须**显式给出 GOLD-028 凭证文件，并用
+    `load_attestation_document()` + `verify_attestation()` 与**当前**候选目录逐项重新绑定核验
+    （`package fingerprint` / `package 内容身份` / `handoff 内容身份` / `scope` /
+    `preflight_pass` / `all_required_verified`）；缺失 / 陈旧 / 漂移 / 被篡改 / 部分核验一律
+    `ReviewAttestationError`（继承 `ReviewTargetError` → 退出码 `4`）且**零写入**；
+  - `ReviewRecord` 新增**最小** `attestation` binding（`ATTESTATION_BINDING_KEYS`：binding 版本 /
+    GOLD-028 schema + contract 版本 / `attestation_id` / 凭证文档 `sha256` / package + handoff
+    内容身份 / `scope` / `all_required_verified`）；**绝不**保存凭证正文、材料备注、`reviewer`
+    或任何证据时间；
+  - `REJECT` / `NEEDS_CHANGES` **不**需要凭证（负向决策审计不被阻塞）；
+  - 旧 ledger（无 binding 的 `APPROVE`）**保持可读**、`decision_id` 派生口径不变（`compute_decision_id`
+    未改）、**绝不原地迁移 / 重写**；新门禁只对后续 / 当前重新验证生效；
+  - `build_approved_intake_list()` 新增 `_attestation_binding_invalidation()`：用**当前** inbox /
+    handoff 重新推导绑定身份，缺失 binding → `ATTESTATION_MISSING`、未完整核验 →
+    `ATTESTATION_INCOMPLETE`、指纹与记录不一致 → `ATTESTATION_TAMPERED`、
+    候选包内容身份 / `scope` 漂移 → `ATTESTATION_STALE`（稳定原因码，批准失效并进 `invalidated`）；
+  - `_sanitize_attestation_binding()`：ledger 读入时逐字段白名单校验（未授权键 / 类型 / 摘要 /
+    scope / 非 `APPROVE` 携带 binding 一律 `ReviewLedgerStateError`）。
+- `scripts/evidence_review.py`：新增 `--attestation <凭证文件>`（`approve` 必填；其它决策不需要），
+  并在 `--help` / 文档串中说明门禁与退出码。
+- `src/evidence/intake_plan.py`：`PlanVerificationCode` 与 `_INVALIDATION_CODES` 显式映射四个
+  GOLD-029 失效原因码，使**后续 intake plan** 链在 binding 缺失 / 漂移时给出稳定原因码
+  （计划仍**只读**、**不自动 intake**）。
+- `src/evidence/__init__.py`：惰性导出新增 `ATTESTATION_BINDING_KEYS` / `ATTESTATION_BINDING_VERSION` /
+  `ReviewAttestationError`（与 `__all__` 同源）。
+
+### 3. 验证
+
+- 新增单元回归：`tests/unit/test_evidence_review.py` 覆盖「无凭证的 APPROVE → `ATTESTATION_MISSING`
+  且零写入 + 原始 evidence 零变化」「部分核验 → `ATTESTATION_INCOMPLETE`」「绑错 package /
+  package 漂移 → `ATTESTATION_STALE`」「凭证被改写 → `ATTESTATION_TAMPERED`」「合法绑定 APPROVE
+  只保存**最小** binding（无材料 / 无证据时间）」「负向决策无需凭证」「历史 ledger 可读但不满足
+  新门禁且文件零改写」「批准清单重新验证对 binding 漂移失效」「ledger binding 被改写 / 削弱 /
+  非 APPROVE 携带 → fail-closed」；
+- 新增集成回归：`tests/integration/test_evidence_review_integration.py` 覆盖 CLI
+  「缺 `--attestation` → 退出码 `4`、stdout 为空、零写入」「凭证被篡改 → 退出码 `4`」
+  「`reject` 无凭证仍成功落盘」；`tests/unit/test_evidence_intake_plan.py` 覆盖后续 plan 链
+  的 `ATTESTATION_MISSING` / `ATTESTATION_STALE` 稳定原因码；
+- 全量回归：`pytest tests` 分批执行，`unit` 与 `integration` 全部通过（既有 GOLD-012 ~ GOLD-028
+  测试在补齐合法凭证后保持一致语义）；`ruff check .` → **All checks passed!**；
+  `mypy config database src scripts` → **Success: no issues found in 178 source files**。
+
+### 4. 范围守规
+
+- 零网络 / 零数据库 / 零模型训练 / 零交易；不新增 / 不升级依赖；未改 Phase 3.3 blocker、
+  数据资格阈值、L3-L4 Gate、`LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+  `PHASE3_3_DATA` 仍 BLOCKED；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`、
+  `src/alpha/**`、`src/execution/**`、`database/**`、`docs/**`、`.env`、`config/rss_sources.json`；
+- 写入测试全部发生在 `tmp_path`；Cline 未执行任何 Git 写操作。
+
+### 5. 遗留 / 下一步
+
+- **手写 ledger 的伪造风险**：binding 是"批准时的内容摘要"，ledger 若被拥有写权限的人直接改成
+  另一份**结构合法**的 binding（伪造 `attestation_id` / 摘要），`build_approved_intake_list()`
+  只能按结构白名单接受（无法在没有凭证文件时重新推导）；已在 TECH_DEBT 记录，建议后续给
+  ledger 增加基于外部密钥 / 追加式签名日志的完整性保护；
+- `handoff_content_sha256`（整个 handoff 快照身份）只在 **APPROVE 门禁**（凭证文件在场）复核；
+  批准清单 / plan 复核以**被批准候选包自身**的材料结构内容身份为准（新增无关候选包不会静默
+  作废既有批准，也不放过被批准包的漂移）；
+- 建议下一步：GOLD-029 之后的资格链仍须以 GOLD-028 凭证 + 现有人工 Gate 为准，
+  `evidence_review --decision approve --attestation <凭证>` → `--approved-out` →
+  `evidence_intake_plan` → **人工显式** `evidence_operator workflow --no-dry-run`；
+  `PHASE3_3_DATA` 仍 BLOCKED。
+

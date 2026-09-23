@@ -59,6 +59,8 @@ from src.evidence import (
     scan_inbox,
     write_snapshot_state,
 )
+from src.evidence.human_verification_attestation import run_attestation
+from src.evidence.intake_handoff import load_intake_handoff
 from src.monitoring import PHASE3_3_BLOCKER_CODE
 
 pytestmark = pytest.mark.integration
@@ -281,6 +283,43 @@ def file_snapshot(root: Path, *, include_locks: bool = False) -> dict[str, str]:
     }
 
 
+def write_attestation(inbox: Path, *, moment: datetime = MOMENT, suffix: str = "") -> Path:
+    """为 inbox 内唯一候选包生成合法 GOLD-028 材料级人工核验凭证（零网络）。"""
+    handoff = load_intake_handoff(inbox, as_of=moment)
+    package = handoff.packages[0]
+    materials = [
+        {
+            "material": item.key,
+            "decision": "VERIFIED",
+            "reason_code": "HUMAN_REVIEWED",
+            "reviewer": "operator-li",
+            "reviewed_at": "2026-09-22T00:00:00+00:00",
+            "evidence_reference": "https://vendor.example/terms",
+        }
+        for item in package.materials
+        if item.category != "gate"
+    ]
+    document = {
+        "schema_version": 1,
+        "package_fingerprint": package.fingerprint,
+        "scope": package.scope,
+        "reviewer": "operator-li",
+        "materials": materials,
+    }
+    root = Path(inbox).parent
+    verification = root / f"verification{suffix}.json"
+    verification.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    out = root / f"phase33_human_verification_attestation{suffix}.json"
+    run_attestation(
+        inbox,
+        verification_path=verification,
+        moment=moment,
+        package=package.fingerprint,
+        out_path=out,
+    )
+    return out
+
+
 def prepare_chain(
     tmp_path: Path,
     session_factory: sessionmaker[Session],
@@ -309,6 +348,7 @@ def prepare_chain(
         fingerprint=target.fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, suffix=f"-{target.fingerprint[:8]}"),
         out_path=ledger,
         approved_out_path=approved,
     )

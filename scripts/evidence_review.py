@@ -13,7 +13,9 @@
     # ② 记录决策（dry-run：只预览，不落盘；想落盘必须给 --out）
     python -m scripts.evidence_review --inbox-dir logs/evidence/inbox \
         --decision approve --fingerprint <64 位指纹> --reviewer operator-li \
-        --reason-code APPROVED_FOR_EXPLICIT_INTAKE --out logs/evidence/inbox_review_ledger.json \
+        --reason-code APPROVED_FOR_EXPLICIT_INTAKE \
+        --attestation logs/evidence/phase33_human_verification_attestation.json \
+        --out logs/evidence/inbox_review_ledger.json \
         --approved-out logs/evidence/approved_for_intake.json --json
 
     # ③ 推翻既有决策：必须**显式**给出新 revision + --override（历史全部保留）
@@ -27,8 +29,13 @@
 - **纯本地**：只扫描显式 ``--inbox-dir``（只读）；**绝不**移动 / 重命名 / 删除 / 改写 inbox 内
   任何原始 evidence，不联网、不写数据库、不新增 migration/schema、**不自动 intake**；
 - **approve 门禁**：必须“该指纹当前仍在扫描结果中 + 当前预检 ``PREFLIGHT_PASS`` +
-  非模板 / 示例 / Mock”；内容变化 → 新指纹（**旧批准绝不继承**）；候选消失 / 预检不通过 /
-  state 损坏 / 复核元数据与当前证据不一致一律 **fail-closed**；
+  非模板 / 示例 / Mock”**且必须显式给出 GOLD-028 材料级人工核验凭证 ``--attestation``**
+  （记录前与**当前**候选目录重新绑定核验：package fingerprint / package 内容身份 /
+  handoff 内容身份 / ``scope`` / ``preflight_pass`` / ``all_required_verified``）；
+  凭证缺失 / 陈旧 / 漂移 / 被篡改 / 部分核验一律 **fail-closed（退出码 4、零写入）**；
+  内容变化 → 新指纹（**旧批准绝不继承**）；候选消失 / 预检不通过 / state 损坏 /
+  复核元数据与当前证据不一致一律 **fail-closed**；``reject`` / ``needs_changes``
+  **不**需要凭证（负向决策审计不被阻塞）；
 - **追加式 ledger**：只 append、**绝不静默覆盖**；同一指纹 + 完全相同的决策内容重复提交**幂等**；
   任何差异都必须显式 ``--revision`` + ``--override``（保留全部历史，``supersedes`` 指向前一条）；
 - **写开关只有一个**：``--out`` 才写 ledger（``--approved-out`` 才写批准清单），两者**原子写**
@@ -155,6 +162,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="显式承认这是一次推翻（必须与 --revision 同时给出；历史全部保留）",
     )
     parser.add_argument(
+        "--attestation",
+        type=Path,
+        default=None,
+        help=(
+            "GOLD-028 材料级人工核验凭证文件（**approve 必填**）：记录前会与**当前**候选目录"
+            "重新绑定核验（缺失 / 陈旧 / 漂移 / 被篡改 → 退出码 4、零写入）；"
+            "reject / needs_changes 不需要"
+        ),
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         default=None,
@@ -217,8 +234,10 @@ def _validate_args(
             parser.error(
                 f"--reason-code 必须与决策 {decision.value} 匹配；允许值：{allowed}"
             )
-    elif args.revision is not None or args.override:
-        parser.error("--revision / --override 只在给出 --decision 时有意义")
+    elif args.revision is not None or args.override or args.attestation is not None:
+        parser.error(
+            "--revision / --override / --attestation 只在给出 --decision 时有意义"
+        )
     if args.override and args.revision is None:
         parser.error("--override 必须与显式 --revision 同时给出（绝不静默覆盖历史）")
     if args.revision is not None and args.revision < 1:
@@ -259,6 +278,7 @@ def main(
             out_path=args.out,
             approved_out_path=args.approved_out,
             lock_path=args.lock,
+            attestation_path=args.attestation,
         )
     except (ReviewError, LockConflictError, LockUnavailableError) as exc:
         # fail-closed：任何失败都**不写** artifact；错误信息统一脱敏

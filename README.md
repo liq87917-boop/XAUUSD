@@ -1612,6 +1612,38 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   「候选证据内容与 mtime 零变化」「无网络 / 无写库 / 无 `open` / 无 `os.stat`」等源码级与
   运行期守卫。
 
+
+### APPROVE 门禁绑定材料级人工核验凭证（`scripts/evidence_review.py --attestation`，GOLD-029）
+
+- **为什么**：GOLD-028 只产出了凭证；GOLD-029 把 GOLD-012 的 `APPROVE` 从"人工填一个受控
+  reason code 就能批准"升级为**必须绑定一份当前、完整、未漂移的 GOLD-028 凭证**；
+- **门禁（fail-closed、零写入）**：`--decision approve` **必须**显式给出
+  `--attestation <phase33_human_verification_attestation.json>`，记录前用
+  `load_attestation_document()` + `verify_attestation()` 与**当前**候选目录逐项重新绑定核验：
+  凭证文档完整性（重新推导 `attestation_id` / 安全字段 / 计数自洽 / 无证据时间键）、
+  `package fingerprint`、package 内容身份、`handoff` 内容身份、`scope`、`preflight_pass`、
+  `all_required_verified=true`；任一不匹配 → 退出码 `4`（`ATTESTATION_MISSING` /
+  `ATTESTATION_INCOMPLETE` / `ATTESTATION_STALE` / `ATTESTATION_TAMPERED`）且**零写入**；
+- **只保存最小绑定**：新 `APPROVE` 记录只带 `attestation` 白名单块（binding 版本、GOLD-028
+  schema / contract 版本、`attestation_id`、凭证文档 `sha256`、package / handoff 内容身份、
+  `scope`、`all_required_verified`），**绝不**保存凭证正文、材料备注、`reviewer` 或任何证据时间；
+- **负向决策不被阻塞**：`reject` / `needs_changes` **不**需要凭证；
+- **历史只读兼容、绝不追溯升级**：旧 ledger（没有 binding 的 `APPROVE`）仍可读、`decision_id`
+  派生口径不变、文件**绝不**被原地迁移 / 改写；但
+  `build_approved_intake_list()` / `evidence_intake_plan` 会以稳定原因码 `ATTESTATION_MISSING`
+  把它列入 `invalidated`（新门禁只对后续 / 当前重新验证生效）；
+- **批准清单 / 计划链重新验证**：生成批准清单时用**当前** inbox / handoff 重新推导绑定身份，
+  被批准候选包的材料结构内容身份或 `scope` 漂移 → `ATTESTATION_STALE`；
+  `evidence_intake_plan` 的 `PlanVerificationCode` 显式映射这四个原因码；
+- **用法**：`evidence_human_verification_attestation ... --out <凭证>` →
+  `evidence_review --decision approve --fingerprint <fp> --reviewer <label> --reason-code
+  APPROVED_FOR_EXPLICIT_INTAKE --attestation <凭证> --out <ledger> --approved-out <list>`；
+  `--help` 暴露 `--attestation`，但**绝不**暴露任何 `qualify` / `advance` / `--no-dry-run` 开关；
+- **回归测试**：`tests/unit/test_evidence_review.py`（新增 GOLD-029 用例）+
+  `tests/integration/test_evidence_review_integration.py`（CLI 缺凭证 / 凭证篡改 / reject 无凭证）
+  \+ `tests/unit/test_evidence_intake_plan.py`（计划链 `ATTESTATION_MISSING` / `ATTESTATION_STALE`）。
+
+
 ## 8. 数据模型
 
 

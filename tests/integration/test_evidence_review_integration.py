@@ -39,6 +39,8 @@ from src.evidence import (
     SingleInstanceLock,
     scan_inbox,
 )
+from src.evidence.human_verification_attestation import run_attestation
+from src.evidence.intake_handoff import load_intake_handoff
 
 pytestmark = pytest.mark.integration
 
@@ -109,6 +111,43 @@ def fingerprint_of(inbox: Path) -> str:
     return report.packages[0].fingerprint
 
 
+def write_attestation(inbox: Path, *, moment: datetime = MOMENT, suffix: str = "") -> Path:
+    """为 inbox 内唯一候选包生成合法 GOLD-028 材料级人工核验凭证（零网络）。"""
+    handoff = load_intake_handoff(inbox, as_of=moment)
+    package = handoff.packages[0]
+    materials = [
+        {
+            "material": item.key,
+            "decision": "VERIFIED",
+            "reason_code": "HUMAN_REVIEWED",
+            "reviewer": "operator-li",
+            "reviewed_at": "2026-09-22T00:00:00+00:00",
+            "evidence_reference": "https://vendor.example/terms",
+        }
+        for item in package.materials
+        if item.category != "gate"
+    ]
+    document = {
+        "schema_version": 1,
+        "package_fingerprint": package.fingerprint,
+        "scope": package.scope,
+        "reviewer": "operator-li",
+        "materials": materials,
+    }
+    root = Path(inbox).parent
+    verification = root / f"verification{suffix}.json"
+    verification.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    out = root / f"phase33_human_verification_attestation{suffix}.json"
+    run_attestation(
+        inbox,
+        verification_path=verification,
+        moment=moment,
+        package=package.fingerprint,
+        out_path=out,
+    )
+    return out
+
+
 def decide_argv(
     inbox: Path,
     ledger: Path,
@@ -118,8 +157,9 @@ def decide_argv(
     reason_code: str = APPROVE_CODE,
     reviewer: str = "operator-li",
     extra: list[str] | None = None,
+    with_attestation: bool = True,
 ) -> list[str]:
-    """构造一次决策的 CLI 参数（测试辅助）。"""
+    """构造一次决策的 CLI 参数（测试辅助；``approve`` 默认附带合法凭证）。"""
     argv = [
         "--inbox-dir",
         str(inbox),
@@ -138,6 +178,9 @@ def decide_argv(
         "--as-of",
         MOMENT.isoformat(),
     ]
+    if decision == "approve" and with_attestation:
+        attestation = write_attestation(inbox, suffix=f"-{fingerprint[:8]}")
+        argv += ["--attestation", str(attestation)]
     return argv + list(extra or [])
 
 
@@ -251,7 +294,9 @@ def test_cli_content_change_invalidates_approval(tmp_path: Path, capsys: Any) ->
 
     # ② 对旧指纹继续 approve → fail-closed（退出码 4，零写入）
     before = ledger.read_bytes()
-    code = main(decide_argv(inbox, ledger, fingerprint=old_fingerprint) + ["--json"])
+    code = main(
+        decide_argv(inbox, ledger, fingerprint=old_fingerprint, with_attestation=False) + ["--json"]
+    )
     assert code == EXIT_STATE_INVALID
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -431,6 +476,7 @@ def test_cli_real_process_smoke(tmp_path: Path) -> None:
     approved = tmp_path / "state" / "approved_for_intake.json"
     build_package(inbox)
     fingerprint = fingerprint_of(inbox)
+    attestation = write_attestation(inbox, suffix=f"-{fingerprint[:8]}")
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}  # 让子进程 stdout 稳定为 UTF-8
     completed = subprocess.run(
         [
@@ -453,6 +499,8 @@ def test_cli_real_process_smoke(tmp_path: Path) -> None:
             "operator-li",
             "--reason-code",
             APPROVE_CODE,
+            "--attestation",
+            str(attestation),
             "--json",
             "--as-of",
             MOMENT.isoformat(),
@@ -475,5 +523,109 @@ def test_cli_real_process_smoke(tmp_path: Path) -> None:
     assert payload["phase_transition_allowed"] is False
     assert payload["approved_list"]["approved_count"] == 1
     assert ledger.exists() and approved.exists()
+    assert json.loads(ledger.read_text(encoding="utf-8"))["decision_count"] == 1
+
+
+
+# ---------------------------------------------------------------------------
+# GOLD-029：CLI 新 APPROVE 必须显式提供并验证材料级人工核验凭证
+# ---------------------------------------------------------------------------
+def test_cli_approve_without_attestation_exits_4_without_writing(
+    tmp_path: Path, capsys: Any
+) -> None:
+    """缺少 ``--attestation`` 的 CLI approve：退出码 4、stdout 为空、零写入、原始证据不变。"""
+    inbox = tmp_path / "inbox"
+    package_dir = build_package(inbox)
+    evidence = package_dir / "author.jsonl"
+    evidence_bytes = evidence.read_bytes()
+    ledger = tmp_path / "review_ledger.json"
+    approved = tmp_path / "approved_for_intake.json"
+    fingerprint = fingerprint_of(inbox)
+
+    code = main(
+        decide_argv(inbox, ledger, fingerprint=fingerprint, with_attestation=False)
+        + ["--approved-out", str(approved), "--json"]
+    )
+
+    assert code == EXIT_STATE_INVALID
+    captured = capsys.readouterr()
+    assert captured.out == ""  # fail-closed：stdout 为空
+    assert "ATTESTATION_MISSING" in captured.err
+    assert not ledger.exists() and not approved.exists()
+    assert evidence.read_bytes() == evidence_bytes
+    assert sorted(item.name for item in package_dir.iterdir()) == [
+        "author.jsonl",
+        MANIFEST_FILE_NAME,
+    ]
+
+
+def test_cli_approve_with_tampered_attestation_exits_4(tmp_path: Path, capsys: Any) -> None:
+    """被改写的凭证（与内容寻址 id 不一致）→ 退出码 4、零写入。"""
+    inbox = tmp_path / "inbox"
+    build_package(inbox)
+    ledger = tmp_path / "review_ledger.json"
+    fingerprint = fingerprint_of(inbox)
+    attestation = write_attestation(inbox, suffix=f"-{fingerprint[:8]}")
+    document = json.loads(attestation.read_text(encoding="utf-8"))
+    document["materials"][0]["decision"] = "NEEDS_CHANGES"
+    attestation.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    code = main(
+        [
+            "--inbox-dir",
+            str(inbox),
+            "--ledger",
+            str(ledger),
+            "--out",
+            str(ledger),
+            "--decision",
+            "approve",
+            "--fingerprint",
+            fingerprint,
+            "--reviewer",
+            "operator-li",
+            "--reason-code",
+            APPROVE_CODE,
+            "--attestation",
+            str(attestation),
+            "--json",
+            "--as-of",
+            MOMENT.isoformat(),
+        ]
+    )
+
+    assert code == EXIT_STATE_INVALID
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "ATTESTATION_TAMPERED" in captured.err
+    assert not ledger.exists()
+
+
+def test_cli_reject_without_attestation_still_records(tmp_path: Path, capsys: Any) -> None:
+    """负向决策不需要凭证：CLI reject 仍然成功并落盘（审计不被阻塞）。"""
+    inbox = tmp_path / "inbox"
+    build_package(inbox)
+    ledger = tmp_path / "review_ledger.json"
+    fingerprint = fingerprint_of(inbox)
+
+    code = main(
+        decide_argv(
+            inbox,
+            ledger,
+            decision="reject",
+            fingerprint=fingerprint,
+            reason_code=REJECT_CODE,
+            with_attestation=False,
+        )
+        + ["--json"]
+    )
+
+    assert code == EXIT_OK
+    payload = json_stdout(capsys)
+    assert payload["decision"]["decision"] == "REJECT"
+    assert payload["decision"]["attestation"] is None
     assert json.loads(ledger.read_text(encoding="utf-8"))["decision_count"] == 1
 

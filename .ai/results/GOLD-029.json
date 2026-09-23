@@ -1,0 +1,94 @@
+{
+  "task_id": "GOLD-029",
+  "title": "把 Human Verification Attestation 接入 Evidence APPROVE 门禁",
+  "status": "completed",
+  "finished_at": "2026-09-23T17:29:02+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M scripts/evidence_review.py",
+    " M src/evidence/__init__.py",
+    " M src/evidence/intake_plan.py",
+    " M src/evidence/review.py",
+    " M tests/integration/test_evidence_decision_packet_integration.py",
+    " M tests/integration/test_evidence_decision_record_integration.py",
+    " M tests/integration/test_evidence_intake_plan_integration.py",
+    " M tests/integration/test_evidence_intake_receipt_integration.py",
+    " M tests/integration/test_evidence_review_integration.py",
+    " M tests/unit/test_evidence_decision_packet.py",
+    " M tests/unit/test_evidence_intake_plan.py",
+    " M tests/unit/test_evidence_intake_receipt.py",
+    " M tests/unit/test_evidence_review.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md                                    |  79 ++++\n README.md                                          |  32 ++\n TECH_DEBT.md                                       |  33 ++\n scripts/evidence_review.py                         |  30 +-\n src/evidence/__init__.py                           |  13 +-\n src/evidence/intake_plan.py                        |  13 +\n src/evidence/review.py                             | 414 +++++++++++++++++-\n .../test_evidence_decision_packet_integration.py   |  40 ++\n .../test_evidence_decision_record_integration.py   |  40 ++\n .../test_evidence_intake_plan_integration.py       |  40 ++\n .../test_evidence_intake_receipt_integration.py    |  40 ++\n .../test_evidence_review_integration.py            | 156 ++++++-\n tests/unit/test_evidence_decision_packet.py        |  48 +++\n tests/unit/test_evidence_intake_plan.py            | 103 +++++\n tests/unit/test_evidence_intake_receipt.py         |  57 +++\n tests/unit/test_evidence_review.py                 | 461 ++++++++++++++++++++-\n 16 files changed, 1578 insertions(+), 21 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T16:57:55+08:00",
+      "finished_at": "2026-09-23T17:29:02+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 257,
+      "duration_ms": 1537624,
+      "usage": {
+        "inputTokens": 68256349,
+        "outputTokens": 151190,
+        "cacheReadTokens": 67938304,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.34223566200000016
+      },
+      "cline_final_text": "Submission recorded (verified): ## GOLD-029 完成总结：把 Human Verification Attestation 接入 Evidence APPROVE 门禁\n\n### 1. 完成内容（按 requirements 逐条）\n1. **新 APPROVE 路径强制绑定 GOLD-028 凭证**：新增 `src/evidence/review.py::build_attestation_binding()`，`APPROVE` 必须显式给出 `--attestation <凭证>`，并在记录前用 `load_attestation_document()` + `verify_attestation()` 与**当前**候选目录逐项重新绑定核验：凭证文档完整性（重新推导 `attestation_id` / 安全字段 / 计数自洽 / 无证据时间键）、`package fingerprint`、package 内容身份、`handoff` 内容身份、`scope`、`preflight_pass`、`all_required_verified=true`。缺失 / 部分核验 / fingerprint mismatch / stale / tampered 分别以稳定原因码 `ATTESTATION_MISSING` / `ATTESTATION_INCOMPLETE` / `ATTESTATION_STALE` / `ATTESTATION_TAMPERED` 抛 `ReviewAttestationError`（继承 `ReviewTargetError` → 退出码 `4`）且**零写入**（先判后写，绝无部分落盘）。\n2. **负向决策不被阻塞**：`REJECT` / `NEEDS_CHANGES` 不需要凭证，`attestation=None`，审计照常落盘（`test_negative_decisions_do_not_require_attestation`、CLI 用例）。\n3. **最小 binding**：`ReviewRecord.attestation` 采用白名单 `ATTESTATION_BINDING_KEYS`（`binding_version` / GOLD-028 `attestation_schema_version` + `attestation_contract_version` / `attestation_id` / 凭证文档 `sha256` / package + handoff 内容身份 / `scope` / `all_required_verified`），**不保存**凭证正文、材料备注、`reviewer`、任何证据时间；`_sanitize_attestation_binding()` 对 ledger 读入做严格白名单校验（未授权键 / 类型 / 摘要 / scope / 非 APPROVE 携带 → `ReviewLedgerStateError`）。\n4. **显式版本化 + 向后兼容只读**：ledger 文档 `schema_version` 不变、`compute_decision_id` 派生口径不变（历史 `decision_id` 仍可原样重算），新字段是**可选且自带版本**；旧 ledger（无 binding 的 APPROVE）保持可读、**绝不**原地迁移 / 重写，且**永不**获得新门禁资格。\n5. **批准清单 / 后续链重新验证**：`build_approved_intake_list()` 新增 `_attestation_binding_invalidation()`，用**当前** inbox / handoff 重新推导 binding 绑定的身份（材料结构内容身份 / `scope` / 候选包存在性），漂移 → `ATTESTATION_STALE`、缺失 → `ATTESTATION_MISSING`；`src/evidence/intake_plan.py` 的 `PlanVerificationCode` + `_INVALIDATION_CODES` 显式映射这四个稳定原因码（计划仍只读、不自动 intake）。\n6. **测试覆盖**：上述全部场景（含 ledger binding 被改写 / 削弱 / 非 APPROVE 携带、零写入 + 原始 evidence 零变化）均有新单元 + 集成用例；既有 GOLD-012~028 测试在补齐合法凭证后语义保持一致。\n\n### 2. 修改的文件（无新增文件）\n- `src/evidence/review.py`（门禁 + 最小 binding + 清单重新验证；`ReviewAttestationError`、`ATTESTATION_BINDING_KEYS`、`ATTESTATION_BINDING_VERSION`、`build_attestation_binding`）\n- `scripts/evidence_review.py`（新增 `--attestation`、文档串 / 帮助与门禁说明）\n- `src/evidence/intake_plan.py`（`PlanVerificationCode` + `_INVALIDATION_CODES` 映射）\n- `src/evidence/__init__.py`（惰性导出 + `__all__` 同步 3 个新公开名）\n- `tests/unit/test_evidence_review.py`（更新既有 approve 用例 + 11 项 GOLD-029 新用例）\n- `tests/unit/test_evidence_intake_plan.py`（helper + 2 项 plan 链新用例 + 既有用例适配）\n- `tests/unit/test_evidence_intake_receipt.py`、`tests/unit/test_evidence_decision_packet.py`（helper 适配）\n- `tests/integration/test_evidence_review_integration.py`（helper + `with_attestation` + 3 项 CLI 新用例 + 真实子进程冒烟）\n- `tests/integration/test_evidence_intake_plan_integration.py`、`test_evidence_intake_receipt_integration.py`、`test_evidence_decision_packet_integration.py`、`test_evidence_decision_record_integration.py`（helper 适配）\n- 文档：`README.md`（新增 GOLD-029 小节）、`PROGRESS_LOG.md`（第九十二轮）、`TECH_DEBT.md`（TD-64 登记表 + 明细 + 变更日志）\n\n### 3. 执行的测试（task `validation_commands`）\n- `.venv\\Scripts\\python.exe -m ruff check .` → **All checks passed!**\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts` → **Success: no issues found in 178 source files**\n- `.venv\\Scripts\\python.exe -m pytest tests -q`：单个命令超出本环境 30s 命令上限，按文件分批覆盖**全部** unit（96 个文件）与 integration（53 个文件）：\n\n### 4. 测试结果\n- unit 分批：`578 passed, 1 deselected` + `913 passed` + `489 passed` + `435 passed, 1 skipped`（合计 2415 passed）\n- integration 分批：`44/25/36/16/17/4/7/2/18/21/95/18/17/8/19/16/…` 全部 passed；证据链关键批：review 13、intake_plan 12、intake_receipt 8、decision_packet 10、decision_record 12、human_verification_attestation 24、import_order+inbox 22、intake_handoff+intake 30、operator+package_builder 22、readiness 26、phase3_3 gate 19、cli_smoke 35（共数百项，全部通过）\n- 受影响面复核：`516 passed`（unit 证据链 6 个文件）+ `50 passed`（integration 证据链 5 个文件）；`217 passed`（review/intake_plan/intake_receipt/lazy_exports）\n- **唯一未通过项为既有环境既存问题**：`tests/unit/test_dukascopy_market.py::test_backfill_cli_help_starts` 因 Windows GBK 控制台解码子进程 UTF-8 输出而 `UnicodeDecodeError`（与本任务无关的测试桩编码问题）；设 `PYTHONUTF8=1` 后该用例 **1 passed**，证明与本次改动无关\n- `git status --porcelain`：仅 16 个允许路径内文件被修改，**0 个新增 / 未跟踪文件**；未触碰 `.ai/tasks`、`.ai/results`、`.ai/PROJECT_STATE.json`、`.ai/GPT_REVIEW_LEDGER.json`、`src/alpha/**`、`src/execution/**`、`database/**`、`docs/**`、`.env`、`config/**`；未执行任何 Git 写操作\n\n### 5. 遗留问题（已登记 TECH_DEBT TD-64）\n- 手写 ledger 的伪造风险：binding 是\"批准时写入的内容摘要\"，拥有 ledger 写权限者可伪造**结构合法**的 binding；无凭证文件时只能校验结构 + 比对当前候选包内容身份，建议后续引入外部密钥 / 追加式签名日志的完整性保护；\n- `handoff_content_sha256`（整批快照身份）只在 APPROVE 门禁（凭证在场）复核；清单 / plan 链以**被批准候选包自身**的内容身份 + `scope` 为准（刻意如此，避免新增无关候选包静默作废既有批准）。\n\n### 6. 是否满足 acceptance\n**满足**：①任何新 APPROVE 都由当前、完整、未漂移的材料级人工核验凭证支撑（凭证文档完整性 + 与当前 inbox 逐项重新绑定），且批准清单 / intake plan 链会再次验证该绑定（漂移即失效、稳定原因码）；②历史记录可审计但绝不自动升级为新门禁合格（`ATTESTATION_MISSING`），REJECT/NEEDS_CHANGES 审计不被阻塞；③ruff / mypy 全绿，pytest 分批覆盖全量且通过（唯一失败为既存环境编码问题，`PYTHONUTF8=1` 下通过）；数据资格、Phase（`PHASE3_3_DATA` 仍 BLOCKED）、L3/L4 与交易安全边界（`LIVE_TRADING` / `ALLOW_EXTERNAL_ORDER_SUBMISSION` 默认 false）不变。\n\n### 7. 建议下一步\n业务方以 `evidence_human_verification_attestation --out` 生成**当前**凭证 → `evidence_review --decision approve --attestation <凭证> --approved-out <list>` → `evidence_intake_plan` → **人工显式** `evidence_operator workflow --no-dry-run` → `recheck` / `intake_receipt` / `decision_packet` → **L3 人工 Gate**；如需更强防伪，可按 TD-64 引入 ledger 级签名 / 外部锚定。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M scripts/evidence_review.py",
+        " M src/evidence/__init__.py",
+        " M src/evidence/intake_plan.py",
+        " M src/evidence/review.py",
+        " M tests/integration/test_evidence_decision_packet_integration.py",
+        " M tests/integration/test_evidence_decision_record_integration.py",
+        " M tests/integration/test_evidence_intake_plan_integration.py",
+        " M tests/integration/test_evidence_intake_receipt_integration.py",
+        " M tests/integration/test_evidence_review_integration.py",
+        " M tests/unit/test_evidence_decision_packet.py",
+        " M tests/unit/test_evidence_intake_plan.py",
+        " M tests/unit/test_evidence_intake_receipt.py",
+        " M tests/unit/test_evidence_review.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md                                    |  79 ++++\n README.md                                          |  32 ++\n TECH_DEBT.md                                       |  33 ++\n scripts/evidence_review.py                         |  30 +-\n src/evidence/__init__.py                           |  13 +-\n src/evidence/intake_plan.py                        |  13 +\n src/evidence/review.py                             | 414 +++++++++++++++++-\n .../test_evidence_decision_packet_integration.py   |  40 ++\n .../test_evidence_decision_record_integration.py   |  40 ++\n .../test_evidence_intake_plan_integration.py       |  40 ++\n .../test_evidence_intake_receipt_integration.py    |  40 ++\n .../test_evidence_review_integration.py            | 156 ++++++-\n tests/unit/test_evidence_decision_packet.py        |  48 +++\n tests/unit/test_evidence_intake_plan.py            | 103 +++++\n tests/unit/test_evidence_intake_receipt.py         |  57 +++\n tests/unit/test_evidence_review.py                 | 461 ++++++++++++++++++++-\n 16 files changed, 1578 insertions(+), 21 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 14%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 21%]\n........................................................................ [ 23%]\n........................................................................ [ 25%]\n........................................................................ [ 28%]\n........................................................................ [ 30%]\n........................................................................ [ 32%]\n........................................................................ [ 35%]\n........................................................................ [ 37%]\n........................................................................ [ 39%]\n........................................................................ [ 42%]\n........................................................................ [ 44%]\n........................................................................ [ 46%]\n........................................................................ [ 49%]\n........................................................................ [ 51%]\n........................................................................ [ 53%]\n........................................................................ [ 56%]\n........................................................................ [ 58%]\n........................................................................ [ 60%]\n........................................................................ [ 63%]\n........................................................................ [ 65%]\n........................................................................ [ 67%]\n........................................................................ [ 70%]\n........................................................................ [ 72%]\n........................................................................ [ 74%]\n........................................................................ [ 77%]\n........................................................................ [ 79%]\n........................................................................ [ 81%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 95%]\n........................................................................ [ 98%]\n..........s............................................                  [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3078 passed, 1 skipped in 324.32s (0:05:24)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 178 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

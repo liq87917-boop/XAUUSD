@@ -38,10 +38,33 @@ GOLD-011 已交付**只读发现与预检**（:mod:`src.evidence.inbox` /
   **都不是** ``published_at`` / ``collected_at`` / ``effective_at`` / ``availability`` 证据；
   本模块产出的 JSON **只有**上述审计字段，绝不合成任何证据时间（见
   :data:`FORBIDDEN_EVIDENCE_FIELDS`）。
+- **新 APPROVE 必须绑定 GOLD-028 材料级人工核验凭证**（GOLD-029）：``APPROVE`` 只允许在
+  **显式**给出 ``--attestation <GOLD-028 凭证文件>`` 时记录，并且在记录前用
+  :func:`~src.evidence.human_verification_attestation.verify_attestation` 把凭证与**当前**
+  候选目录逐项重新绑定核验（package fingerprint / package 内容身份 / handoff 内容身份 /
+  ``scope`` / ``preflight_pass`` / ``all_required_verified``）：任一不匹配（缺失 / 部分核验 /
+  fingerprint mismatch / 漂移 / 被篡改）都 **fail-closed 且零写入**。批准记录里只保存
+  **最小 attestation binding**（版本 + ``attestation_id`` + 内容摘要 + 绑定的 package / handoff
+  身份 + ``scope`` + 完整性布尔），**绝不**保存凭证正文、凭据或任何证据时间；
+- **负向决策不被阻塞**：``REJECT`` / ``NEEDS_CHANGES`` 仍然**不需要** attestation（便于人工
+  驳回 / 要求整改的审计留痕）；
+- **历史记录只读兼容**：旧 ledger（含**没有** attestation binding 的旧 ``APPROVE``）仍然可读、
+  可审计、**绝不**被原地迁移或重写；但**缺失 binding 的 ``APPROVE`` 永不满足新门禁**，
+  :func:`build_approved_intake_list` 会以稳定原因码 ``ATTESTATION_MISSING`` 把它列入
+  ``invalidated``（新门禁只对**后续 / 当前**重新验证生效，绝不自动升级历史结论）。
+  演进方式刻意保持**向后兼容只读**：ledger 文档 ``schema_version`` **不变**，新字段
+  ``decisions[].attestation`` 是**可选**的、且**自带版本**（``binding_version`` +
+  GOLD-028 ``attestation_schema_version`` / ``attestation_contract_version``），
+  老读者忽略它即可；:func:`compute_decision_id` 的派生口径**不变**，因此历史
+  ``decision_id`` 仍可原样重算与对账；
+- **批准清单 / 下游链重新验证**：生成批准清单时再次用**当前** inbox / handoff 重新推导
+  binding 绑定的身份（绑定候选包的材料结构内容身份 / ``scope``），任一漂移 → 稳定原因码
+  ``ATTESTATION_STALE``（``ATTESTATION_INCOMPLETE`` 用于声明未完整核验的 binding），
+  批准失效并**绝不放行**。
 
 入口：``scripts/evidence_review.py``（``--inbox-dir`` / ``--decision`` / ``--fingerprint`` /
-``--reviewer`` / ``--reason-code``；``--out`` 是**唯一** ledger 写开关，``--approved-out`` 才写
-批准清单）。
+``--reviewer`` / ``--reason-code`` / ``--attestation``；``--out`` 是**唯一** ledger 写开关，
+``--approved-out`` 才写批准清单）。
 """
 
 from __future__ import annotations
@@ -59,7 +82,13 @@ from typing import Any, Final
 from src.common import hashing
 from src.common.redaction import redact_secrets, safe_text, safe_url
 from src.evidence import readiness_runner as runner
-from src.evidence.contracts import EVIDENCE_CONTRACT_VERSION
+from src.evidence.contracts import EVIDENCE_CONTRACT_VERSION, EvidenceScope
+from src.evidence.human_verification_attestation import (
+    AttestationError,
+    load_attestation_document,
+    package_content_sha256,
+    verify_attestation,
+)
 from src.evidence.inbox import (
     CandidatePackage,
     InboxError,
@@ -68,6 +97,7 @@ from src.evidence.inbox import (
     ensure_outside_inbox,
     scan_inbox,
 )
+from src.evidence.intake_handoff import IntakeHandoffDocument, load_intake_handoff
 from src.evidence.readiness_watch import MAX_CODE_CHARS, atomic_write_text
 from src.monitoring.phase33_qualification import PHASE3_3_BLOCKER_CODE
 
@@ -75,6 +105,8 @@ __all__ = [
     "APPROVED_KIND",
     "APPROVED_NOTE",
     "APPROVAL_SCOPE",
+    "ATTESTATION_BINDING_KEYS",
+    "ATTESTATION_BINDING_VERSION",
     "EXIT_CONFIG_ERROR",
     "EXIT_LOCK_CONFLICT",
     "EXIT_NO_DECISION",
@@ -100,6 +132,7 @@ __all__ = [
     "InvalidatedApproval",
     "InvalidationReason",
     "ReviewArgumentError",
+    "ReviewAttestationError",
     "ReviewConflictError",
     "ReviewDecision",
     "ReviewError",
@@ -169,6 +202,25 @@ PACKAGE_COMPARED_KEYS: Final[tuple[str, ...]] = (
     "files",
     "rows",
     "acceptable_rows",
+)
+#: **最小 attestation binding** 的版本（GOLD-029；字段增删必须同步升版本 + 更新测试与 README）
+ATTESTATION_BINDING_VERSION: Final[int] = 1
+#: 新的 ``APPROVE`` 记录里保存的**最小 attestation binding** 键集合（白名单）。
+#:
+#: 这里**只**放能够稳定重算 / 比对的身份字段：**绝不**保存凭证正文、材料备注、
+#: ``reviewer`` / ``reviewed_at`` 等内容，也**绝不**保存任何证据时间
+#: （``published_at`` / ``collected_at`` / ``effective_at`` / ``available_at``）。
+ATTESTATION_BINDING_KEYS: Final[tuple[str, ...]] = (
+    "binding_version",
+    "attestation_schema_version",
+    "attestation_contract_version",
+    "attestation_id",
+    "attestation_document_sha256",
+    "package_fingerprint",
+    "package_content_sha256",
+    "handoff_content_sha256",
+    "scope",
+    "all_required_verified",
 )
 
 #: 64 位小写十六进制（指纹 / 摘要 / decision_id 统一校验）
@@ -274,6 +326,15 @@ class InvalidationReason(StrEnum):
     PREFLIGHT_NOT_PASSING = "PREFLIGHT_NOT_PASSING"
     SYNTHETIC_EVIDENCE = "SYNTHETIC_EVIDENCE"
     EVIDENCE_INCONSISTENT = "EVIDENCE_INCONSISTENT"
+    # ---- GOLD-029：材料级人工核验 attestation 门禁（任一即批准失效）----------
+    #: 该 ``APPROVE`` **没有** attestation binding（历史 / 旧口径），永不满足新门禁
+    ATTESTATION_MISSING = "ATTESTATION_MISSING"
+    #: binding 声明的材料级核验**不完整**（``all_required_verified=false``）
+    ATTESTATION_INCOMPLETE = "ATTESTATION_INCOMPLETE"
+    #: binding 绑定的 package / handoff / scope 身份与**当前** inbox 不一致（漂移）
+    ATTESTATION_STALE = "ATTESTATION_STALE"
+    #: binding 结构被改写 / 与记录本身不一致（篡改）
+    ATTESTATION_TAMPERED = "ATTESTATION_TAMPERED"
 
 
 class ReviewError(RuntimeError):
@@ -287,6 +348,13 @@ class ReviewArgumentError(ReviewError):
 class ReviewTargetError(ReviewError):
     """目标候选不满足记录条件（不存在 / 内容已变化 / 预检未通过 / 模板示例）。"""
 
+
+class ReviewAttestationError(ReviewTargetError):
+    """新 ``APPROVE`` 的 GOLD-028 材料级人工核验凭证缺失 / 漂移 / 被篡改。
+
+    **fail-closed、零写入**；继承 :class:`ReviewTargetError` 以保证退出码语义不变
+    （``4``：state 非法，绝不假设已落盘）。
+    """
 
 class ReviewConflictError(ReviewError):
     """与既有决策冲突且未显式给出新 ``revision`` + ``override``（**绝不静默覆盖**）。"""
@@ -454,6 +522,86 @@ def _package_matches_review(record_package: Mapping[str, Any], package: Candidat
     )
 
 
+def _known_scopes() -> frozenset[str]:
+    """受控 scope 词表（**直接取自** ``evidence-intake-v1`` 契约，不另造词表）。"""
+    return frozenset(member.value for member in EvidenceScope)
+
+
+def _sanitize_attestation_binding(raw: object, *, index: int) -> dict[str, Any] | None:
+    """把 ledger 里的 attestation binding **规范化**为白名单形态（被改写 → fail-closed）。
+
+    - 键缺失 / ``None`` → 没有 binding（旧口径记录，仍可读，但**永不**满足新门禁）；
+    - 出现**任何**未授权键 / 类型非法 / 摘要非法 / scope 不在受控词表 →
+      :class:`ReviewLedgerStateError`（绝不"擦一擦"继续读，也绝不猜测缺失字段）。
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise ReviewLedgerStateError("review ledger attestation binding 必须是对象或 null")
+    unknown = sorted(set(str(key) for key in raw) - set(ATTESTATION_BINDING_KEYS))
+    if unknown:
+        raise ReviewLedgerStateError(
+            "review ledger attestation binding 含未授权字段："
+            + "、".join(_safe(item, max_chars=40) for item in unknown)
+        )
+    missing = [key for key in ATTESTATION_BINDING_KEYS if key not in raw]
+    if missing:
+        raise ReviewLedgerStateError(
+            "review ledger attestation binding 缺字段："
+            + "、".join(sorted(missing))
+        )
+    binding_version = raw.get("binding_version")
+    if binding_version != ATTESTATION_BINDING_VERSION or isinstance(binding_version, bool):
+        raise ReviewLedgerStateError(
+            "review ledger attestation binding.binding_version 不受支持："
+            f"{binding_version!r}"
+        )
+    schema_version = raw.get("attestation_schema_version")
+    if isinstance(schema_version, bool) or not isinstance(schema_version, int):
+        raise ReviewLedgerStateError(
+            "review ledger attestation binding.attestation_schema_version 必须是整数"
+        )
+    contract_version = raw.get("attestation_contract_version")
+    if not isinstance(contract_version, str) or not contract_version:
+        raise ReviewLedgerStateError(
+            "review ledger attestation binding.attestation_contract_version 必须是非空字符串"
+        )
+    digest_fields = (
+        "attestation_id",
+        "attestation_document_sha256",
+        "package_fingerprint",
+        "package_content_sha256",
+        "handoff_content_sha256",
+    )
+    for field_name in digest_fields:
+        if not _HEX64.match(str(raw.get(field_name) or "")):
+            raise ReviewLedgerStateError(
+                f"review ledger attestation binding.{field_name} 必须是 64 位小写十六进制"
+            )
+    scope = raw.get("scope")
+    if not isinstance(scope, str) or scope not in _known_scopes():
+        raise ReviewLedgerStateError(
+            "review ledger attestation binding.scope 不在受控词表内"
+        )
+    complete = raw.get("all_required_verified")
+    if not isinstance(complete, bool):
+        raise ReviewLedgerStateError(
+            "review ledger attestation binding.all_required_verified 必须是布尔"
+        )
+    return {
+        "binding_version": ATTESTATION_BINDING_VERSION,
+        "attestation_schema_version": schema_version,
+        "attestation_contract_version": contract_version,
+        "attestation_id": str(raw["attestation_id"]).lower(),
+        "attestation_document_sha256": str(raw["attestation_document_sha256"]).lower(),
+        "package_fingerprint": str(raw["package_fingerprint"]).lower(),
+        "package_content_sha256": str(raw["package_content_sha256"]).lower(),
+        "handoff_content_sha256": str(raw["handoff_content_sha256"]).lower(),
+        "scope": scope,
+        "all_required_verified": complete,
+    }
+
+
 # ---------------------------------------------------------------------------
 # 决策记录 / 追加式 ledger
 # ---------------------------------------------------------------------------
@@ -472,15 +620,30 @@ class ReviewRecord:
     supersedes: str | None = None
     override: bool = False
     package: Mapping[str, Any] = field(default_factory=dict)
+    #: GOLD-029 **最小 attestation binding**（只有 ``APPROVE`` 才可能非空；旧记录恒为 ``None``）
+    attestation: Mapping[str, Any] | None = None
 
     @property
     def approval_scope(self) -> str:
         """决策含义（机器可读；防止把人工预审读成资格）。"""
         return APPROVAL_SCOPE
 
-    def payload(self) -> tuple[str, str, str, str]:
-        """幂等判定用的"决策内容"（决策 / 原因码 / note / reviewer）。"""
-        return (self.decision, self.reason_code, self.note, self.reviewer)
+    @property
+    def attestation_id(self) -> str | None:
+        """binding 绑定的 GOLD-028 ``attestation_id``（没有 binding → ``None``）。"""
+        if self.attestation is None:
+            return None
+        value = self.attestation.get("attestation_id")
+        return None if value is None else str(value)
+
+    def payload(self) -> tuple[str, str, str, str, str | None]:
+        """幂等判定用的"决策内容"（决策 / 原因码 / note / reviewer / attestation 身份）。
+
+        ⚠️ attestation 身份刻意只用**内容级** ``attestation_id``（不含审计时间）：同一 package
+        派生出的同一凭证无论何时重新生成，id 都相同 → 重复提交仍然是**幂等**；
+        任何**内容**差异（含换用另一份凭证 / 另一个 package）都必须走**新 revision**。
+        """
+        return (self.decision, self.reason_code, self.note, self.reviewer, self.attestation_id)
 
     def to_dict(self) -> dict[str, Any]:
         """稳定机器可读结构（**全部脱敏**；不含任何证据时间字段）。"""
@@ -497,6 +660,7 @@ class ReviewRecord:
             "note": _safe(self.note, max_chars=MAX_NOTE_CHARS),
             "approval_scope": APPROVAL_SCOPE,
             "package": dict(self.package),
+            "attestation": None if self.attestation is None else dict(self.attestation),
         }
 
 
@@ -549,6 +713,17 @@ def _record_from_state(item: object, index: int) -> ReviewRecord:
         raise ReviewLedgerStateError(
             f"review ledger decisions[{index}] decision_id 与记录内容不一致（疑似被篡改）"
         )
+    attestation = _sanitize_attestation_binding(item.get("attestation"), index=index)
+    if attestation is not None:
+        if decision != ReviewDecision.APPROVE.value:
+            raise ReviewLedgerStateError(
+                f"review ledger decisions[{index}] 只有 APPROVE 才允许携带 attestation binding"
+            )
+        if attestation["package_fingerprint"] != fingerprint:
+            raise ReviewLedgerStateError(
+                f"review ledger decisions[{index}] attestation binding 绑定的 package 指纹"
+                "与记录指纹不一致（疑似被篡改）"
+            )
     return ReviewRecord(
         fingerprint=fingerprint,
         decision=decision,
@@ -561,6 +736,7 @@ def _record_from_state(item: object, index: int) -> ReviewRecord:
         supersedes=supersedes,
         override=override,
         package=_sanitize_package_summary(item.get("package")),
+        attestation=attestation,
     )
 
 
@@ -743,6 +919,102 @@ def _package_for(report: InboxPreflightReport, fingerprint: str) -> CandidatePac
             return package
     return None
 
+def _attestation_document_sha256(payload: Mapping[str, Any]) -> str:
+    """凭证**文档**的内容摘要（canonical JSON；把"这一份"凭证稳定绑定进 ledger）。"""
+    return hashing.sha256_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
+
+
+def build_attestation_binding(
+    attestation_path: Path | str,
+    *,
+    fingerprint: str,
+    inbox_dir: Path | str,
+    moment: datetime,
+) -> dict[str, Any]:
+    """校验 GOLD-028 材料级人工核验凭证并压缩为**最小 binding**（纯只读）。
+
+    校验（**全部 fail-closed**）：
+
+    1. 凭证文档自身完整性（重新推导 ``attestation_id``、安全字段未被削弱、计数 / 合取自洽、
+       无证据时间键）—— 被改写 → :class:`ReviewAttestationError`（``ATTESTATION_TAMPERED``）；
+    2. 凭证与**当前**候选目录逐项重新绑定（fingerprint / package 内容身份 / handoff 内容身份 /
+       ``scope`` / ``preflight_pass``）—— 任一不一致 → ``ATTESTATION_STALE``；
+    3. 凭证绑定的 package 必须**正是本次 APPROVE 的目标**（绑错 package → ``ATTESTATION_STALE``）；
+    4. ``all_required_verified`` 必须为 ``true``（部分核验 → ``ATTESTATION_INCOMPLETE``）。
+
+    Raises:
+        ReviewAttestationError: 缺失 / 不可读 / 被篡改 / 漂移 / 部分核验 / 绑错 package。
+    """
+    moment = _require_aware(moment, field_name="moment")
+    target = _require_fingerprint(fingerprint)
+    try:
+        payload = load_attestation_document(attestation_path)
+    except AttestationError as exc:
+        raise ReviewAttestationError(
+            f"{InvalidationReason.ATTESTATION_TAMPERED.value}：材料级人工核验凭证缺失 / 不可读 / "
+            f"被改写（APPROVE fail-closed、零写入）：{_safe(str(exc), max_chars=300)}"
+        ) from exc
+    try:
+        verification = verify_attestation(attestation_path, inbox_dir, moment=moment)
+    except AttestationError as exc:
+        raise ReviewAttestationError(
+            f"{InvalidationReason.ATTESTATION_TAMPERED.value}：材料级人工核验凭证无法与当前候选"
+            f"目录重新绑定（APPROVE fail-closed、零写入）：{_safe(str(exc), max_chars=300)}"
+        ) from exc
+    if not verification.verified:
+        codes = "、".join(verification.codes) or "UNKNOWN"
+        raise ReviewAttestationError(
+            f"{InvalidationReason.ATTESTATION_STALE.value}：凭证与**当前**候选包不再一致"
+            f"（稳定原因码：{codes}）；陈旧 / 漂移的凭证**永远**不能支撑 APPROVE（fail-closed）"
+        )
+    if verification.package_fingerprint != target:
+        raise ReviewAttestationError(
+            f"{InvalidationReason.ATTESTATION_STALE.value}：凭证绑定的 package fingerprint"
+            f"（{verification.package_fingerprint[:16]}…）不是本次 APPROVE 的目标"
+            f"（{target[:16]}…）：绑错 package 一律 fail-closed、零写入"
+        )
+    if not verification.all_required_verified:
+        raise ReviewAttestationError(
+            f"{InvalidationReason.ATTESTATION_INCOMPLETE.value}：凭证的 "
+            "all_required_verified=false（材料级人工核验未完成 / 部分核验）："
+            "不完整的人工核验**永不**满足 APPROVE 门禁（fail-closed）"
+        )
+    package_block = payload.get("package")
+    schema_version = payload.get("schema_version")
+    contract_version = payload.get("contract_version")
+    if (
+        not isinstance(package_block, Mapping)
+        or isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or not isinstance(contract_version, str)
+        or not contract_version
+    ):
+        raise ReviewAttestationError(
+            f"{InvalidationReason.ATTESTATION_TAMPERED.value}：凭证缺少可绑定的版本 / package 段"
+            "（fail-closed、零写入）"
+        )
+    binding: dict[str, Any] = {
+        "binding_version": ATTESTATION_BINDING_VERSION,
+        "attestation_schema_version": schema_version,
+        "attestation_contract_version": contract_version,
+        "attestation_id": str(payload["attestation_id"]).lower(),
+        "attestation_document_sha256": _attestation_document_sha256(payload),
+        "package_fingerprint": str(package_block["fingerprint"]).lower(),
+        "package_content_sha256": str(package_block["package_content_sha256"]).lower(),
+        "handoff_content_sha256": str(package_block["handoff_content_sha256"]).lower(),
+        "scope": str(package_block["scope"]),
+        "all_required_verified": True,
+    }
+    if binding["package_fingerprint"] != target or binding["scope"] not in _known_scopes():
+        raise ReviewAttestationError(
+            f"{InvalidationReason.ATTESTATION_TAMPERED.value}：凭证 binding 与本次 APPROVE 目标"
+            "不自洽（fail-closed、零写入）"
+        )
+    return binding
+
+
 def record_review_decision(
     report: InboxPreflightReport,
     ledger: ReviewLedger | None,
@@ -756,6 +1028,7 @@ def record_review_decision(
     reviewed_at: datetime | None = None,
     revision: int | None = None,
     override: bool = False,
+    attestation_path: Path | str | None = None,
 ) -> DecidedReview:
     """记录一次人工复核决策（**纯函数**：不写文件、不联网、不碰原始 evidence）。
 
@@ -765,13 +1038,20 @@ def record_review_decision(
     - ``fingerprint`` 必须**当前**仍出现在 ``report``（inbox 扫描结果）中；
       **内容变化 → 新指纹**，旧批准绝不继承；
     - ``APPROVE`` 额外要求该候选当前 ``PREFLIGHT_PASS`` 且**不是**模板 / 示例 / Mock；
-    - 与既有记录**完全相同**（决策 / 原因码 / note / reviewer）→ **幂等**（不新增记录）；
+    - ``APPROVE`` **还**必须显式给出 GOLD-028 材料级人工核验凭证（``attestation_path``）并通过
+      :func:`build_attestation_binding`（当前 package fingerprint / 内容身份 / handoff 内容身份 /
+      ``scope`` / ``preflight_pass`` / ``all_required_verified`` 逐项复核）—— 缺失 / 陈旧 / 漂移 /
+      被篡改 / 部分核验一律 :class:`ReviewAttestationError`（**fail-closed、零写入**）；
+      ``REJECT`` / ``NEEDS_CHANGES`` **不**需要凭证；
+    - 与既有记录**完全相同**（决策 / 原因码 / note / reviewer / attestation 身份）→ **幂等**
+      （不新增记录）；
     - 任何差异都必须显式给出 ``revision = 既有 revision + 1`` 且 ``override=True``，
       否则 :class:`ReviewConflictError`（**绝不静默覆盖**，历史全部保留）。
 
     Raises:
         ReviewArgumentError: 词表 / 指纹 / 元数据 / 时区 / revision 组合错误。
         ReviewTargetError: 目标候选不存在 / 预检未通过 / 是模板示例。
+        ReviewAttestationError: ``APPROVE`` 缺少 / 漂移 / 被篡改 / 不完整的 attestation。
         ReviewConflictError: 与既有决策冲突且未显式 revision + override。
     """
     moment = _require_aware(moment, field_name="moment")
@@ -818,9 +1098,29 @@ def record_review_decision(
                 f"候选包指纹 {target[:16]}… 当前预检结论为 {package.status.value}"
                 f"（原因码：{codes}）：不满足 approve 门禁（fail-closed）"
             )
+        if attestation_path is None:
+            raise ReviewAttestationError(
+                f"{InvalidationReason.ATTESTATION_MISSING.value}：新的 APPROVE 必须显式提供 "
+                "GOLD-028 材料级人工核验凭证（`--attestation <凭证文件>`）："
+                "缺少凭证的批准一律 fail-closed、零写入（历史 APPROVE 不会被追溯升级）"
+            )
+        attestation = build_attestation_binding(
+            attestation_path,
+            fingerprint=target,
+            inbox_dir=report.inbox_dir,
+            moment=moment,
+        )
+    else:
+        attestation = None
     base = ledger if ledger is not None else ReviewLedger(generated_at=moment)
     existing = base.latest_for(target)
-    payload = (coerced.value, code, clean_note, clean_reviewer)
+    payload = (
+        coerced.value,
+        code,
+        clean_note,
+        clean_reviewer,
+        None if attestation is None else str(attestation["attestation_id"]),
+    )
     if existing is not None and existing.payload() == payload:
         # 同一指纹 + 完全相同的决策内容 → 幂等（不新增记录、不改写历史）
         return DecidedReview(record=existing, ledger=base, idempotent=True)
@@ -864,6 +1164,7 @@ def record_review_decision(
         supersedes=supersedes,
         override=supersedes is not None,
         package=_package_summary(package),
+        attestation=attestation,
     )
     return DecidedReview(
         record=record, ledger=base.with_record(record, moment=moment), idempotent=False
@@ -980,6 +1281,76 @@ def _invalidation_reason(package: CandidatePackage) -> InvalidationReason | None
     return None
 
 
+def _attestation_binding_invalidation(
+    record: ReviewRecord,
+    report: InboxPreflightReport,
+    *,
+    moment: datetime,
+) -> tuple[str, str] | None:
+    """对一条 ``APPROVE`` **重新验证** GOLD-029 attestation binding（只读）。
+
+    用**当前** inbox / intake handoff 重新推导 binding 里绑定的身份，并逐一比对：
+
+    - 没有 binding（历史 / 旧口径 ``APPROVE``）→ ``ATTESTATION_MISSING``；
+    - binding 声明未完整核验 → ``ATTESTATION_INCOMPLETE``；
+    - binding 绑定的指纹与记录不一致 → ``ATTESTATION_TAMPERED``；
+    - 绑定的候选包在当前 handoff 中缺失 / 其**材料结构内容身份**或 ``scope`` 与 binding
+      不一致 → ``ATTESTATION_STALE``（package 漂移即批准失效）。
+
+    说明：binding 里同时保存了 ``handoff_content_sha256``（整个 handoff 快照的内容身份），
+    它由 **APPROVE 门禁**在凭证文件在场时逐项复核（:func:`build_attestation_binding`）；
+    批准清单 / 后续链的复核则以**该候选包自身**的材料结构内容身份为准，避免"新增一个
+    无关候选包"就静默作废既有批准（那不是被批准材料的漂移）。
+
+    返回 ``(稳定原因码, 已脱敏说明)``；全部一致 → ``None``（批准仍然成立）。
+    """
+    binding = record.attestation
+    if binding is None:
+        return (
+            InvalidationReason.ATTESTATION_MISSING.value,
+            "该 APPROVE 没有 GOLD-028 材料级人工核验凭证绑定（历史 / 旧口径记录）："
+            "新门禁**不承认**缺失 binding 的批准，必须重新人工核验并重新批准",
+        )
+    if not binding["all_required_verified"]:
+        return (
+            InvalidationReason.ATTESTATION_INCOMPLETE.value,
+            "binding 声明的材料级人工核验不完整（all_required_verified=false）：批准失效",
+        )
+    if binding["package_fingerprint"] != record.fingerprint:
+        return (
+            InvalidationReason.ATTESTATION_TAMPERED.value,
+            "binding 绑定的 package 指纹与批准记录指纹不一致（疑似被篡改）：fail-closed",
+        )
+    try:
+        handoff: IntakeHandoffDocument = load_intake_handoff(report.inbox_dir, as_of=moment)
+    except (OSError, ValueError, InboxError) as exc:
+        return (
+            InvalidationReason.ATTESTATION_STALE.value,
+            f"无法重新推导当前 intake handoff / manifest（{type(exc).__name__}）："
+            "binding 无法复核，批准失效",
+        )
+    current = next(
+        (item for item in handoff.packages if item.fingerprint == record.fingerprint),
+        None,
+    )
+    if current is None:
+        return (
+            InvalidationReason.ATTESTATION_STALE.value,
+            "当前 handoff 中已不存在该 fingerprint 的候选包（package 漂移）：批准失效",
+        )
+    if package_content_sha256(current) != binding["package_content_sha256"]:
+        return (
+            InvalidationReason.ATTESTATION_STALE.value,
+            "候选包材料结构内容身份与 binding 不一致（package 内容漂移）：批准失效",
+        )
+    if current.scope != binding["scope"]:
+        return (
+            InvalidationReason.ATTESTATION_STALE.value,
+            "候选包 scope 与 binding 不一致：批准失效",
+        )
+    return None
+
+
 def build_approved_intake_list(
     report: InboxPreflightReport, ledger: ReviewLedger, *, moment: datetime
 ) -> ApprovedIntakeList:
@@ -987,7 +1358,9 @@ def build_approved_intake_list(
 
     只有**同时**满足下列条件的指纹才进入清单：最新决策为 ``APPROVE``、
     该指纹**当前仍在**扫描结果中、当前仍 ``PREFLIGHT_PASS``、不是模板 / 示例 / Mock、
-    且复核时记录的候选包摘要与当前一致（状态 / 类型 / 来源 / 文件数 / 行数）。
+    复核时记录的候选包摘要与当前一致（状态 / 类型 / 来源 / 文件数 / 行数），
+    并且 GOLD-029 attestation binding 与**当前** inbox / handoff **重新验证一致**
+    （绑定的候选包材料结构内容身份 / ``scope`` 任一漂移 → 批准失效）。
     其余 ``APPROVE`` 一律列入 ``invalidated``（**绝不因为「曾经批准过」就放行**）。
 
     Raises:
@@ -1040,6 +1413,18 @@ def build_approved_intake_list(
                         "候选包摘要与复核时记录不一致（状态 / 类型 / 来源 / 文件数 / 行数）："
                         "必须重新人工复核"
                     ),
+                )
+            )
+            continue
+        binding_problem = _attestation_binding_invalidation(record, report, moment=moment)
+        if binding_problem is not None:
+            binding_code, binding_detail = binding_problem
+            invalidated.append(
+                InvalidatedApproval(
+                    fingerprint=record.fingerprint,
+                    decision_id=record.decision_id,
+                    reason_code=binding_code,
+                    detail=binding_detail,
                 )
             )
             continue
@@ -1190,6 +1575,7 @@ def _compose_review(
     reviewed_at: datetime | None,
     revision: int | None,
     override: bool,
+    attestation_path: Path | None,
 ) -> ReviewReport:
     """读 ledger（只读）→ 扫描 inbox（只读）→ 应用决策 → 生成批准清单（**零写入**）。"""
     ledger = load_review_ledger(ledger_target) if ledger_target is not None else None
@@ -1214,6 +1600,7 @@ def _compose_review(
             reviewed_at=reviewed_at,
             revision=revision,
             override=override,
+            attestation_path=attestation_path,
         )
         record = decided.record
         idempotent = decided.idempotent
@@ -1246,6 +1633,7 @@ def run_review(
     approved_out_path: Path | str | None = None,
     lock_path: Path | str | None = None,
     lock_owner: str | None = None,
+    attestation_path: Path | str | None = None,
 ) -> ReviewReport:
     """执行**一次**人工复核运行（默认只读；只有显式 ``out_path`` 才写 ledger）。
 
@@ -1258,6 +1646,10 @@ def run_review(
       落盘顺序为"批准清单（派生）→ ledger（唯一事实来源）"，两者都是**原子写**；
     - ``APPROVE`` 只表示人工预审通过：本函数**没有**任何 intake / commit 调用，
       也**绝不**写数据库、**绝不**移动 / 删除 / 改写 inbox 内原始 evidence；
+    - ``APPROVE`` **必须**给出 ``attestation_path``（GOLD-028 材料级人工核验凭证），并在记录前
+      与**当前**候选目录重新绑定核验（缺失 / 陈旧 / 漂移 / 被篡改 →
+      :class:`ReviewAttestationError`，**零写入**）；
+    - ``REJECT`` / ``NEEDS_CHANGES`` **不**需要凭证（负向决策审计不被阻塞）；
     - 四个安全字段恒为 true / true / false / false（硬编码），与 approve 数量无关。
 
     Raises:
@@ -1265,6 +1657,7 @@ def run_review(
         ReviewPathError: inbox 目录不可用，或输出写进 inbox 目录。
         ReviewLedgerStateError: 既有 ledger 损坏 / 被篡改（fail-closed）。
         ReviewTargetError: 目标候选不存在 / 预检未通过 / 是模板示例。
+        ReviewAttestationError: ``APPROVE`` 缺少 / 漂移 / 被篡改 / 不完整的 attestation。
         ReviewConflictError: 与既有决策冲突且未显式 revision + override。
         LockConflictError: 另一个复核 / 重扫正持有活动锁（fail-closed，零写入）。
         ReviewLedgerWriteError: 输出写入失败（fail-closed）。
@@ -1276,6 +1669,7 @@ def run_review(
     ledger_target = Path(ledger_path) if ledger_path is not None else None
     out = Path(out_path) if out_path is not None else None
     approved_out = Path(approved_out_path) if approved_out_path is not None else None
+    attestation_target = Path(attestation_path) if attestation_path is not None else None
     for target in (ledger_target, out, approved_out):
         if target is not None:
             try:
@@ -1297,6 +1691,7 @@ def run_review(
             reviewed_at=reviewed_at,
             revision=revision,
             override=override,
+            attestation_path=attestation_target,
         )
     lock_file = (
         Path(lock_path) if lock_path is not None else out.with_name(out.name + LEDGER_LOCK_SUFFIX)
@@ -1314,6 +1709,7 @@ def run_review(
             reviewed_at=reviewed_at,
             revision=revision,
             override=override,
+            attestation_path=attestation_target,
         )
         if approved_out is not None:
             write_approved_intake_list(approved_out, report.approved_list)

@@ -204,6 +204,11 @@ class PlanVerificationCode(StrEnum):
     PREFLIGHT_NOT_PASSING = "PREFLIGHT_NOT_PASSING"
     SYNTHETIC_EVIDENCE = "SYNTHETIC_EVIDENCE"
     EVIDENCE_INCONSISTENT = "EVIDENCE_INCONSISTENT"
+    # ---- GOLD-029：材料级人工核验 attestation 门禁 -------------------------
+    ATTESTATION_MISSING = "ATTESTATION_MISSING"
+    ATTESTATION_INCOMPLETE = "ATTESTATION_INCOMPLETE"
+    ATTESTATION_STALE = "ATTESTATION_STALE"
+    ATTESTATION_TAMPERED = "ATTESTATION_TAMPERED"
 
 
 #: 失效批准原因（GOLD-012 口径）→ 计划核验原因码（**同一含义不另造词**）
@@ -215,6 +220,14 @@ _INVALIDATION_CODES: Final[Mapping[str, str]] = {
     InvalidationReason.SYNTHETIC_EVIDENCE.value: PlanVerificationCode.SYNTHETIC_EVIDENCE.value,
     InvalidationReason.EVIDENCE_INCONSISTENT.value: (
         PlanVerificationCode.EVIDENCE_INCONSISTENT.value
+    ),
+    InvalidationReason.ATTESTATION_MISSING.value: PlanVerificationCode.ATTESTATION_MISSING.value,
+    InvalidationReason.ATTESTATION_INCOMPLETE.value: (
+        PlanVerificationCode.ATTESTATION_INCOMPLETE.value
+    ),
+    InvalidationReason.ATTESTATION_STALE.value: PlanVerificationCode.ATTESTATION_STALE.value,
+    InvalidationReason.ATTESTATION_TAMPERED.value: (
+        PlanVerificationCode.ATTESTATION_TAMPERED.value
     ),
 }
 

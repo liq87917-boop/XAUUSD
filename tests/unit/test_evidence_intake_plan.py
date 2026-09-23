@@ -64,6 +64,8 @@ from src.evidence import (
     scan_inbox,
 )
 from src.evidence import intake_plan as intake_plan_module
+from src.evidence.human_verification_attestation import run_attestation
+from src.evidence.intake_handoff import load_intake_handoff
 from src.monitoring import PHASE3_3_BLOCKER_CODE
 
 pytestmark = pytest.mark.unit
@@ -185,6 +187,49 @@ def _inbox_with_package(root: Path) -> tuple[Path, Path]:
 
 
 
+def write_attestation(
+    inbox: Path,
+    fingerprint: str,
+    *,
+    moment: datetime = MOMENT,
+    suffix: str = "",
+) -> Path:
+    """为一个候选包生成合法 GOLD-028 材料级人工核验凭证（测试辅助；零网络）。"""
+    handoff = load_intake_handoff(inbox, as_of=moment)
+    package = next(item for item in handoff.packages if item.fingerprint == fingerprint)
+    materials = [
+        {
+            "material": item.key,
+            "decision": "VERIFIED",
+            "reason_code": "HUMAN_REVIEWED",
+            "reviewer": "operator-li",
+            "reviewed_at": (moment - timedelta(hours=1)).isoformat(),
+            "evidence_reference": "https://vendor.example/terms",
+        }
+        for item in package.materials
+        if item.category != "gate"
+    ]
+    document = {
+        "schema_version": 1,
+        "package_fingerprint": package.fingerprint,
+        "scope": package.scope,
+        "reviewer": "operator-li",
+        "materials": materials,
+    }
+    root = Path(inbox).parent
+    verification = root / f"verification{suffix}.json"
+    verification.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    out = root / f"phase33_human_verification_attestation{suffix}.json"
+    run_attestation(
+        inbox,
+        verification_path=verification,
+        moment=moment,
+        package=package.fingerprint,
+        out_path=out,
+    )
+    return out
+
+
 def approve_package(
     tmp_path: Path,
     inbox: Path,
@@ -206,6 +251,9 @@ def approve_package(
         fingerprint=target.fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(
+            inbox, target.fingerprint, moment=moment, suffix=f"-{target.fingerprint[:8]}"
+        ),
         out_path=ledger_path,
         approved_out_path=approved_path,
     )
@@ -495,6 +543,9 @@ def test_new_plan_when_ledger_decisions_change(tmp_path: Path) -> None:
         fingerprint=second.fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(
+            inbox, second.fingerprint, suffix=f"-{second.fingerprint[:8]}"
+        ),
         ledger_path=ledger_path,
         out_path=ledger_path,
         approved_out_path=approved_path,
@@ -942,6 +993,9 @@ def test_many_approvals_never_change_safety_fields(tmp_path: Path) -> None:
             fingerprint=package.fingerprint,
             reviewer="operator-li",
             reason_code=APPROVE_CODE,
+            attestation_path=write_attestation(
+                inbox, package.fingerprint, suffix=f"-{package.fingerprint[:8]}"
+            ),
             ledger_path=None if index == 0 else ledger_path,
             out_path=ledger_path,
             approved_out_path=approved_path,
@@ -1068,4 +1122,53 @@ def test_cli_module_defers_to_core_module_and_exposes_no_intake_flag() -> None:
     parsed = parser.parse_args(["--inbox-dir", "x", "--ledger", "y", "--approved-list", "z"])
     assert parsed.out is None  # 默认零写入
     assert parsed.json_output is False
+
+
+
+# ---------------------------------------------------------------------------
+# GOLD-029：计划链必须重新验证 APPROVE 的 attestation binding
+# ---------------------------------------------------------------------------
+def test_ledger_approve_without_attestation_binding_is_fail_closed(tmp_path: Path) -> None:
+    """没有 attestation binding 的（历史 / 旧口径）APPROVE 永不满足门禁。
+
+    计划链必须以稳定原因码 ``ATTESTATION_MISSING`` fail-closed；即使按当前真值重新生成
+    批准清单，也只会变成 BLOCKED，绝不静默放行。
+    """
+    inbox, ledger_path, approved_path = _ready(tmp_path)
+
+    # 模拟旧口径 ledger：去掉 binding（历史记录仍可读、不被追溯升级）
+    document = json.loads(ledger_path.read_text(encoding="utf-8"))
+    for item in document["decisions"]:
+        assert item["attestation"] is not None
+        item.pop("attestation", None)
+    write_json(ledger_path, document)
+
+    with pytest.raises(IntakePlanInconsistentError) as failure:
+        build_plan(inbox, ledger_path, approved_path, moment=MOMENT)
+    assert PlanVerificationCode.ATTESTATION_MISSING.value in codes_of(failure)
+
+    # 按当前真值重建清单后：不再有任何仍成立的批准（BLOCKED，而不是"看起来可落库"）
+    run_review(
+        inbox,
+        moment=MOMENT,
+        ledger_path=ledger_path,
+        out_path=ledger_path,
+        approved_out_path=approved_path,
+    )
+    plan = build_plan(inbox, ledger_path, approved_path, moment=MOMENT)
+    assert plan.status is IntakePlanStatus.BLOCKED_NO_APPROVED_EVIDENCE
+    assert plan.entries == ()
+
+
+def test_plan_rejects_binding_bound_to_a_different_package(tmp_path: Path) -> None:
+    """绑定被改写为另一个 package 的内容身份 → 计划链 fail-closed（``ATTESTATION_STALE``）。"""
+    inbox, ledger_path, approved_path = _ready(tmp_path)
+
+    document = json.loads(ledger_path.read_text(encoding="utf-8"))
+    document["decisions"][0]["attestation"]["package_content_sha256"] = "c" * 64
+    write_json(ledger_path, document)
+
+    with pytest.raises(IntakePlanInconsistentError) as failure:
+        build_plan(inbox, ledger_path, approved_path, moment=MOMENT)
+    assert PlanVerificationCode.ATTESTATION_STALE.value in codes_of(failure)
 

@@ -86,6 +86,8 @@ from src.evidence import (
     write_snapshot_state,
 )
 from src.evidence import decision_packet as packet_module
+from src.evidence.human_verification_attestation import run_attestation
+from src.evidence.intake_handoff import load_intake_handoff
 from src.monitoring import PHASE3_3_BLOCKER_CODE, build_readiness_report
 
 pytestmark = pytest.mark.unit
@@ -338,6 +340,49 @@ def write_readiness_state(path: Path, handoff_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # 链路夹具与调用助手
 # ---------------------------------------------------------------------------
+def write_attestation(
+    inbox: Path,
+    fingerprint: str,
+    *,
+    moment: datetime = MOMENT,
+    suffix: str = "",
+) -> Path:
+    """为一个候选包生成合法 GOLD-028 材料级人工核验凭证（测试辅助；零网络）。"""
+    handoff = load_intake_handoff(inbox, as_of=moment)
+    package = next(item for item in handoff.packages if item.fingerprint == fingerprint)
+    materials = [
+        {
+            "material": item.key,
+            "decision": "VERIFIED",
+            "reason_code": "HUMAN_REVIEWED",
+            "reviewer": "operator-li",
+            "reviewed_at": (moment - timedelta(hours=1)).isoformat(),
+            "evidence_reference": "https://vendor.example/terms",
+        }
+        for item in package.materials
+        if item.category != "gate"
+    ]
+    document = {
+        "schema_version": 1,
+        "package_fingerprint": package.fingerprint,
+        "scope": package.scope,
+        "reviewer": "operator-li",
+        "materials": materials,
+    }
+    root = Path(inbox).parent
+    verification = root / f"verification{suffix}.json"
+    verification.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    out = root / f"phase33_human_verification_attestation{suffix}.json"
+    run_attestation(
+        inbox,
+        verification_path=verification,
+        moment=moment,
+        package=package.fingerprint,
+        out_path=out,
+    )
+    return out
+
+
 def approve_package(
     tmp_path: Path,
     inbox: Path,
@@ -357,6 +402,9 @@ def approve_package(
         fingerprint=target.fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(
+            inbox, target.fingerprint, moment=moment, suffix=f"-{target.fingerprint[:8]}"
+        ),
         out_path=ledger_path,
         approved_out_path=approved_path,
     )

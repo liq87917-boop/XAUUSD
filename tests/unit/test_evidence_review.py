@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import csv
 import io
 import json
@@ -34,6 +35,7 @@ import pytest
 
 from src.common import hashing
 from src.evidence import (
+    ATTESTATION_BINDING_KEYS,
     EXIT_CONFIG_ERROR,
     EXIT_LOCK_CONFLICT,
     EXIT_NO_DECISION,
@@ -48,8 +50,10 @@ from src.evidence import (
     REASON_CODES_BY_DECISION,
     REVIEW_SCHEMA_VERSION,
     InboxStatus,
+    InvalidationReason,
     LockConflictError,
     ReviewArgumentError,
+    ReviewAttestationError,
     ReviewConflictError,
     ReviewDecision,
     ReviewLedger,
@@ -68,6 +72,8 @@ from src.evidence import (
     scan_inbox,
 )
 from src.evidence import review as review_module
+from src.evidence.human_verification_attestation import AttestationError, run_attestation
+from src.evidence.intake_handoff import load_intake_handoff
 from src.monitoring import PHASE3_3_BLOCKER_CODE
 
 pytestmark = pytest.mark.unit
@@ -184,6 +190,50 @@ def only_package(report: Any) -> Any:
     return report.packages[0]
 
 
+def write_attestation(
+    inbox: Path,
+    fingerprint: str,
+    *,
+    moment: datetime = MOMENT,
+    suffix: str = "",
+    all_verified: bool = True,
+) -> Path:
+    """为一个候选包生成合法 GOLD-028 材料级人工核验凭证（测试辅助；零网络）。"""
+    handoff = load_intake_handoff(inbox, as_of=moment)
+    package = next(item for item in handoff.packages if item.fingerprint == fingerprint)
+    materials = [
+        {
+            "material": item.key,
+            "decision": "VERIFIED" if all_verified else "NEEDS_CHANGES",
+            "reason_code": "HUMAN_REVIEWED",
+            "reviewer": "operator-li",
+            "reviewed_at": (moment - timedelta(hours=1)).isoformat(),
+            "evidence_reference": "https://vendor.example/terms",
+        }
+        for item in package.materials
+        if item.category != "gate"
+    ]
+    document = {
+        "schema_version": 1,
+        "package_fingerprint": package.fingerprint,
+        "scope": package.scope,
+        "reviewer": "operator-li",
+        "materials": materials,
+    }
+    root = Path(inbox).parent
+    verification = root / f"verification{suffix}.json"
+    verification.write_text(json.dumps(document, ensure_ascii=False), encoding="utf-8")
+    out = root / f"phase33_human_verification_attestation{suffix}.json"
+    run_attestation(
+        inbox,
+        verification_path=verification,
+        moment=moment,
+        package=package.fingerprint,
+        out_path=out,
+    )
+    return out
+
+
 def decide(
     report: Any,
     ledger: ReviewLedger | None,
@@ -194,8 +244,17 @@ def decide(
     **overrides: Any,
 ) -> Any:
     """按唯一候选包的指纹提交一次决策（测试辅助）。"""
-    fingerprint = overrides.pop("fingerprint", only_package(report).fingerprint)
+    if "fingerprint" in overrides:
+        fingerprint = overrides.pop("fingerprint")
+    else:
+        fingerprint = only_package(report).fingerprint
     reviewer = overrides.pop("reviewer", "operator-li")
+    if decision == ReviewDecision.APPROVE.value and "attestation_path" not in overrides:
+        # 目标不可核验（合成 / 预检未通过 / 指纹不存在）：让核心层给出**它**的稳定原因码
+        with contextlib.suppress(AttestationError, StopIteration, OSError, ValueError):
+            overrides["attestation_path"] = write_attestation(
+                Path(report.inbox_dir), fingerprint, moment=moment
+            )
     return record_review_decision(
         report,
         ledger,
@@ -304,6 +363,9 @@ def test_approve_records_decision_and_approved_list(tmp_path: Path) -> None:
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
         note="人工核验授权与可用性证据",
+        attestation_path=write_attestation(
+            inbox, only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+        ),
         out_path=ledger_path,
         approved_out_path=approved_path,
     )
@@ -488,6 +550,7 @@ def test_repeat_identical_decision_is_idempotent_and_writes_byte_identical_ledge
         "reviewer": "operator-li",
         "reason_code": APPROVE_CODE,
         "note": "人工核验通过",
+        "attestation_path": write_attestation(inbox, fingerprint),
     }
     first = run_review(inbox, moment=MOMENT, out_path=ledger_path, **argv)
     assert first.action == "DECISION_RECORDED"
@@ -560,6 +623,7 @@ def test_override_appends_new_revision_and_keeps_full_history(tmp_path: Path) ->
         fingerprint=fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, fingerprint),
         out_path=ledger_path,
     )
     second = run_review(
@@ -622,6 +686,7 @@ def test_ledger_is_written_atomically_and_is_self_describing(tmp_path: Path) -> 
         fingerprint=fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, fingerprint),
         out_path=ledger_path,
     )
     assert ledger_path.exists()
@@ -686,6 +751,7 @@ def _written_ledger(tmp_path: Path, *, name: str = "review_ledger.json") -> Path
         fingerprint=fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, fingerprint),
         out_path=ledger_path,
     )
     return ledger_path
@@ -704,6 +770,7 @@ def test_tampered_decision_id_and_broken_history_are_detected(tmp_path: Path) ->
         fingerprint=fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, fingerprint),
         out_path=ledger_path,
     )
     run_review(
@@ -812,6 +879,7 @@ def test_read_only_run_never_writes_anything(tmp_path: Path) -> None:
         fingerprint=fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, fingerprint),
     )
     assert report.written_ledger is None and report.written_approved is None
     assert report.has_decision is True  # 决策只在内存中（dry-run）
@@ -855,6 +923,7 @@ def _approve_package(tmp_path: Path, inbox: Path, fingerprint: str) -> Path:
         fingerprint=fingerprint,
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, fingerprint),
         out_path=ledger_path,
     )
     return ledger_path
@@ -950,6 +1019,7 @@ def test_approved_list_only_contains_current_approvals(tmp_path: Path) -> None:
         fingerprint=by_dir["pkg-author-01"],
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, by_dir["pkg-author-01"]),
         out_path=ledger_path,
     )
     run_review(
@@ -998,6 +1068,7 @@ def _approve_with_reference(tmp_path: Path) -> tuple[Any, Path, Path]:
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
         note="人工核验授权与可用性证据",
+        attestation_path=write_attestation(inbox, fingerprint),
         out_path=ledger_path,
         approved_out_path=approved_path,
     )
@@ -1065,6 +1136,9 @@ def test_approvals_never_change_blocker_or_human_gate_fields(tmp_path: Path) -> 
             fingerprint=package.fingerprint,
             reviewer="operator-li",
             reason_code=APPROVE_CODE,
+            attestation_path=write_attestation(
+                inbox, package.fingerprint, suffix=f"-{package.fingerprint[:8]}"
+            ),
             ledger_path=ledger_path,
             out_path=ledger_path,
             approved_out_path=approved_path,
@@ -1094,6 +1168,7 @@ def test_render_summary_keeps_blocker_and_human_gate_visible(tmp_path: Path) -> 
         fingerprint=by_dir["pkg-author-01"],
         reviewer="operator-li",
         reason_code=APPROVE_CODE,
+        attestation_path=write_attestation(inbox, by_dir["pkg-author-01"]),
     )
     rejected = record_review_decision(
         report,
@@ -1135,6 +1210,9 @@ def test_concurrent_ledger_writes_never_produce_partial_or_rewritten_history(
     fingerprints = [item.fingerprint for item in report.packages]
     assert len(set(fingerprints)) == 4
     ledger_path = tmp_path / "review_ledger.json"
+    attestations = {
+        item: write_attestation(inbox, item, suffix=f"-{item[:8]}") for item in fingerprints
+    }
     outcomes: list[str] = []
     lock = threading.Lock()
 
@@ -1147,6 +1225,7 @@ def test_concurrent_ledger_writes_never_produce_partial_or_rewritten_history(
                 fingerprint=fingerprint,
                 reviewer="operator-li",
                 reason_code=APPROVE_CODE,
+                attestation_path=attestations[fingerprint],
                 out_path=ledger_path,
             )
             outcome = "ok"
@@ -1213,4 +1292,384 @@ def test_cli_module_defers_to_core_module(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as missing_inbox_dir:
         parser.parse_args(["--json"])
     assert missing_inbox_dir.value.code == 2
+
+
+
+# ---------------------------------------------------------------------------
+# GOLD-029：新 APPROVE 必须绑定当前、完整、未漂移的材料级人工核验凭证
+# ---------------------------------------------------------------------------
+def _is_hex64(value: object) -> bool:
+    """是否是 64 位小写十六进制摘要（binding 里内容身份字段的合法形态）。"""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def test_new_approve_without_attestation_is_fail_closed_and_writes_nothing(
+    tmp_path: Path,
+) -> None:
+    """无 attestation 的 APPROVE：fail-closed、零写入、原始 evidence 零变化。"""
+    inbox, package_dir = _inbox_with_package(tmp_path)
+    evidence = package_dir / EVIDENCE_NAME
+    evidence_bytes = evidence.read_bytes()
+    before = sorted(item.name for item in package_dir.iterdir())
+    ledger_path = tmp_path / "review_ledger.json"
+    approved_path = tmp_path / "approved.json"
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+
+    with pytest.raises(ReviewAttestationError) as failure:
+        run_review(
+            inbox,
+            moment=MOMENT,
+            decision="approve",
+            fingerprint=fingerprint,
+            reviewer="operator-li",
+            reason_code=APPROVE_CODE,
+            out_path=ledger_path,
+            approved_out_path=approved_path,
+        )
+
+    assert InvalidationReason.ATTESTATION_MISSING.value in str(failure.value)
+    assert "fail-closed" in str(failure.value)
+    assert not ledger_path.exists() and not approved_path.exists()
+    # 零写入 / 不改原始 evidence
+    assert evidence.read_bytes() == evidence_bytes
+    assert sorted(item.name for item in package_dir.iterdir()) == before
+    listed = run_review(inbox, moment=MOMENT)
+    assert listed.ledger.records == ()
+    assert listed.approved_list.has_approved is False
+
+
+def test_new_approve_records_minimal_attestation_binding(tmp_path: Path) -> None:
+    """合法绑定：记录里只保存**最小** binding，且不含证据文本 / 凭据 / 证据时间。"""
+    inbox, _package = _inbox_with_package(tmp_path)
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+    attestation = write_attestation(inbox, fingerprint)
+
+    report = run_review(
+        inbox,
+        moment=MOMENT,
+        decision="approve",
+        fingerprint=fingerprint,
+        reviewer="operator-li",
+        reason_code=APPROVE_CODE,
+        attestation_path=attestation,
+        out_path=tmp_path / "review_ledger.json",
+    )
+
+    assert report.decision is not None
+    binding = report.decision.attestation
+    assert binding is not None
+    assert set(binding) == set(ATTESTATION_BINDING_KEYS)
+    assert binding["binding_version"] == 1
+    assert binding["package_fingerprint"] == fingerprint
+    assert binding["scope"] == "author"
+    assert binding["all_required_verified"] is True
+    for field_name in (
+        "attestation_id",
+        "attestation_document_sha256",
+        "package_content_sha256",
+        "handoff_content_sha256",
+    ):
+        assert _is_hex64(binding[field_name]), field_name
+    # binding 与凭证文档内容身份一致（attestation_id / package 内容身份）
+    document = json.loads(attestation.read_text(encoding="utf-8"))
+    assert binding["attestation_id"] == document["attestation_id"]
+    assert binding["package_content_sha256"] == document["package"]["package_content_sha256"]
+    assert binding["handoff_content_sha256"] == document["package"]["handoff_content_sha256"]
+    # **绝不**保存原始材料 / 备注 / 证据时间
+    assert "materials" not in binding
+    assert not _has_key(binding, FORBIDDEN_EVIDENCE_FIELDS)
+    assert report.approved_list.has_approved is True
+    reloaded = load_review_ledger(tmp_path / "review_ledger.json")
+    assert reloaded is not None
+    assert reloaded.records[0].attestation is not None
+    # 同一内容级凭证重放 → 幂等（不新增历史记录）
+    again = run_review(
+        inbox,
+        moment=LATER,
+        decision="approve",
+        fingerprint=fingerprint,
+        reviewer="operator-li",
+        reason_code=APPROVE_CODE,
+        attestation_path=attestation,
+        ledger_path=tmp_path / "review_ledger.json",
+        out_path=tmp_path / "review_ledger.json",
+    )
+    assert again.idempotent is True
+    assert len(again.ledger.records) == 1
+
+
+
+def test_new_approve_requires_complete_human_verification(tmp_path: Path) -> None:
+    """部分核验（all_required_verified=false）不得支撑 APPROVE。"""
+    inbox, _package = _inbox_with_package(tmp_path)
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+    attestation = write_attestation(inbox, fingerprint, all_verified=False)
+    document = json.loads(attestation.read_text(encoding="utf-8"))
+    assert document["all_required_verified"] is False
+    ledger_path = tmp_path / "review_ledger.json"
+
+    with pytest.raises(ReviewAttestationError) as failure:
+        run_review(
+            inbox,
+            moment=MOMENT,
+            decision="approve",
+            fingerprint=fingerprint,
+            reviewer="operator-li",
+            reason_code=APPROVE_CODE,
+            attestation_path=attestation,
+            out_path=ledger_path,
+        )
+
+    assert InvalidationReason.ATTESTATION_INCOMPLETE.value in str(failure.value)
+    assert not ledger_path.exists()
+
+
+def test_new_approve_rejects_attestation_bound_to_another_package(
+    tmp_path: Path,
+) -> None:
+    """绑错 package（fingerprint mismatch）→ fail-closed。"""
+    inbox = tmp_path / "inbox"
+    build_package(inbox, name="pkg-1", rows=[author_row("a-1")])
+    build_package(inbox, name="pkg-2", rows=[author_row("a-2")])
+    report = scan_inbox(inbox, moment=MOMENT)
+    by_dir = {item.package_dir: item.fingerprint for item in report.packages}
+    assert by_dir["pkg-1"] != by_dir["pkg-2"]
+    attestation = write_attestation(inbox, by_dir["pkg-1"])
+
+    with pytest.raises(ReviewAttestationError) as failure:
+        decide(report, None, fingerprint=by_dir["pkg-2"], attestation_path=attestation)
+
+    assert InvalidationReason.ATTESTATION_STALE.value in str(failure.value)
+
+
+def test_new_approve_rejects_stale_attestation_after_package_drift(
+    tmp_path: Path,
+) -> None:
+    """package 漂移（指纹变化）→ 旧凭证 stale，绝不继承。"""
+    inbox, package_dir = _inbox_with_package(tmp_path)
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+    attestation = write_attestation(inbox, fingerprint)
+
+    evidence = package_dir / EVIDENCE_NAME
+    write_rows(evidence, [author_row("a-0001"), author_row("a-0002")], fmt="jsonl")
+    manifest_path = package_dir / MANIFEST_FILE_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][0]["sha256"] = hashing.sha256_bytes(evidence.read_bytes())
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
+
+    drifted = scan_inbox(inbox, moment=LATER)
+    new_fingerprint = only_package(drifted).fingerprint
+    assert new_fingerprint != fingerprint
+
+    with pytest.raises(ReviewAttestationError) as failure:
+        decide(
+            drifted,
+            None,
+            fingerprint=new_fingerprint,
+            moment=LATER,
+            attestation_path=attestation,
+        )
+
+    assert InvalidationReason.ATTESTATION_STALE.value in str(failure.value)
+
+
+def test_new_approve_rejects_tampered_attestation(tmp_path: Path) -> None:
+    """凭证文档被改写（与内容寻址 id 不一致）→ fail-closed。"""
+    inbox, _package = _inbox_with_package(tmp_path)
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+    attestation = write_attestation(inbox, fingerprint)
+
+    document = json.loads(attestation.read_text(encoding="utf-8"))
+    document["materials"][0]["decision"] = "NEEDS_CHANGES"
+    attestation.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ReviewAttestationError) as failure:
+        decide(scan_inbox(inbox, moment=MOMENT), None, attestation_path=attestation)
+
+    assert InvalidationReason.ATTESTATION_TAMPERED.value in str(failure.value)
+
+
+
+def test_negative_decisions_do_not_require_attestation(tmp_path: Path) -> None:
+    """REJECT / NEEDS_CHANGES 不被 attestation 门禁阻塞（负向决策审计留痕）。"""
+    inbox, _package = _inbox_with_package(tmp_path)
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+    ledger_path = tmp_path / "review_ledger.json"
+
+    rejected = run_review(
+        inbox,
+        moment=MOMENT,
+        decision="reject",
+        fingerprint=fingerprint,
+        reviewer="operator-li",
+        reason_code=REJECT_CODE,
+        out_path=ledger_path,
+    )
+    assert rejected.decision is not None and rejected.decision.decision == "REJECT"
+    assert rejected.decision.attestation is None
+
+    needs = run_review(
+        inbox,
+        moment=LATER,
+        decision="needs_changes",
+        fingerprint=fingerprint,
+        reviewer="operator-li",
+        reason_code=NEEDS_CODE,
+        revision=2,
+        override=True,
+        ledger_path=ledger_path,
+        out_path=ledger_path,
+    )
+    assert needs.decision is not None and needs.decision.decision == "NEEDS_CHANGES"
+    assert needs.decision.attestation is None
+    assert json.loads(ledger_path.read_text(encoding="utf-8"))["decision_count"] == 2
+
+
+def test_legacy_approve_ledger_is_readable_but_never_eligible(tmp_path: Path) -> None:
+    """历史（无 binding）APPROVE：可读可审计，但**绝不**满足新门禁、绝不被追溯升级。"""
+    inbox, _package = _inbox_with_package(tmp_path)
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+    attestation = write_attestation(inbox, fingerprint)
+    ledger_path = tmp_path / "review_ledger.json"
+    run_review(
+        inbox,
+        moment=MOMENT,
+        decision="approve",
+        fingerprint=fingerprint,
+        reviewer="operator-li",
+        reason_code=APPROVE_CODE,
+        attestation_path=attestation,
+        out_path=ledger_path,
+    )
+
+    # 模拟旧口径 ledger（去掉 binding）并保持文件可读
+    document = json.loads(ledger_path.read_text(encoding="utf-8"))
+    for item in document["decisions"]:
+        item.pop("attestation", None)
+    legacy_path = tmp_path / "legacy_ledger.json"
+    legacy_path.write_text(
+        json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    legacy_bytes = legacy_path.read_bytes()
+
+    loaded = load_review_ledger(legacy_path)
+    assert loaded is not None
+    assert loaded.records[0].decision == "APPROVE"
+    assert loaded.records[0].attestation is None  # 只读兼容，绝不回填
+
+    approved = build_approved_intake_list(
+        scan_inbox(inbox, moment=MOMENT), loaded, moment=MOMENT
+    )
+    assert approved.approved == ()
+    assert [item.reason_code for item in approved.invalidated] == [
+        InvalidationReason.ATTESTATION_MISSING.value
+    ]
+    assert legacy_path.read_bytes() == legacy_bytes  # 历史文件绝不被原地改写
+
+
+
+def test_approved_list_reverifies_binding_and_invalidates_on_drift(
+    tmp_path: Path,
+) -> None:
+    """批准清单必须用**当前** inbox 重新验证 binding；绑定内容身份漂移即失效。"""
+    inbox, _package = _inbox_with_package(tmp_path)
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+    attestation = write_attestation(inbox, fingerprint)
+    ledger_path = tmp_path / "review_ledger.json"
+    first = run_review(
+        inbox,
+        moment=MOMENT,
+        decision="approve",
+        fingerprint=fingerprint,
+        reviewer="operator-li",
+        reason_code=APPROVE_CODE,
+        attestation_path=attestation,
+        out_path=ledger_path,
+    )
+    assert [item.fingerprint for item in first.approved_list.approved] == [fingerprint]
+
+    # ① binding 绑定的材料结构内容身份与当前不一致 → ATTESTATION_STALE
+    drifted = json.loads(ledger_path.read_text(encoding="utf-8"))
+    drifted["decisions"][0]["attestation"]["package_content_sha256"] = "b" * 64
+    drifted_ledger = ReviewLedger.from_dict(drifted)
+    approved = build_approved_intake_list(
+        scan_inbox(inbox, moment=MOMENT), drifted_ledger, moment=MOMENT
+    )
+    assert approved.approved == ()
+    assert [item.reason_code for item in approved.invalidated] == [
+        InvalidationReason.ATTESTATION_STALE.value
+    ]
+
+    # ② 新增一个候选包不影响**该**批准的复核（批准只绑定被核验的那一个 package）
+    build_package(inbox, name="pkg-author-02", rows=[author_row("b-0001")])
+    still_ok = run_review(inbox, moment=LATER, ledger_path=ledger_path)
+    assert [item.fingerprint for item in still_ok.approved_list.approved] == [fingerprint]
+
+
+def test_attestation_binding_rejects_tampered_ledger_state(tmp_path: Path) -> None:
+    """ledger 里的 binding 被改写 / 与记录指纹不一致 → 读取时 fail-closed。"""
+    inbox, _package = _inbox_with_package(tmp_path)
+    fingerprint = only_package(scan_inbox(inbox, moment=MOMENT)).fingerprint
+    attestation = write_attestation(inbox, fingerprint)
+    ledger_path = tmp_path / "review_ledger.json"
+    run_review(
+        inbox,
+        moment=MOMENT,
+        decision="approve",
+        fingerprint=fingerprint,
+        reviewer="operator-li",
+        reason_code=APPROVE_CODE,
+        attestation_path=attestation,
+        out_path=ledger_path,
+    )
+    document = json.loads(ledger_path.read_text(encoding="utf-8"))
+
+    # ① binding 绑定到另一个指纹 → 与记录不一致
+    mismatched = json.loads(json.dumps(document))
+    mismatched["decisions"][0]["attestation"]["package_fingerprint"] = "a" * 64
+    with pytest.raises(ReviewLedgerStateError):
+        ReviewLedger.from_dict(mismatched)
+
+    # ② 未授权字段（防止夹带正文 / 凭据）
+    unknown = json.loads(json.dumps(document))
+    unknown["decisions"][0]["attestation"]["raw_evidence"] = "secret"
+    with pytest.raises(ReviewLedgerStateError):
+        ReviewLedger.from_dict(unknown)
+
+    # ③ 削弱完整性声明 → 批准失效（不满足新门禁）
+    weakened = json.loads(json.dumps(document))
+    weakened["decisions"][0]["attestation"]["all_required_verified"] = False
+    weakened_ledger = ReviewLedger.from_dict(weakened)
+    approved = build_approved_intake_list(
+        scan_inbox(inbox, moment=MOMENT), weakened_ledger, moment=MOMENT
+    )
+    assert approved.approved == ()
+    assert [item.reason_code for item in approved.invalidated] == [
+        InvalidationReason.ATTESTATION_INCOMPLETE.value
+    ]
+
+    # ④ 非 APPROVE 记录不得携带 binding
+    reject_record = json.loads(json.dumps(document))["decisions"][0]
+    reject_record["decision"] = "REJECT"
+    reject_record["reason_code"] = REJECT_CODE
+    reject_record["decision_id"] = compute_decision_id(
+        fingerprint, "REJECT", 1, REJECT_CODE
+    )
+    with pytest.raises(ReviewLedgerStateError):
+        ReviewLedger.from_dict(
+            {
+                "kind": LEDGER_KIND,
+                "schema_version": REVIEW_SCHEMA_VERSION,
+                "generated_at": MOMENT.isoformat(),
+                "decisions": [reject_record],
+            }
+        )
 
