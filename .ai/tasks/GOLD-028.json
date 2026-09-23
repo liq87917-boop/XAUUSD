@@ -1,0 +1,56 @@
+{
+  "task_id": "GOLD-028",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立材料级 Human Verification Attestation 与证据绑定审计",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-027"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把 GOLD-027 的结构完整预检进一步转换为可审计的材料级人工核验凭证：明确记录授权证明、来源身份/出处、独立时间语义与 availability/OOS 证明分别核验了什么、由谁核验、结论是什么，同时保持该凭证绝不等价于数据资格或 Phase 放行。",
+  "requirements": [
+    "新增版本化 Human Verification Attestation 契约，必须绑定当前候选 package fingerprint、GOLD-027 intake handoff/manifest 的内容身份以及 scope；至少逐项覆盖 authorization、source identity/provenance、published_at/collected_at/effective_at 独立时间语义、availability/OOS 独立证据。",
+    "每个必核验材料必须有受控决策 VERIFIED/REJECTED/NEEDS_CHANGES、稳定 reason code、显式 reviewer label、带时区 reviewed_at 和独立 evidence reference；不得保存凭据、token、原始正文或把 reviewer/文件 mtime/当前时间当作证据时间。",
+    "只有当前 package 非 Mock/模板/示例/合成、GOLD-027 preflight_pass=true 且所有必需材料都有可核验引用时，才允许产生 all_required_verified=true；任何 package/manifest/content fingerprint 漂移必须使旧 attestation 失效，绝不静默继承。",
+    "提供纯本地 CLI/库入口；默认只读/零写入，只有显式 --out 才原子写 attestation；允许 verify 模式重新绑定当前 package 并检测 stale/tampered/missing reference。",
+    "artifact 必须硬编码 data_qualification_passed=false、phase_transition_allowed=false、l3_l4_auto_advance_allowed=false、blocker_active=true、human_gate_required=true；all_required_verified 只代表材料级人工核验完成。",
+    "新增回归测试覆盖：缺授权证明、时间语义未核验、availability/OOS 未核验、Mock/模板、内容漂移、attestation 篡改、重复/修订语义、敏感值拒绝、未来/naive reviewed_at、零网络/零数据库/零证据改写。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/evidence/**",
+      "scripts/evidence_*.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**"
+    ]
+  },
+  "constraints": [
+    "不得把 attestation 或 all_required_verified 解释为 evidence qualified、PHASE3_3_DATA 解除或 L3/L4 通过。",
+    "不得访问外部网络、未授权来源或真实凭据；不得新增采集器、外部模型 API、数据库写入或交易逻辑。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false；PHASE3_3_DATA 保持 BLOCKED。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "可从一个内容寻址的 attestation 明确回答每项关键材料是否被人工核验、核验者和所依据的独立引用，并能检测 package/content 漂移。",
+    "缺任一必需人工核验、Mock/模板/篡改/不可信时间均 fail-closed；artifact 永不自动资格化数据或推进 Gate。",
+    "全量 pytest/ruff/mypy 通过；Phase、L3/L4 与交易安全不变量保持。"
+  ]
+}
