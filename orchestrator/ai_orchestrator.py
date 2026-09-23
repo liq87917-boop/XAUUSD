@@ -90,7 +90,7 @@ CLINE_PROVIDER = (
 CLINE_MODEL = (
     os.getenv(
         "AI_CLINE_MODEL",
-        "deepseek-flash"
+        ""
     )
     .strip()
 )
