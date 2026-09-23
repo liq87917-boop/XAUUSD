@@ -1,0 +1,58 @@
+{
+  "task_id": "GOLD-029",
+  "type": "BLOCKER_TOOLING",
+  "title": "把 Human Verification Attestation 接入 Evidence APPROVE 门禁",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-028"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "让现有 evidence_review 的 APPROVE 从“人工 reason code 即可批准”升级为必须绑定一份当前、完整、未漂移的 GOLD-028 Human Verification Attestation；历史记录保持可读且不得被静默改写。",
+  "requirements": [
+    "修改 evidence review/CLI 的新 APPROVE 路径：必须显式提供并验证 GOLD-028 attestation，要求 exact package fingerprint/scope/content identity 匹配、all_required_verified=true、attestation 完整性通过且非 stale/tampered；否则 APPROVE fail-closed 且零写入。",
+    "REJECT/NEEDS_CHANGES 仍允许在未完成 attestation 时记录，以便人工驳回或要求整改；不得因为缺 attestation 阻止负向决策审计。",
+    "新的 APPROVE review record 必须保存最小 attestation binding（schema/version、attestation_id、内容摘要/sha256 或等价稳定身份），不保存原始证据正文、凭据或证据时间；旧 review ledger/历史记录必须保持可读且不得原地迁移或重写。",
+    "若需要 schema 演进，必须显式版本化并提供向后兼容只读路径；禁止把旧 APPROVE 自动视为满足新 attestation 门禁，新门禁只对后续资格链/当前状态重新验证时生效。",
+    "build_approved_intake_list 与后续 intake plan 在使用当前 APPROVE 时必须重新验证 attestation binding；package 或 attestation 任一漂移都使批准失效并给出稳定原因码。",
+    "新增测试覆盖：无 attestation 的 APPROVE、部分核验、fingerprint mismatch、attestation stale/tampered、合法绑定 APPROVE、负向决策无需 attestation、历史 v1 可读但不获得新门禁资格、批准清单/plan 重新验证失效、零网络/零数据库/不改原始 evidence。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/evidence/review.py",
+      "src/evidence/**",
+      "scripts/evidence_review.py",
+      "scripts/evidence_*.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**"
+    ]
+  },
+  "constraints": [
+    "不得降低现有 preflight/authorization/OOS/qualification 阈值；新 attestation 是附加安全门禁，不是资格替代品。",
+    "不得改写历史 review ledger；不得用 review/attestation 时间推断 published_at/collected_at/effective_at/available_at。",
+    "PHASE3_3_DATA 保持 BLOCKED；L3/L4 不自动推进；LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "任何新的 APPROVE 都必须由当前、完整、未漂移的材料级人工核验 attestation 支撑，且批准清单/后续链会再次验证该绑定。",
+    "历史记录可审计但不会被自动升级为满足新门禁；REJECT/NEEDS_CHANGES 审计不被不必要阻塞。",
+    "全量 pytest/ruff/mypy 通过；数据资格、Phase 与交易安全边界不变。"
+  ]
+}
