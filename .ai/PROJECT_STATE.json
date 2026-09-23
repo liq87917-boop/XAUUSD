@@ -4,57 +4,37 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-018",
-  "last_completed_task": "GOLD-017",
-  "last_reviewed_task": "GOLD-017",
+  "current_task": "GOLD-021",
+  "last_completed_task": "GOLD-020",
+  "last_reviewed_task": "GOLD-020",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-017 已完成并通过工程验收：Evidence Package Manifest Builder 已落地，pytest 2557 passed / 1 skipped，ruff PASS，mypy 172 source files PASS。真实授权 Author/News 证据仍不足，PHASE3_3_DATA 保持 BLOCKED。用户已重启并启用 3-task rolling queue；当前队列先修 GOLD-017 暴露的 monitoring/evidence 循环导入，再加固 queue fail-closed 与 Git push/result 语义。上述自动化基础设施工作不得改变数据资格或越过 L3/L4 Gate。",
+      "detail": "GOLD-018/019/020 已完成并经 GPT 工程审查：导入顺序门禁、rolling queue fail-closed、Git push 恢复与 result 语义加固均通过全量 pytest/ruff/mypy。真实授权 Author/News 证据仍不足，PHASE3_3_DATA 保持 BLOCKED；不得因此进入 Phase 3.4 或越过 L3/L4 Gate。",
       "retryable": false
     }
   ],
   "resolved_blockers": [
-    {
-      "code": "VALIDATION_PYTHON_ENV",
-      "resolved_by": "project .venv validation confirmed: pytest runs successfully"
-    },
-    {
-      "code": "CLINE_MODEL_QUOTA_OR_CONFIG",
-      "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"
-    },
-    {
-      "code": "CLINE_CLI_INSTALLATION",
-      "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
-    },
-    {
-      "code": "CLINE_PROVIDER_BILLING_ROUTE",
-      "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; start_agent.bat now hard-pins AI_CLINE_PROVIDER=deepseek and Orchestrator passes --provider deepseek without exposing API keys. Non-retryable balance/auth/quota/model errors now fail fast, skip validation/retries, preserve local recovery artifacts, and stop the rolling queue."
-    }
+    {"code": "VALIDATION_PYTHON_ENV", "resolved_by": "project .venv validation confirmed: pytest runs successfully"},
+    {"code": "CLINE_MODEL_QUOTA_OR_CONFIG", "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"},
+    {"code": "CLINE_CLI_INSTALLATION", "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"},
+    {"code": "CLINE_PROVIDER_BILLING_ROUTE", "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; launcher hard-pins AI_CLINE_PROVIDER=deepseek and provider fatal errors fail fast."}
   ],
-  "next_action": "Restart start_agent.bat once to load the new DeepSeek-pinned/fail-fast Orchestrator, then retry GOLD-018. Queue remains GOLD-018 -> GOLD-019 -> GOLD-020. GOLD-018 currently has no terminal result in GitHub, so the restarted agent should begin it again without inheriting a blocked result. Do not enter Phase 3.4 or cross L3/L4 gates.",
+  "next_action": "Execute GPT-approved L1 automation queue GOLD-021 -> GOLD-022 -> GOLD-023. These tasks harden startup self-update, interrupted-task recovery, and the GPT-planner/executor boundary only. PHASE3_3_DATA remains BLOCKED; do not enter Phase 3.4 or cross L3/L4 gates.",
   "human_gates": [
-    {
-      "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
-      "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."
-    },
-    {
-      "code": "PHASE3_3_L3_DECISION",
-      "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."
-    }
+    {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."},
+    {"code": "PHASE3_3_L3_DECISION", "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."}
   ],
   "invariants": [
     "LIVE_TRADING=false",
-    "不得伪造 published_at / collected_at / effective_at / availability",
+    "ALLOW_EXTERNAL_ORDER_SUBMISSION=false",
+    "不得伪造 published_at / collected_at / effective_at / availability / OOS evidence",
     "不得绕过来源授权或 robots/证书安全限制",
     "不得用 Mock/模板/示例数据宣称真实数据资格",
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行已批准任务，不得生成后续任务或决定 Phase",
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ],
   "queue_target_size": 3,
-  "task_queue": [
-    "GOLD-018",
-    "GOLD-019",
-    "GOLD-020"
-  ],
+  "task_queue": ["GOLD-021", "GOLD-022", "GOLD-023"],
   "queue_status": "ACTIVE"
 }
