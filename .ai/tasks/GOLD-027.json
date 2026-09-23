@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-027",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立授权证据人工 Intake Handoff 与预检契约",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-026"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把 GOLD-026 的 PHASE3_3_DATA 只读缺口诊断转换为严格的人工证据提交/预检 handoff，使业务人员能提供真实授权 Author/News 证据，同时保持资格判定与 L3/L4 决策完全独立。",
+  "requirements": [
+    "基于现有 evidence contract/readiness diagnostic 定义版本化 intake handoff schema：明确 Author/News 所需来源身份、授权证明、原始证据引用、published_at/collected_at/effective_at/availability/OOS 与独立时间语义要求；不得新增或降低任何资格阈值。",
+    "实现只读/本地预检入口，仅检查提交材料是否齐全、字段是否可解析、来源/时间声明是否有独立证据引用；不得把当前时间、文件 mtime、抓取时间或推断值补成业务时间事实。",
+    "输出必须区分 missing、present-unverified、human-verification-required、non-qualifying、gate-blocked；Mock/模板/示例/合成材料始终 non-qualifying。",
+    "预检 PASS 只能表示 intake package 结构完整，绝不等于 evidence qualified、PHASE3_3_DATA 解除或 L3/L4 通过；文档和机器字段必须明确这一点。",
+    "不得访问未授权来源、不得绕过 robots/证书、不得新增真实网络采集、凭据或外部模型 API；测试仅使用 fixture/Mock/本地 package。",
+    "新增回归测试覆盖缺失授权证明、时间语义来源缺失、Mock 证据、结构完整但未人工验证、L3/L4 停线，以及历史 evidence/result 不被改写。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/monitoring/**", "scripts/evidence_*.py", "tests/unit/**", "tests/integration/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", "src/alpha/**", "src/execution/**"]
+  },
+  "constraints": [
+    "PHASE3_3_DATA 必须保持 BLOCKED；本任务无权解除 blocker 或签发 GPT/L3/L4 review。",
+    "不得伪造 published_at/collected_at/effective_at/availability/OOS，不得将 package completeness 当作 qualification。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false；不得启动 Phase 3.4、Alpha、模型或交易工作。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "人工可按单一 handoff 契约准备真实授权 Author/News 材料，预检能确定性指出缺失或待人工验证项。",
+    "结构完整不会被误判为 evidence qualified；Mock/缺失授权/不可信时间语义全部 fail-closed。",
+    "全量 pytest/ruff/mypy 通过；PHASE3_3_DATA、L3/L4、安全开关保持不变。"
+  ]
+}
