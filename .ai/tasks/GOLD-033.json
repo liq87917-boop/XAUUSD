@@ -1,0 +1,37 @@
+{
+  "task_id": "GOLD-033",
+  "type": "PHASE3_3_BLOCKER_TOOLING",
+  "title": "生成 Phase 3.3 人工证据提交就绪包",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-032"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把 GOLD-026~030 已有只读诊断、handoff、attestation 与 chain audit 的客观缺口汇总成一个确定性的人工提交就绪包，让业务方清楚知道还缺哪些真实授权材料；该包绝不产生或推断真实证据资格。",
+  "requirements": [
+    "新增只读 builder/CLI，汇总当前 Phase 3.3 blocker、Author/News 授权材料要求、独立时间/availability 要求、human verification 要求和 L3 待办，引用既有契约而非复制/降低阈值。",
+    "输出必须明确区分 engineering_ready、submission_materials_complete、human_verification_complete、data_qualification_passed、l3_gate_pending；data_qualification_passed 与 phase_transition_allowed 在本任务中不得被置 true。",
+    "缺少真实材料时输出稳定 missing reason codes 与人工动作清单；不得生成 published_at/collected_at/effective_at/availability/OOS 值，不得把 fixture/mock/template 计为真实材料。",
+    "默认只读；仅显式 --out 可写汇总文件，且不得修改 inbox、历史 evidence artifacts、Review Ledger、PROJECT_STATE 或 task/result。",
+    "增加回归测试证明 rehearsal/mock 输入仍保持 blocker，真实材料缺失不会被工程链全绿掩盖。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "scripts/**", "tests/unit/**", "tests/integration/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**"]
+  },
+  "constraints": [
+    "只做 blocker-facing/read-only tooling，不得改变数据资格阈值或宣称真实证据合格。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false；PHASE3_3_DATA 保持 BLOCKED。",
+    "不得进入 Phase 3.4 或跨 L3/L4；真实授权和法律有效性仍由业务方/人工负责。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "人工证据缺口被确定性汇总且可操作，但任何工程就绪状态都不能解除 PHASE3_3_DATA。",
+    "Mock/fixture/template 永不被计为真实授权证据；时间/availability 不被生成或推断。",
+    "全量 pytest/ruff/mypy 通过；L3/L4 与交易安全边界不变。"
+  ]
+}
