@@ -1,0 +1,37 @@
+{
+  "task_id": "GOLD-026",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立 PHASE3_3_DATA 人工证据缺口的只读 Readiness Diagnostic",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-025"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "在不采集、不伪造、不放宽资格门槛的前提下，把 PHASE3_3_DATA 当前缺失的真实授权 Author/News 证据整理为确定性、只读、可操作的 readiness diagnostic，供 GPT 和人工判断还缺什么。",
+  "requirements": [
+    "复用现有 evidence/readiness/manifest 能力生成只读缺口诊断：按 Author/News、授权/来源、published_at/collected_at/effective_at/availability/OOS、独立时间语义、样本量/覆盖等现有契约分类；不得新增或降低资格阈值。",
+    "输出必须明确区分 code-ready、evidence-missing、human-verification-required、gate-blocked；Mock/模板/示例数据必须始终标记为 non-qualifying。",
+    "不得访问未授权来源、不得绕过 robots/证书、不得发起真实网络采集；测试必须 Mock/fixture/本地 manifest。",
+    "对缺失字段只报告事实和人工下一步，不得用当前时间、文件 mtime、抓取时间或推断值填补 published_at/collected_at/effective_at/availability/OOS。",
+    "提供 CLI/库级只读入口与回归测试，证明 PHASE3_3_DATA 在证据不足时仍 BLOCKED，且 L3/L4 不会被工具自动推进。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/monitoring/**", "scripts/evidence_*.py", "tests/unit/**", "tests/integration/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", "src/alpha/**", "src/execution/**"]
+  },
+  "constraints": [
+    "PHASE3_3_DATA 必须保持 BLOCKED，除非未来由真实授权证据和人工 Gate 独立解除；本任务无权解除。",
+    "不得新增真实来源、凭据、外部网络调用、模型训练或交易逻辑。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false；Mock 永不 qualify。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT/人工可从单一诊断明确看到 PHASE3_3_DATA 的剩余真实证据缺口和必须人工完成的步骤。",
+    "任何缺失/Mock/时间语义不可信场景都保持 fail-closed，不会被诊断工具转成 qualified。",
+    "全量 pytest/ruff/mypy 通过；Phase 3.4、Alpha、交易与 L3/L4 均未启动。"
+  ]
+}
