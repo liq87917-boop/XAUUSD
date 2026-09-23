@@ -95,6 +95,16 @@
   Mock / 模板 / 示例 / 合成、``preflight_pass=false``、非 ``HUMAN_VERIFICATION_REQUIRED`` 材料
   一律**拒绝**被声明为 ``VERIFIED``（fail-closed）；``verify_attestation`` 提供**防伪核验**
   （重新推导 ``attestation_id``、与**当前**候选目录比对 package / handoff 内容身份）。
+- :mod:`src.evidence.submission_readiness`：**纯本地只读**的人工证据**提交就绪包**（GOLD-033）：
+  把 GOLD-026 ~ GOLD-030 已有的只读结论（缺口诊断 / handoff / intake handoff 契约 / 材料级
+  人工核验 / 端到端链审计）汇总成**单一、确定、可操作**的"业务方还缺什么"清单，输出五个
+  **互相独立**的结论（``engineering_ready`` / ``submission_materials_complete`` /
+  ``human_verification_complete`` / ``data_qualification_passed`` /
+  ``phase_transition_allowed``；后两者**恒为** false、``l3_gate_pending`` 恒为 true）、
+  **稳定 missing reason codes** 与人工动作清单（每条**只引用**既有契约字段 / 既有阈值 /
+  既有命令）；**绝不生成或推断** ``published_at`` / ``collected_at`` / ``effective_at`` /
+  ``available_at`` / OOS 值，Mock / fixture / 模板**永不计**真实材料（演练模式禁止与真实输入
+  同时出现），默认零写入（唯一写开关是显式 ``--out``），**绝不**解除 ``PHASE3_3_DATA``。
 
 红线（与 `.clinerules` 一致）：
 
@@ -338,6 +348,13 @@ _LAZY_EXPORTS_BY_MODULE: Final[dict[str, tuple[str, ...]]] = {
         "TEMPLATE_SCHEMA_VERSION", "example_rows", "render_template", "template_columns",
         "template_output_name", "write_template",
     ),
+    "submission_readiness": (
+        "SUBMISSION_PACK_FILE_NAME", "SUBMISSION_PACK_KIND", "SUBMISSION_PACK_NOTE",
+        "SUBMISSION_PACK_SCHEMA_VERSION", "SUBMISSION_PACK_SEMANTICS_NOTE", "ChainBinding",
+        "HumanAction", "MaterialRequirement", "ScopeSubmission", "SubmissionCode",
+        "SubmissionReadinessPack", "build_submission_pack", "load_submission_pack",
+        "render_submission_pack_markdown", "run_submission_pack",
+    ),
     "validation": (
         "EvidenceRecord", "NormalizedRow", "RowAssessment", "assess_row",
         "normalize_input_row",
@@ -450,6 +467,7 @@ __all__ = [
     "ChainAuditInputs",
     "ChainAuditPathError",
     "ChainAuditWriteError",
+    "ChainBinding",
     "ChainStage",
     "ChainStageResult",
     "ChainStageStatus",
@@ -537,6 +555,7 @@ __all__ = [
     "HANDOFF_SCHEMA_VERSION",
     "HandoffDocument",
     "HandoffMaterial",
+    "HumanAction",
     "HumanDecision",
     "HumanDecisionRecord",
     "HumanVerificationAttestation",
@@ -623,6 +642,7 @@ __all__ = [
     "ManifestWriteStatus",
     "MaterialAttestation",
     "MaterialDecision",
+    "MaterialRequirement",
     "MaterialSpec",
     "NEXT_STEP_NOTE",
     "NormalizedRow",
@@ -727,14 +747,22 @@ __all__ = [
     "STATUS_FILE_NAME",
     "STATUS_KIND",
     "STATUS_MEANINGS",
+    "SUBMISSION_PACK_FILE_NAME",
+    "SUBMISSION_PACK_KIND",
+    "SUBMISSION_PACK_NOTE",
+    "SUBMISSION_PACK_SCHEMA_VERSION",
+    "SUBMISSION_PACK_SEMANTICS_NOTE",
     "SUPPORTED_FILE_FORMATS",
     "ScopeChange",
     "ScopeGap",
     "ScopeLedger",
     "ScopeSnapshot",
+    "ScopeSubmission",
     "SingleInstanceLock",
     "SnapshotBuilder",
     "SnapshotStateError",
+    "SubmissionCode",
+    "SubmissionReadinessPack",
     "TEMPLATE_FORMATS",
     "TEMPLATE_ROOT",
     "TEMPLATE_SCHEMA_VERSION",
@@ -773,6 +801,7 @@ __all__ = [
     "build_rehearsal_chain",
     "build_snapshot",
     "build_snapshot_from_session",
+    "build_submission_pack",
     "chain_audit_exit_code_for",
     "compute_attestation_id",
     "compute_chain_facts_digest",
@@ -816,6 +845,7 @@ __all__ = [
     "load_readiness_state_document",
     "load_review_ledger",
     "load_snapshot_state",
+    "load_submission_pack",
     "load_verification_input",
     "main_audit_exit_code",
     "main_verification_exit_code",
@@ -841,6 +871,7 @@ __all__ = [
     "render_package_summary",
     "render_quarantine_summary",
     "render_review_summary",
+    "render_submission_pack_markdown",
     "render_template",
     "render_tick_summary",
     "render_watch_summary",
@@ -857,6 +888,7 @@ __all__ = [
     "run_intake_receipt",
     "run_package_builder",
     "run_review",
+    "run_submission_pack",
     "run_tick",
     "scan_inbox",
     "synthetic_marker_fields",

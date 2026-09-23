@@ -1724,6 +1724,80 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   「源码级守卫：审计 / 演练模块不 import 数据库 / 网络 / 子进程」等。
 
 
+### 人工证据提交就绪包（`scripts/evidence_submission_readiness.py`，GOLD-033）
+
+> **合规红线**：本项**只做只读聚合** —— 不采集、不写库、不联网、不执行 intake、不移动 /
+> 删除 / 改写任何原始 evidence 或历史 artifact；Mock / fixture / 模板**永不**计为真实材料；
+> `PHASE3_3_DATA` **保持 BLOCKED**，L3 / L4 只能人工推进。
+
+- **一句话**：把 GOLD-026 ~ GOLD-030 已有的只读结论（缺口诊断 / handoff / intake handoff
+  契约 / 材料级人工核验 / 端到端链审计）汇总成**单一、确定、可操作**的"业务方现在还缺哪些
+  **真实材料**、哪些只能人工做、哪些工程侧已就绪"清单（稳定 JSON + 人类可读 Markdown）；
+- **复用而不复制**：缺口 / 阈值 / 材料清单 / 原因码完全复用既有能力（`build_readiness_report`
+  + `build_handoff_report` + GOLD-027 `MATERIAL_SPECS` + GOLD-028 `attestable_material_keys` +
+  GOLD-030 链审计事实），本工具**不新增、不降低**任何资格阈值，也**不重新解释**任何契约字段；
+- **五个结论互相独立**（机器可读字段）：
+  `engineering_ready`（工程链 / 契约是否一致，**只**说明工具链健康）/
+  `submission_materials_complete`（业务方提交的真实材料**结构完整**，仍待人工核验）/
+  `human_verification_complete`（当前 GOLD-028 材料级人工核验已完成）/
+  `data_qualification_passed` / `phase_transition_allowed`；后两者**恒为 false**，
+  `l3_gate_pending` / `blocker_active` / `human_gate_required` / `gate_blocked` **恒为 true**
+  （**硬编码**）；
+- **缺材料时只报事实**：输出**稳定 missing reason codes**（如
+  `SUBMISSION_AUTHORIZATION_MISSING` / `SUBMISSION_AVAILABILITY_OOS_MISSING` /
+  `SUBMISSION_SYNTHETIC_MATERIAL_ONLY` / `SUBMISSION_ATTESTATION_STALE` /
+  `SUBMISSION_ENGINEERING_CHAIN_INCOMPLETE`）与**人工动作清单**（每条只引用既有契约字段 /
+  既有阈值 / 既有命令），并逐材料列出 `IntakeStatus`；
+  **绝不生成或推断** `published_at` / `collected_at` / `effective_at` / `available_at` /
+  OOS 值（载荷里连这些键名都不出现，唯一时间戳是审计操作时间 `generated_at`）；
+- **Mock / fixture / 模板永不计数**：只带示例 / 合成标记或名称命中示例词表的候选包一律
+  `NON_QUALIFYING`；`--rehearsal` 只接受 fixture / Mock 输入（**禁止**与 `--inbox-dir` /
+  `--attestation` / `--chain-audit` 同时给出），此时
+  `submission_materials_complete` / `human_verification_complete` **恒为 false**；
+- **工程链全绿不掩盖真实材料缺失**：`engineering_ready=true` 时
+  `submission_materials_complete` / `human_verification_complete` /
+  `data_qualification_passed` / `phase_transition_allowed` **不受影响**；
+- **内容身份**：确定性 `facts_digest` 与 `pack_id`（策略块 + 证据来源 + 摘要）**不含**路径与
+  审计时点：同一份提交材料换目录 / 换时刻计算得到**同一**身份，材料 / 结论 / 凭证 / 链路漂移
+  必然产生**新**身份（旧结论绝不静默继承）；
+- **用法**：
+
+  ```bash
+  # ① 只读汇总（默认只打印 stdout；零写入、零网络、零数据库写入）
+  .venv\Scripts\python.exe -m scripts.evidence_submission_readiness --json
+
+  # ② 纳入本地候选目录（GOLD-027 只读预检）+ 当前凭证核验（GOLD-028）
+  .venv\Scripts\python.exe -m scripts.evidence_submission_readiness \
+      --inbox-dir logs/evidence/inbox \
+      --attestation logs/evidence/phase33_human_verification_attestation.json --json
+
+  # ③ 纳入 GOLD-030 链审计结论（工程链是否一致）
+  .venv\Scripts\python.exe -m scripts.evidence_submission_readiness \
+      --chain-audit logs/evidence/phase33_evidence_chain_audit.json --json
+
+  # ④ 单一 rehearsal：先验证工具链健康（纯本地 fixture；**不是**真实证据）
+  .venv\Scripts\python.exe -m scripts.evidence_submission_readiness --rehearsal \
+      --work-dir logs/submission_rehearsal --json
+
+  # ⑤ 唯一写开关：显式 --out 原子落盘**本包本身**（不写库、不 intake、不解除 blocker）
+  .venv\Scripts\python.exe -m scripts.evidence_submission_readiness --json \
+      --out logs/evidence/phase33_human_evidence_submission_pack.json
+  ```
+
+- 退出码：`0` 无待办缺口（**仍不是**资格通过）/ `2` 参数或输入错误（含 inbox 目录缺失）/
+  `3` 路径不可用（链审计报告 / 凭证 / 输出不可用、把输出写进 inbox、演练工作目录落在仓库非
+  `logs/` 之处）/ `4` 输入 artifact 损坏 / 被篡改 / 漂移（fail-closed，零写入）/
+  `5` 仍有待办缺口（**当前预期**：真实材料 / 人工核验 / 工程链至少缺一项）/ `6` 锁冲突；
+- 回归测试：`tests/unit/test_evidence_submission_readiness.py`（27 项）+
+  `tests/integration/test_evidence_submission_readiness_integration.py`（15 项），其中包含
+  「空输入逐材料 MISSING + 稳定原因码」「Mock 候选包 `NON_QUALIFYING` 且**永不计**真实材料」
+  「真实材料结构完整仍 `data_qualification_passed=false` / `l3_gate_pending=true`」
+  「rehearsal 工程链全绿仍保持 blocker（真实材料缺失**不**被掩盖）」
+  「凭证漂移 → `SUBMISSION_ATTESTATION_STALE`」「`pack_id` / `facts_digest` 确定性且漂移必变」
+  「载荷**没有**任何证据时间键」「默认零写入 / `--out` 只写本包 + 锁文件、写进 inbox 被拒」
+  「源码级守卫：模块与 CLI 无网络 / 文件时间 / 数据库写入调用」等。
+
+
 ## 8. 数据模型
 
 

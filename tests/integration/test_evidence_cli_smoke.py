@@ -46,6 +46,7 @@ EVIDENCE_CLI_MODULES: tuple[str, ...] = (
     "scripts.evidence_readiness_runner",
     "scripts.evidence_readiness_watch",
     "scripts.evidence_review",
+    "scripts.evidence_submission_readiness",
     "scripts.intake_evidence",
 )
 

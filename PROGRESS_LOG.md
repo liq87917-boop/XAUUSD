@@ -4774,3 +4774,97 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   §2 状态机推进指针。
 
 
+## GOLD-033：人工证据提交就绪包（Phase 3.3 blocker-facing 只读工具）
+
+### 1. 背景 / 问题
+
+- GOLD-026 ~ GOLD-030 已各自提供只读缺口诊断、intake handoff 预检、材料级人工核验凭证与
+  端到端链审计，但**业务方**拿到这些工具时仍要自己拼出"我现在到底缺哪些**真实材料**、
+  哪些必须人工做、哪些工程侧已就绪、L3 还等什么"；
+- 缺一个**只读聚合**层：把已有结论汇总成**单一、确定、可操作**的提交就绪包。若让 Executor
+  顺手"判定一下是否有资格"，就等于把资格解释权交给执行方。
+
+### 2. 变更（最小范围）
+
+- `src/evidence/submission_readiness.py`（新增，纯只读聚合，~1730 行含文档）：
+  - 复用既有能力，**不新增 / 不降低**任何阈值：GOLD-006 `build_readiness_report` /
+    GOLD-008 `build_handoff_report` / GOLD-027 `MATERIAL_SPECS` + `TIME_SEMANTICS_REQUIREMENTS`
+    / GOLD-028 `attestable_material_keys` + `REQUIRED_VERIFICATION_CATEGORIES` +
+    `verify_attestation` / GOLD-026 `build_gap_diagnostic`（紧凑摘要）/ GOLD-030 链审计事实
+    （新增只读 `ChainBinding` + `load_chain_binding`，**不重算**阶段语义）；
+  - **五个独立结论**（机器可读）：`engineering_ready`（只说明工程链 / 契约一致）/
+    `submission_materials_complete`（提交材料**结构完整**，仍待人工核验）/
+    `human_verification_complete`（当前 GOLD-028 凭证仍成立）/
+    `data_qualification_passed` / `phase_transition_allowed`（后两者**硬编码 false**），
+    `l3_gate_pending` / `blocker_active` / `human_gate_required` / `gate_blocked` 恒 true；
+    `nothing_open` 仅由前四项派生，**绝不**改资格字段；
+  - **稳定 missing reason codes**（`SubmissionCode`，如
+    `SUBMISSION_AUTHORIZATION_MISSING` / `SUBMISSION_AVAILABILITY_OOS_MISSING` /
+    `SUBMISSION_SYNTHETIC_MATERIAL_ONLY` / `SUBMISSION_ATTESTATION_STALE` /
+    `SUBMISSION_ENGINEERING_CHAIN_INCOMPLETE`）+ **人工动作清单**（每条只引用既有契约字段 /
+    阈值 / 命令；`blocking` 恒 true；末条恒为 `l3_human_gate_decision`）+ L3 待办清单；
+  - **逐材料事实**：材料契约漂移即 fail-closed（`_verify_material_contract`）；只带合成 /
+    示例标记的候选包一律 `NON_QUALIFYING`；`counts_toward_eligibility` / `qualifies` 硬编码
+    false；**绝不生成或推断** `published_at` / `collected_at` / `effective_at` /
+    `available_at` / OOS 值（载荷里连键名都不出现，唯一时间戳是 `generated_at`）；
+  - **内容身份**：`facts_digest` / `pack_id` 只覆盖确定性事实（不含路径与审计时点），
+    材料 / 结论 / 凭证 / 链漂移必然改变身份；
+  - **默认零写入**：`run_submission_pack` 只有显式 `out_path` 才先取单实例锁再原子落盘
+    **本包本身**，拒绝写进 inbox；模块内**没有** intake / commit / 数据库写入 / 网络调用。
+- `scripts/evidence_submission_readiness.py`（新增 CLI，默认只读）：`--inbox-dir`（GOLD-027
+  只读预检）/ `--attestation`（**必须**与 `--inbox-dir` 同时给出）/ `--chain-audit` /
+  `--rehearsal --work-dir`（纯本地 fixture，仅供验证工具链健康）/ `--as-of` / `--json` /
+  `--out`（唯一写开关）/ `--lock`；演练模式**禁止**与真实输入同时给出（fail-closed）；
+  退出码 `0/2/3/4/5/6`（`5` 为**当前预期**：仍待真实材料 / 人工核验 / 工程链）；
+- `src/evidence/__init__.py`：登记 `submission_readiness` 惰性导出（`__all__` 同名同源，
+  包初始化仍不 eager 导入任何子模块）；
+- `README.md`：新增 GOLD-033 章节（红线、五个结论语义、稳定原因码、用法、退出码、回归）；
+- 未新增依赖、未改 `pyproject.toml`、未改 `.ai/**`、未改 `src/alpha/**` / `src/execution/**` /
+  `database/**`。
+
+### 3. 验证
+
+- 新增单元回归 `tests/unit/test_evidence_submission_readiness.py`（**27 项**）：
+  材料缺失原因码与 GOLD-027 材料契约对齐、版本化 schema 只读语义、源码级守卫（模块与 CLI
+  都无网络 / 文件时间 / 数据库写入调用）、空输入逐材料 `MISSING` + 稳定原因码 + 退出码 5、
+  人工动作清单覆盖材料与固定 gate 步骤、载荷**没有**任何证据时间键（唯一时间戳 `generated_at`）、
+  Markdown 摘要保持 blocker、**rehearsal / fixture 工程链全绿仍全部 blocked**（真实材料缺失
+  **不**被掩盖）、演练模式拒绝真实输入、链绑定往返一致 + 非法结构 fail-closed + 最早失败阶段透出、
+  Mock 候选包 `NON_QUALIFYING` 且**永不计**真实材料、真实材料结构完整仍
+  `data_qualification_passed=false` / `l3_gate_pending=true`、Mock 与真实包并存只计真实包、
+  availability 未验证如实报 `PRESENT_UNVERIFIED`、凭证完成 / 漂移（`SUBMISSION_ATTESTATION_STALE`）、
+  `pack_id` / `facts_digest` 确定性且漂移必变、`nothing_open=true` 也**不**改资格字段、
+  退出码映射、默认零写入 / `--out` 只写本包 + 锁文件 / 写进 inbox 被拒；
+- 新增集成回归 `tests/integration/test_evidence_submission_readiness_integration.py`（**15 项**，
+  临时 SQLite + 本地候选目录）：CLI 选项契约（**无** qualify / advance / intake 开关）、
+  空库 → 退出码 5 + 零文件写入 + 零数据库写入、`--inbox-dir` 只读预检（inbox 逐字节不变、
+  不 ingest）、缺失 inbox → 退出码 2、rehearsal 只写显式 work-dir 且只证明工具链健康、
+  `--chain-audit` 只让 `engineering_ready=true`、`--attestation` 只让
+  `human_verification_complete=true`、`--out` 唯一写开关（原子写、无 `.tmp` 残留、写进 inbox 被拒）；
+- `tests/integration/test_evidence_cli_smoke.py`：登记新 CLI → import / `--help` 冒烟 +
+  覆盖守门通过（fresh subprocess、空 cwd 零副作用）；
+- 全量回归：`pytest tests`（unit + integration）**3314 passed / 1 skipped**（372.20s）；
+  `ruff check .` → **All checks passed!**；
+  `mypy config database src scripts` → **Success: no issues found in 183 source files**。
+
+### 4. 范围守规
+
+- 只读聚合、零网络、零数据库写入、零交易；未进入 Phase 3.4、未跨 L3/L4；`PHASE3_3_DATA`
+  保持 BLOCKED；`LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`、
+  `src/alpha/**`、`src/execution/**`、`database/**`、`.env`、`config/rss_sources.json`；
+- 测试写入全部发生在 `tmp_path`；Cline 未执行任何 Git 写操作。
+
+### 5. 遗留 / 下一步
+
+- 本层只**汇总客观缺口**：`submission_materials_complete=true` 只表示提交材料**结构完整**、
+  `human_verification_complete=true` 只表示材料级人工核验已完成、`engineering_ready=true`
+  只表示工程链契约一致 —— 三者**都不**等于 `data_qualification_passed`，也**不**解除
+  `PHASE3_3_DATA`（只能由真实授权证据 + L3 人工 Gate 独立改变）；
+- 真实材料仍需业务方提供：按 GOLD-027 handoff 契约准备 Author / News 证据 →
+  GOLD-028 逐材料人工核验 → GOLD-029 review 批准 → GOLD-030 链审计 → L3 人工决策；
+- 建议下一步（由 GPT 决定）：业务方提交材料**前**先跑
+  `python -m scripts.evidence_submission_readiness --rehearsal --work-dir logs/submission_rehearsal --json`
+  验证工具链健康，再用 `--inbox-dir` / `--attestation` / `--chain-audit` 读取真实缺口并据此补齐材料。
+
+
