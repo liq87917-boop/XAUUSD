@@ -498,3 +498,52 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
     也绝不绕过 blocked / human-gated 的 queue head —— 提示里只有「缺几个 / 卡在谁 / 为什么 /
     `executor_can_refill=false`」这类事实。
 
+### 2.10.1 三任务前瞻契约的机器化门禁（GOLD-036）
+
+策略不再只靠文字约定，而是由 `orchestrator.planner_autopilot_contract` 固化、
+并由 `pytest` 锁定（`tests/unit/test_planner_autopilot_contract.py`、
+`tests/integration/test_planner_autopilot_contract_regression.py`）：
+
+- **冻结目标**：`LOOKAHEAD_TARGET=3`、`FOLLOW_ON_TARGET_MINIMUM=1`。任何把
+  follow-on target 降为 0 的回归都会被 `FOLLOW_ON_TARGET_BELOW_MINIMUM` 拒绝；
+  refill 事实包同时 fail-safe 回落 3，并把同一份契约内嵌到
+  `planner_authority.autopilot_contract`（`summary` 另有显式
+  `lookahead_target` / `follow_on_target_minimum` / `executor_can_refill=false`）。
+- **回归矩阵**：running+3 follow-ons ⇒ `deficit=0`、`refill_required=false`；
+  running+2 ⇒ `deficit=1`；running+0 ⇒ `deficit=3`；可运行任务必须排在
+  human-gated tail 之前（`RUNNABLE_TASK_AFTER_GATED_TAIL`）；完全 human-only 时
+  允许停线（`hard_gate_tail_allowed=true`，计数事实仍保留），但**不得**为凑数量
+  制造 filler（`FILLER_TASK_FORBIDDEN`）。
+- **Executor 不得变 Planner**：`EXECUTOR_CLAIMS_PLANNER` 拦住任何「Executor 补队列 /
+  自我提升为 Planner」的回归；绕过 hard gate（`HUMAN_GATE_BYPASS`）与可执行声明
+  不一致（`PLAN_EXECUTABLE_INCONSISTENT`）同样 fail-closed。
+- **blocker 下的工作范围**：只要 `PHASE3_3_DATA` 仍在 `PROJECT_STATE.blockers`，
+  可被标记可执行的只允许 `BLOCKER_FACING` / `CONTROL_PLANE` /
+  `EVIDENCE_PREPARATION`（否则
+  `INADMISSIBLE_WORK_CLASS_EXECUTABLE_UNDER_PHASE_BLOCKER`）；Phase 3.4 功能任务
+  若被标成可执行，一律 `PHASE34_FEATURE_TASK_EXECUTABLE` fail-closed；被 gate 挡住
+  （`auto_start=false` / L3、L4）的功能任务属于合法 gated tail，不算违规。
+- **纯只读**：判定只吃调用方传入的 task 结构；该模块不读 / 不写文件、不联网、
+  不读数据库、不调用任何 LLM；仓库中**不存在** planner API key，也**不要求**任何
+  密钥环境变量。
+
+### 2.10.2 GPT 云端条件检查 vs 本地三任务缓冲（职责边界与异常恢复）
+
+- **云端（GPT Planner）**：唯一规划权。按平台调度做**条件检查**（周期不受仓库控制），
+  每次写 task / state 之前必须重新读只读事实（
+  `python -m orchestrator.planner_refill_request` 与
+  `orchestrator.planner_autopilot_contract` 的审计事实），并以最新事实为准。
+- **本地（Orchestrator / Executor）**：只负责「活着的时候看得见缺口」——成功
+  commit + push 后与 idle 时输出 `GPT_PLANNER_REFILL_REQUIRED` /
+  `GPT_PLANNER_REFILL_SATISFIED`（去重 / 节流 + 只读镜像
+  `.ai/runtime/planner_refill_request.json`）；Executor **绝不**补队列、
+  **绝不**调用 GPT（或任何 LLM）生成 task。
+- **缓冲的角色**：本地已批准任务负责「覆盖云端检查间隔」，而不是把规划权下放；
+  队列足量时该提示保持安静。
+- **异常恢复**：看到低水位提示后，GPT 重新读取事实再补队列；若期间远端 HEAD 已被
+  Executor 推进，以新 HEAD 重新读取事实（绝不 force push / 覆盖刚完成的工作）；
+  若已只剩 human-only hard gate，允许队列停在 gated tail 等待人工，**不得**为凑数量
+  造任务；Executor 侧发现 `PROJECT_STATE` 指针 / 队列声明漂移（或
+  `STATE_RESULT_DRIFT`）时只报告、绝不修复。
+
+

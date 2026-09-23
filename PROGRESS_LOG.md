@@ -5017,3 +5017,108 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   不在本任务允许的主路径内）。
 
 
+## GOLD-036：GPT 三任务前瞻自动补队列契约与端到端门禁
+
+### 1. 背景 / 问题
+
+- GOLD-034 把「当前任务之外还剩几个已批准任务、缺几个」变成了只读事实包，
+  GOLD-035 让 Orchestrator 在低水位主动提示；但两者都只是**观察**：如果后续改动
+  把 follow-on target 悄悄降为 0、把 Executor 变成 Planner、或让 human-gated 的
+  hard gate 被绕过，仓库里没有任何**机器可测**的契约能拦住这类回归；
+- 另一条红线同样必须机器化：只要 `PHASE3_3_DATA` 未解除，自动规划只允许产出
+  blocker-facing / control-plane / 证据准备类工作，**绝不允许** Phase 3.4 功能任务
+  被标记为可执行。
+
+### 2. 变更（最小范围）
+
+- `orchestrator/planner_autopilot_contract.py`（新增，只读纯函数模块，~810 行含文档）：
+  - **冻结常量**：`LOOKAHEAD_TARGET=3`、`FOLLOW_ON_TARGET_MINIMUM=1`、
+    `PLANNING_AUTHORITY="gpt_only"`、`EXECUTOR_CAN_REFILL=False`、
+    `HARD_GATE_TAIL_IS_ONLY_DEFICIT_EXCEPTION=True`、`BLOCKING_HUMAN_GATES={L3,L4}`、
+    `PHASE_GATING_BLOCKER_CODES=("PHASE3_3_DATA",)`、`FORBIDDEN_PHASE_UNDER_BLOCKER="Phase 3.4"`；
+  - **工作类别词表**：`BLOCKER_FACING` / `CONTROL_PLANE` / `EVIDENCE_PREPARATION`
+    为 blocker 下**唯一可被标记可执行**的类别，`FEATURE` / `FILLER` / `UNKNOWN`
+    被禁止；类别由 task `type` 前缀确定性推导（大小写不敏感，可被显式
+    `work_class` 覆盖，未知一律 fail-closed 归入 `UNKNOWN`）；
+  - **稳定 violation 词表**（8 个）：`EXECUTOR_CLAIMS_PLANNER`、
+    `FOLLOW_ON_TARGET_BELOW_MINIMUM`、`FILLER_TASK_FORBIDDEN`、`HUMAN_GATE_BYPASS`、
+    `PLAN_EXECUTABLE_INCONSISTENT`、`INADMISSIBLE_WORK_CLASS_EXECUTABLE_UNDER_PHASE_BLOCKER`、
+    `PHASE34_FEATURE_TASK_EXECUTABLE`、`RUNNABLE_TASK_AFTER_GATED_TAIL`；
+  - `audit_follow_on_plan()`：对调用方传入的**候选** plan 做确定性审计，输出
+    `follow_on_count` / `lookahead_target` / `deficit` / `refill_required` /
+    `hard_gate_tail_allowed` / `admissible_work_classes` / `violations` /
+    `reason_codes` / `compliant` / `plan_digest`；可执行判定与
+    `ai_orchestrator.evaluate_task_readiness` 同口径（L3/L4、`auto_start=false`、
+    `requires_human_approval=true`、非法元数据一律不可执行）；
+  - `contract_facts()` / `gpt_cloud_check_boundary()`：把「GPT 唯一 Planner +
+    云端条件检查 + 本地三任务缓冲 + 异常恢复」写成只读事实
+    （`planner_api_key_in_repo=false`、`planner_api_key_env_required=false`、
+    `local_executor_can_call_gpt=false`、`local_executor_can_generate_task=false`）；
+  - **纯只读**：不读 / 不写文件、不联网、不读数据库、不调用任何 LLM，无新增依赖。
+- `orchestrator/planner_refill_request.py`（最小接线）：
+  - `planner_authority` 新增 `autopilot_contract`（内嵌 `contract_facts()`），
+    `executor_can_refill` 改为读契约常量；
+  - `summary` 新增 `follow_on_target_minimum=1` 与 `executor_can_refill=false`，
+    使「不得把 target 降为 0」「Executor 不能补队列」在事实包里显式可断言。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.10.1（契约机器化门禁）与 §2.10.2
+  （GPT 云端条件检查 vs 本地三任务缓冲的职责边界与异常恢复）；
+- `README.md`：新增 GOLD-036 章节（红线、冻结常量、回归矩阵、blocker 下的工作范围、
+  职责边界与异常恢复、只读用法）；
+- 未改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json` / `src/**` / `database/**` / `.env` / `pyproject.toml`，
+  未进入 Phase 3.4、未跨 L3/L4。
+
+
+### 3. 验证
+
+- 新增单元回归 `tests/unit/test_planner_autopilot_contract.py`（**67 项**）：
+  冻结常量与词表完整划分（含 `lookahead_target` 与 refill 同源为 3）、
+  **前瞻矩阵**（running+3 ⇒ `deficit=0` / `refill_required=false`；running+2 ⇒
+  `deficit=1`；running+0 ⇒ `deficit=3`；空队列**不**算 human-only）、
+  **排序**（可运行任务在 gated tail 前合法；排在 gated tail 后 ⇒
+  `RUNNABLE_TASK_AFTER_GATED_TAIL`）、**human-only 可停线但不得造 filler**、
+  **target 降为 0 / -1 / 非整数 / True / None 一律 fail-safe 回落 3 并违规**、
+  **Executor 变 Planner** / **绕过 hard gate（L3、L4、`auto_start=false`、
+  `requires_human_approval=true`、非法 gate 类型）** / **可执行声明不一致** 全部被拒、
+  **blocker 下工作类别**（16 类 `type` 分类 + blocker-facing / control-plane /
+  evidence-preparation 保持可执行 + FEATURE / UNKNOWN 被拒 + 显式 `work_class` 覆盖）、
+  **Phase 3.4 功能任务**（`"Phase 3.4"` / `"PHASE3_4"` / `"3.4"` / `3.4` /
+  `"Phase 4.0"` / `"phase_3_4_alpha"` 六种写法）被标记可执行 ⇒
+  `PHASE34_FEATURE_TASK_EXECUTABLE`，被 gate 挡住则不违规、无 blocker 时不限制、
+  非 Phase blocker 不限制、`parse_phase` 11 组边界、`plan_digest` 确定性与敏感度、
+  载荷无任务内容 / Phase 决定键、模块无规划 / 写 API（源码级守卫）、
+  契约**零 API key / 零环境变量 / 零网络 / 零 LLM**；
+- 新增集成回归 `tests/integration/test_planner_autopilot_contract_regression.py`（**9 项**，
+  真实仓库只读）：refill CLI 事实包内嵌的契约与 `contract_facts()` **逐字段一致**
+  （`lookahead_target=3` / `follow_on_target_minimum=1` / `executor_can_refill=false`），
+  提示行携带 `target` / `deficit` / `hard_gate_tail_allowed` / `executor_can_refill=false`，
+  真实队列的 follow-on 计数 / 缺口 / 是否需补与契约审计**逐项一致**
+  （矩阵在真实数据上自洽：`follow_on >= target ⇒ deficit=0`；否则
+  `deficit = target - follow_on`），真实队列在 `PHASE3_3_DATA` 下**只**把
+  blocker-facing / control-plane / evidence-preparation 标为可执行，
+  同一真实队列上构造的 **Phase 3.4 功能任务反例**被
+  `PHASE34_FEATURE_TASK_EXECUTABLE` 拒绝，真实 `PROJECT_STATE` 的
+  `PHASE3_3_DATA` 与两条交易安全不变量仍在，整条链路（CLI + 审计 + 提示 + 事实包）
+  在真实仓库**零写入**（`.ai/tasks` / `.ai/results` / `PROJECT_STATE` /
+  `GPT_REVIEW_LEDGER` 逐字节不变、`git status --porcelain` 前后一致），
+  `orchestrator/*.py` 无任何 planner API key / 凭据痕迹；
+- 全量门禁：`.venv\Scripts\python.exe -m pytest tests -q`、
+  `.venv\Scripts\python.exe -m ruff check .`、
+  `.venv\Scripts\python.exe -m mypy config database src scripts` 全绿；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json`、`src/alpha/**`、`src/execution/**`、`database/**`、
+  `.env`、`config/rss_sources.json`；未新增依赖、未改 `pyproject.toml`；
+  测试写入全部发生在内存 / `tmp_path`；Cline 未执行任何 Git 写操作。
+
+### 4. 遗留 / 下一步
+
+- 本契约只**判定**，不规划：它不会（也不允许）生成任何 follow-on task 内容，
+  也不会自动补队列；真正的规划仍由 GPT 依据只读事实（
+  `python -m orchestrator.planner_refill_request` + 契约审计）完成；
+- 真实仓库当前处于 `STATE_RESULT_DRIFT`（`current_task=GOLD-035` 但 result 已
+  `completed`）：契约/事实包只报告该漂移（`refill_required=true`），按 §2.10.2
+  由 GPT 读取最新事实后补队列与推进 `PROJECT_STATE`，Executor 不做修复；
+- 建议下一步（由 GPT 决定）：GOLD-036 收口后按 `queue_target_size=3` 补足
+  blocker-facing / control-plane follow-on，并按 GOLD-037 把 completed-but-unreviewed
+  的正式 Review backlog 变成确定性批量绑定事实清单。
+

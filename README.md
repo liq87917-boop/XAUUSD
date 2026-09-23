@@ -1798,6 +1798,62 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   「源码级守卫：模块与 CLI 无网络 / 文件时间 / 数据库写入调用」等。
 
 
+### GPT Rolling Queue Autopilot 三任务前瞻契约（`orchestrator/planner_autopilot_contract.py`，GOLD-036）
+
+> **合规红线**：本项**只读、纯函数** —— 不生成 / 追加 task、不补队列、不改
+> `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json` / result、不决定 Phase、
+> 不跨 L3/L4；仓库里**不存在**任何 planner API key，本地 Executor **绝不**调用 GPT
+> 生成 task；`PHASE3_3_DATA` 保持 BLOCKED。
+
+- **一句话**：把「GPT 唯一 Planner + 当前任务之外默认维持 3 个已批准 follow-on」
+  从文字约定固化成**机器可测契约**（冻结常量 + 确定性审计 + 稳定 violation code），
+  阻止「Executor 变 Planner」「follow-on target 降为 0」「绕过 hard gate」再次回归；
+- **冻结常量**：`LOOKAHEAD_TARGET=3`、`FOLLOW_ON_TARGET_MINIMUM=1`、
+  `PLANNING_AUTHORITY="gpt_only"`、`EXECUTOR_CAN_REFILL=False`、
+  `BLOCKING_HUMAN_GATES={L3,L4}`、`PHASE_GATING_BLOCKER_CODES=("PHASE3_3_DATA",)`；
+  GOLD-034 事实包（`orchestrator.planner_refill_request`）把同一份契约内嵌到
+  `planner_authority.autopilot_contract`，并在 `summary` 显式给出
+  `executor_can_refill=false` / `follow_on_target_minimum=1`；
+- **端到端回归矩阵**（`tests/unit/test_planner_autopilot_contract.py` +
+  `tests/integration/test_planner_autopilot_contract_regression.py`）：
+  running+3 follow-ons ⇒ 无需补（`deficit=0`）；running+2 ⇒ `deficit=1`；
+  running+0 ⇒ `deficit=3`；可运行任务必须位于 human-gated tail 之前
+  （`RUNNABLE_TASK_AFTER_GATED_TAIL`）；完全 human-only 时允许停线
+  （`hard_gate_tail_allowed=true`，计数事实仍保留）但**不得**制造 filler
+  （`FILLER_TASK_FORBIDDEN`）；
+- **blocker 下的工作范围**：`PHASE3_3_DATA` 存在时可被标记可执行的只允许
+  `BLOCKER_FACING` / `CONTROL_PLANE` / `EVIDENCE_PREPARATION`
+  （`INADMISSIBLE_WORK_CLASS_EXECUTABLE_UNDER_PHASE_BLOCKER`）；
+  Phase 3.4 功能任务若被标成可执行，一律
+  `PHASE34_FEATURE_TASK_EXECUTABLE` fail-closed；被 gate 挡住的功能任务
+  （`auto_start=false` / L3、L4）属于合法 gated tail，不算违规；
+- **职责边界（云端条件检查 vs 本地三任务缓冲）**：
+  - **云端 GPT Planner**：唯一规划权，按平台调度做**条件检查**（周期不受仓库控制），
+    每次写 task / state 前必须重新读取只读事实（
+    `python -m orchestrator.planner_refill_request` 与
+    `orchestrator.planner_autopilot_contract`）；
+  - **本地 Orchestrator / Executor**：只负责「看得见缺口」——成功 commit + push 后与
+    idle 时输出 `GPT_PLANNER_REFILL_REQUIRED` / `GPT_PLANNER_REFILL_SATISFIED`
+    （节流 + 只读镜像 `.ai/runtime/planner_refill_request.json`），
+    **绝不**补队列、**绝不**代 GPT 生成 task；
+  - **三任务缓冲的角色**：用本地已批准任务覆盖云端检查间隔，而不是把规划权下放；
+- **异常恢复**：看到低水位提示后，GPT 重新读事实再补队列；若期间远端 HEAD 已被
+  Executor 推进，以新 HEAD 重新读取事实（绝不 force push / 覆盖刚完成的工作）；
+  若已只剩 human-only hard gate，允许队列停在 gated tail 等待人工，**不得**为凑数量
+  造任务；Executor 侧发现 `PROJECT_STATE` 指针 / 队列声明漂移时只报告、绝不修复；
+- **用法**（只读）：
+
+  ```bash
+  # ① GOLD-034 事实包：队列水位 / 缺口 / 阻塞原因（纯 ASCII JSON；零写入）
+  .venv\Scripts\python.exe -m orchestrator.planner_refill_request --generated-at 2026-09-23T00:00:00+08:00
+
+  # ② GOLD-036 契约审计（对候选 plan 做确定性判定；纯函数、零写入）
+  .venv\Scripts\python.exe -c "from orchestrator import planner_autopilot_contract as c, json; \
+print(json.dumps(c.audit_follow_on_plan(tasks=[{'task_id':'GOLD-037','type':'CONTROL_PLANE_REVIEW_BACKLOG'}], \
+blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
+  ```
+
+
 ## 8. 数据模型
 
 

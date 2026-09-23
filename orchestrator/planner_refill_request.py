@@ -31,7 +31,13 @@
    本模块输出的 JSON 里**不存在**任何具体后续任务内容 / 下一任务标题 / Phase 决定字段；
 4. 受控输出：``--output`` **复用** :mod:`orchestrator.planner_snapshot_output` 的
    fail-closed 路径守卫（只允许 ``<root>/.ai/runtime/**`` 或系统临时目录），
-   其余位置一律拒绝且不写任何文件。
+   其余位置一律拒绝且不写任何文件；
+5. 契约事实（GOLD-036）：``planner_authority.autopilot_contract`` 直接内嵌
+   :func:`orchestrator.planner_autopilot_contract.contract_facts`（冻结
+   ``lookahead_target=3`` / ``follow_on_target_minimum=1`` /
+   ``executor_can_refill=false`` / human-only hard gate 为唯一例外 /
+   blocker 下允许的工作类别），``summary.executor_can_refill`` 也显式给出同一
+   事实，使「不得把 Executor 变成 Planner」「不得把 target 降为 0」可被机器断言。
 
 安全红线（与 ``.clinerules`` / ``.ai/DEVELOPMENT_PROTOCOL.md`` 一致）
 --------------------------------------------------------------------
@@ -70,6 +76,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator import ai_orchestrator as orch
+from orchestrator import planner_autopilot_contract as autopilot_contract
 from orchestrator import planner_snapshot as planner
 from orchestrator import planner_snapshot_output as snapshot_output
 
@@ -455,7 +462,7 @@ def authority_section() -> dict[str, Any]:
         "planning_authority": "gpt_only",
         "planner_agents": list(contract["planner_agents"]),
         "executor_agents": list(contract["executor_agents"]),
-        "executor_can_refill": False,
+        "executor_can_refill": autopilot_contract.EXECUTOR_CAN_REFILL,
         "executor_can_plan": False,
         "executor_can_modify_project_state": False,
         "executor_can_decide_phase": False,
@@ -473,6 +480,9 @@ def authority_section() -> dict[str, Any]:
         "phase_transition_requires_human_gate": bool(
             contract["phase_transition_requires_human_gate"]
         ),
+        # GOLD-036：把「GPT 唯一 Planner + 三任务前瞻」固化成机器可测契约事实
+        # （只读：目标数量 / 下限 / 例外 / 允许的工作类别 / violation 词表）。
+        "autopilot_contract": autopilot_contract.contract_facts(),
     }
 
 
@@ -778,9 +788,12 @@ def build_planner_refill_request(
         "queue_head": queue_head,
         "follow_on_count": follow_on_count,
         "lookahead_target": target,
+        "follow_on_target_minimum": autopilot_contract.FOLLOW_ON_TARGET_MINIMUM,
         "deficit": deficit,
         "refill_required": refill_required,
         "hard_gate_tail_allowed": hard_gate,
+        # GOLD-036：补队列权只属于 GPT；Executor 永远不能补（只读事实）。
+        "executor_can_refill": autopilot_contract.EXECUTOR_CAN_REFILL,
         "completed_but_unreviewed_count": int(unreviewed["count"]),
         "drift_detected": bool(drift["detected"]),
         "blocker_count": len(blocker_entries),

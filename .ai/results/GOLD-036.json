@@ -1,0 +1,76 @@
+{
+  "task_id": "GOLD-036",
+  "title": "固化 GPT 三任务前瞻自动补队列契约与端到端门禁",
+  "status": "completed",
+  "finished_at": "2026-09-23T20:28:12+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M orchestrator/planner_refill_request.py",
+    "?? orchestrator/planner_autopilot_contract.py",
+    "?? tests/integration/test_planner_autopilot_contract_regression.py",
+    "?? tests/unit/test_planner_autopilot_contract.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md            |  49 +++++++++++++++\n PROGRESS_LOG.md                        | 105 +++++++++++++++++++++++++++++++++\n README.md                              |  56 ++++++++++++++++++\n orchestrator/planner_refill_request.py |  17 +++++-\n 4 files changed, 225 insertions(+), 2 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T20:08:36+08:00",
+      "finished_at": "2026-09-23T20:28:12+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 90,
+      "duration_ms": 780356,
+      "usage": {
+        "inputTokens": 12012123,
+        "outputTokens": 89762,
+        "cacheReadTokens": 11734528,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.13070003399999994
+      },
+      "cline_final_text": "Submission recorded (verified): GOLD-036（固化 GPT 三任务前瞻自动补队列契约与端到端门禁）已完成并通过全量验证。\n\n完成内容（按 requirements）：\n1) 只读 refill facts 显式化：orchestrator/planner_refill_request.py 的 planner_authority 内嵌 autopilot_contract（contract_facts()），summary 显式新增 follow_on_target_minimum=1 与 executor_can_refill=false。实测 CLI JSON：lookahead_target=3、follow_on_count=2、deficit=1、refill_required=true、hard_gate_tail_allowed=false、executor_can_refill=false。\n2) 端到端回归矩阵：新增 orchestrator/planner_autopilot_contract.py（只读纯函数，含 audit_follow_on_plan / contract_facts / gpt_cloud_check_boundary），锁定 running+3⇒无缺口、running+2⇒缺 1、running+0⇒缺 3、可运行任务必须排在 human-gated tail 之前（RUNNABLE_TASK_AFTER_GATED_TAIL）、完全 human-only 可停线但禁止 filler（FILLER_TASK_FORBIDDEN）。\n3) blocker 契约：PHASE3_3_DATA 存在时可被标记可执行的只允许 BLOCKER_FACING/CONTROL_PLANE/EVIDENCE_PREPARATION，Phase 3.4 功能任务被标可执行一律 PHASE34_FEATURE_TASK_EXECUTABLE fail-closed（真实队列 + 内存反例双向证明；被 gate 挡住的 Phase 3.4 任务属合法 gated tail）。\n4) 文档：.ai/DEVELOPMENT_PROTOCOL.md 新增 §2.10.1/§2.10.2、README.md 新增 GOLD-036 章节、PROGRESS_LOG.md 追加轮次记录，写清 GPT 云端条件检查 vs 本地三任务缓冲的职责边界与异常恢复。\n5) 无密钥/无本地 GPT 调用：契约事实 planner_api_key_in_repo=false、planner_api_key_env_required=false、local_executor_can_call_gpt=false、local_executor_can_generate_task=false；orchestrator/*.py 无任何 key/凭据痕迹；未新增依赖。\n\n修改文件：orchestrator/planner_refill_request.py、.ai/DEVELOPMENT_PROTOCOL.md、README.md、PROGRESS_LOG.md。\n新增文件：orchestrator/planner_autopilot_contract.py（807 行）、tests/unit/test_planner_autopilot_contract.py（67 项）、tests/integration/test_planner_autopilot_contract_regression.py（9 项）。\n未触碰 .ai/tasks、.ai/results、.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、src/**、database/**、.env、pyproject.toml（git status 仅 4 改 3 增）。\n\n测试与证据：\n- .venv\\Scripts\\python.exe -m pytest tests -q → 3486 passed, 1 skipped in 366.26s（skip 为既有 jieba 分支）\n- .venv\\Scripts\\python.exe -m ruff check . → All checks passed!\n- .venv\\Scripts\\python.exe -m mypy config database src scripts → Success: no issues found in 183 source files\n- 定向回归（新契约 + GOLD-034/035 refill + Phase3 边界）→ 168 passed\n\n遗留：真实仓库存在既有 STATE_RESULT_DRIFT（current_task=GOLD-035 而 result 已 completed），契约只报告不修复，属 GPT 规划职责。acceptance 全部满足，动态验证命令全部通过。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M orchestrator/planner_refill_request.py",
+        "?? orchestrator/planner_autopilot_contract.py",
+        "?? tests/integration/test_planner_autopilot_contract_regression.py",
+        "?? tests/unit/test_planner_autopilot_contract.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md            |  49 +++++++++++++++\n PROGRESS_LOG.md                        | 105 +++++++++++++++++++++++++++++++++\n README.md                              |  56 ++++++++++++++++++\n orchestrator/planner_refill_request.py |  17 +++++-\n 4 files changed, 225 insertions(+), 2 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  6%]\n........................................................................ [  8%]\n........................................................................ [ 10%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 28%]\n........................................................................ [ 30%]\n........................................................................ [ 33%]\n........................................................................ [ 35%]\n........................................................................ [ 37%]\n........................................................................ [ 39%]\n........................................................................ [ 41%]\n........................................................................ [ 43%]\n........................................................................ [ 45%]\n........................................................................ [ 47%]\n........................................................................ [ 49%]\n........................................................................ [ 51%]\n........................................................................ [ 53%]\n........................................................................ [ 55%]\n........................................................................ [ 57%]\n........................................................................ [ 59%]\n........................................................................ [ 61%]\n........................................................................ [ 64%]\n........................................................................ [ 66%]\n........................................................................ [ 68%]\n........................................................................ [ 70%]\n........................................................................ [ 72%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 78%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 94%]\n........................................................................ [ 97%]\n..........................................................s............. [ 99%]\n...............................                                          [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3486 passed, 1 skipped in 360.97s (0:06:00)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
