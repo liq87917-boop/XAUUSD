@@ -64,6 +64,40 @@ Orchestrator 使用 **3-task rolling queue** 降低任务供给断档：
 }
 ```
 
+## 2.2 Result 字段与 Git Push 恢复契约
+
+### Result / attempt 字段语义
+
+Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任务已完成却显示 aborted」这类语义歧义：
+
+| 字段 | 位置 | 含义 |
+| --- | --- | --- |
+| `status` | result | Orchestrator 终态：`completed` / `blocked`（`failed` 只出现在历史 V1 result） |
+| `execution_outcome` | result / attempt | Orchestrator 归一化判定：`completed` / `blocked` / `failed` / `waiting_external`，必须与 `status` 一致 |
+| `normalized_finish_reason` | result / attempt | 稳定 finish reason（与 `execution_outcome` 同词表） |
+| `finish_reason` | attempt | **兼容旧键**；新结果写入归一化值，成功任务不再显示 `aborted` |
+| `cline_finish_reason_raw` | attempt | Cline CLI 自报的原始 finish reason（例如 `aborted`），只读审计 |
+
+- 成功判定唯一来源：`cline_exit_code == 0` 且全部 validation `returncode == 0`；
+  `execution_outcome` 与该判定**同源**，绝不被 raw finish reason 覆盖。
+- 历史 result **不回写**：只有新生成的 result 带新字段；解析旧 result（无新字段）保持兼容。
+
+### push pending / Git 恢复状态机
+
+- 任务只有在 validation 全通过、commit 成功、push 成功之后才算完整收口。
+- 本地 result 已写 `completed` 但 push 失败时：
+  1. **不重新调用 Cline**（result 已是终态，队列按终态只读跳过）；
+  2. runtime 写入 `push_pending` 状态（含 `local_result=completed` / `push_status=pending` /
+     `remote` / `branch`），本地 commit 与 result **一律保留**，绝不丢弃；
+  3. 本轮不再启动任何任务。
+- 下一轮循环第一步固定是 Git sync：`pull --rebase <remote> <branch>` → retry `push <remote> <branch>`：
+  - 任一步失败：fail-closed，保留本地 commit/result，下一轮继续恢复；
+    **绝不 force push、绝不 reset 已完成的 commit、绝不静默丢弃 result**；
+  - 同步成功后清理 `push_pending` 状态并输出 `remote synced` 日志，
+    之后 rolling queue 才允许执行后续任务。
+- 日志分别输出 `completed locally` / `push pending` / `remote synced` / `rolling queue continue`，
+  避免把 Git 同步问题误报为任务 validation 失败。
+
 ## 3. 恢复任务命名
 
 原任务失败或阻塞后不得修改既有审计历史。

@@ -695,3 +695,403 @@ def test_dependency_metadata_error_blocks_dependents(
 
     assert ready is False
     assert "human_gate 未知档位: L9" in dependent_reason
+
+
+# ============================================================
+# GOLD-020：push-pending 恢复 / result 语义一致性
+# ============================================================
+
+
+def git_ok() -> dict[str, object]:
+    return {
+        "returncode": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": False,
+    }
+
+
+def git_non_fast_forward() -> dict[str, object]:
+    return {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": (
+            "! [rejected]        cline-agent -> cline-agent (non-fast-forward)\n"
+            "error: failed to push some refs"
+        ),
+        "timed_out": False,
+    }
+
+
+def git_rebase_conflict() -> dict[str, object]:
+    return {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "CONFLICT (content): Merge conflict in PROGRESS_LOG.md",
+        "timed_out": False,
+    }
+
+
+class FakeGit:
+    """脚本化 git fake：只记录命令，绝不访问真实远端。"""
+
+    def __init__(self) -> None:
+        self.commands: list[str] = []
+        self.pull_queue: list[dict[str, object]] = []
+        self.push_queue: list[dict[str, object]] = []
+        self.ahead_queue: list[int | None] = []
+        self.status_stdout = ""
+
+    def __call__(self, command: str, timeout: int = 120) -> dict[str, object]:
+        del timeout
+        self.commands.append(command)
+
+        if command.startswith("status --porcelain"):
+            return {
+                "returncode": 0,
+                "stdout": self.status_stdout,
+                "stderr": "",
+                "timed_out": False,
+            }
+
+        if command.startswith("pull --rebase"):
+            return self.pull_queue.pop(0) if self.pull_queue else git_ok()
+
+        if command.startswith("push "):
+            return self.push_queue.pop(0) if self.push_queue else git_ok()
+
+        if command.startswith("rev-list --count"):
+            ahead = self.ahead_queue.pop(0) if self.ahead_queue else 0
+            if ahead is None:
+                return {
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "unknown upstream",
+                    "timed_out": False,
+                }
+            return {
+                "returncode": 0,
+                "stdout": f"{ahead}\n",
+                "stderr": "",
+                "timed_out": False,
+            }
+
+        if command.startswith("add -A") or command.startswith("commit "):
+            return git_ok()
+
+        raise AssertionError(f"unexpected git command: {command}")
+
+
+@pytest.mark.parametrize("ahead", [0, 2, None])
+def test_push_pending_commits_keeps_ahead_paths_compatible(
+    monkeypatch: pytest.MonkeyPatch,
+    ahead: int | None,
+) -> None:
+    fake = FakeGit()
+    fake.ahead_queue = [ahead]
+    monkeypatch.setattr(orch, "git", fake)
+    monkeypatch.setattr(orch, "REMOTE_NAME", "origin")
+    monkeypatch.setattr(orch, "REQUIRED_BRANCH", "cline-agent")
+
+    assert orch.push_pending_commits() is True
+
+    pushes = [command for command in fake.commands if command.startswith("push ")]
+    if ahead == 0:
+        assert pushes == []
+    else:
+        assert pushes == ["push origin cline-agent"]
+        assert "--force" not in " ".join(fake.commands)
+
+
+def test_sync_repository_fails_closed_on_pull_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "GOLD-101.json").write_text(
+        json.dumps({"task_id": "GOLD-101", "status": "push_pending"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(orch, "TASK_STATE_DIR", state_dir)
+
+    fake = FakeGit()
+    fake.pull_queue = [git_rebase_conflict()]
+    monkeypatch.setattr(orch, "git", fake)
+    monkeypatch.setattr(orch, "REMOTE_NAME", "origin")
+    monkeypatch.setattr(orch, "REQUIRED_BRANCH", "cline-agent")
+
+    assert orch.sync_repository() is False
+    assert not [c for c in fake.commands if c.startswith("push ")]
+    assert not [c for c in fake.commands if "reset" in c]
+    assert not [c for c in fake.commands if "--force" in c]
+    # push_pending 状态与本地 commit/result 一律保留
+    assert (state_dir / "GOLD-101.json").exists()
+
+
+def test_sync_repository_recovers_non_fast_forward_on_next_round(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(orch, "TASK_STATE_DIR", tmp_path / "state")
+
+    fake = FakeGit()
+    fake.ahead_queue = [1, 1]
+    fake.push_queue = [git_non_fast_forward(), git_ok()]
+    monkeypatch.setattr(orch, "git", fake)
+    monkeypatch.setattr(orch, "REMOTE_NAME", "origin")
+    monkeypatch.setattr(orch, "REQUIRED_BRANCH", "cline-agent")
+
+    assert orch.sync_repository() is False
+    assert orch.sync_repository() is True
+
+    assert [c for c in fake.commands if c.startswith("pull --rebase")] == [
+        "pull --rebase origin cline-agent",
+        "pull --rebase origin cline-agent",
+    ]
+    assert [c for c in fake.commands if c.startswith("push ")] == [
+        "push origin cline-agent",
+        "push origin cline-agent",
+    ]
+    assert "--force" not in " ".join(fake.commands)
+
+
+def test_clear_push_pending_states_touches_only_push_pending(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    (state_dir / "GOLD-101.json").write_text(
+        json.dumps({"task_id": "GOLD-101", "status": "push_pending"}),
+        encoding="utf-8",
+    )
+    (state_dir / "GOLD-102.json").write_text(
+        json.dumps({"task_id": "GOLD-102", "status": "running"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(orch, "TASK_STATE_DIR", state_dir)
+
+    assert orch.push_pending_state_paths() == [state_dir / "GOLD-101.json"]
+    assert orch.clear_push_pending_states() == ["GOLD-101"]
+    assert not (state_dir / "GOLD-101.json").exists()
+    assert (state_dir / "GOLD-102.json").exists()
+
+
+def _passing_validation() -> list[dict[str, object]]:
+    return [
+        {
+            "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+            "returncode": 0,
+            "timed_out": False,
+            "stdout_tail": "",
+            "stderr_tail": "",
+        }
+    ]
+
+
+def test_push_pending_recovery_never_reruns_cline_and_gates_next_task(
+    queue_fs: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tasks, results = queue_fs
+    first = write_task(tasks, "GOLD-101")
+    second = write_task(tasks, "GOLD-102", depends_on=["GOLD-101"])
+
+    state_dir = tmp_path / "state"
+    monkeypatch.setattr(orch, "TASK_STATE_DIR", state_dir)
+    monkeypatch.setattr(orch, "REMOTE_NAME", "origin")
+    monkeypatch.setattr(orch, "REQUIRED_BRANCH", "cline-agent")
+
+    fake = FakeGit()
+    # 第 1 轮 sync（无待推送）→ pull ok
+    # 第 2 轮 sync → pull --rebase 冲突（fail-closed）
+    # 第 3 轮 sync → pull ok + retry push 成功
+    fake.pull_queue = [git_ok(), git_rebase_conflict(), git_ok()]
+    # sync / task commit 的 ahead 计数：0（无待推送）/ 1 / 1 / 1
+    fake.ahead_queue = [0, 1, 1, 1]
+    # 首次 push 被拒（non-fast-forward）→ 之后 retry push 成功
+    fake.push_queue = [git_non_fast_forward(), git_ok(), git_ok()]
+    monkeypatch.setattr(orch, "git", fake)
+
+    calls: list[Path] = []
+
+    def fake_run_cline(task_file: Path) -> dict[str, object]:
+        calls.append(task_file)
+        return {
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": False,
+            # GOLD-016 真实出现过的 raw finish reason：aborted
+            "summary": {"finish_reason": "aborted", "model": "deepseek-flash"},
+        }
+
+    def refuse_real_command(*args: object, **kwargs: object) -> object:
+        raise AssertionError("test must not run a real subprocess")
+
+    monkeypatch.setattr(orch, "run_cline", fake_run_cline)
+    monkeypatch.setattr(orch, "run_command", refuse_real_command)
+    monkeypatch.setattr(orch, "run_validations", lambda task: _passing_validation())
+    monkeypatch.setattr(orch, "get_changed_files", lambda: [" M a.py"])
+    monkeypatch.setattr(orch, "get_diff_stat", lambda: "a.py | 1 +")
+
+    # ------------------------------------------------------
+    # 第 1 轮：任务本地完成，但 push 被拒（non-fast-forward）
+    # ------------------------------------------------------
+    step = orch.run_iteration(None)
+
+    assert step["action"] == orch.ITERATION_SLEEP
+    assert step["outcome"] == "push_pending"
+    assert calls == [first]
+
+    local_result = json.loads((results / "GOLD-101.json").read_text(encoding="utf-8"))
+    assert local_result["status"] == "completed"
+    assert local_result["execution_outcome"] == "completed"
+    assert local_result["normalized_finish_reason"] == "completed"
+
+    attempt = local_result["attempts"][0]
+    assert attempt["cline_finish_reason_raw"] == "aborted"
+    assert attempt["execution_outcome"] == "completed"
+    assert attempt["normalized_finish_reason"] == "completed"
+    assert attempt["finish_reason"] == "completed"
+
+    pending = json.loads((state_dir / "GOLD-101.json").read_text(encoding="utf-8"))
+    assert pending["status"] == "push_pending"
+    assert pending["local_result"] == "completed"
+
+    # ------------------------------------------------------
+    # 第 2 轮：pull --rebase 冲突 → 严格停线，绝不重跑 Cline
+    # ------------------------------------------------------
+    step = orch.run_iteration(None)
+
+    assert step["action"] == orch.ITERATION_SLEEP
+    assert step["outcome"] == "sync_pending"
+    assert calls == [first]
+    assert (state_dir / "GOLD-101.json").exists()
+    preserved = json.loads((results / "GOLD-101.json").read_text(encoding="utf-8"))
+    assert preserved["status"] == "completed"
+
+    # ------------------------------------------------------
+    # 第 3 轮：rebase + retry push 成功 → 才允许 rolling queue 继续
+    # ------------------------------------------------------
+    step = orch.run_iteration(None)
+
+    assert step["action"] == orch.ITERATION_CONTINUE
+    assert step["outcome"] == "completed"
+    assert calls == [first, second]
+    assert not (state_dir / "GOLD-101.json").exists()
+
+    pushes = [command for command in fake.commands if command.startswith("push ")]
+    assert pushes == ["push origin cline-agent"] * 3
+    assert "--force" not in " ".join(fake.commands)
+    assert "reset" not in " ".join(fake.commands)
+
+
+# ============================================================
+# GOLD-020：result / attempt 字段语义
+# ============================================================
+
+
+def test_attempt_record_keeps_raw_finish_reason_separate_from_outcome() -> None:
+    record = orch.build_attempt_record(
+        attempt=1,
+        started_at="2026-09-23T08:04:18+08:00",
+        finished_at="2026-09-23T08:30:11+08:00",
+        cline_result={
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": False,
+            "summary": {"finish_reason": "aborted", "model": "deepseek-flash"},
+        },
+        validations=[{"command": "pytest", "returncode": 0}],
+        changed_files=[" M a.py"],
+        diff_stat="a.py | 1 +",
+        execution_outcome=orch.EXECUTION_OUTCOME_COMPLETED,
+    )
+
+    assert record["cline_finish_reason_raw"] == "aborted"
+    assert record["execution_outcome"] == "completed"
+    assert record["normalized_finish_reason"] == "completed"
+    assert record["finish_reason"] == "completed"
+
+
+@pytest.mark.parametrize(
+    ("returncode", "validations", "expected"),
+    [
+        (0, [{"returncode": 0}], "completed"),
+        (0, [{"returncode": 1}], "failed"),
+        (0, [], "completed"),
+        (1, [], "failed"),
+        (124, [{"returncode": 0}], "failed"),
+    ],
+)
+def test_attempt_outcome_matches_orchestrator_success_decision(
+    returncode: int,
+    validations: list[dict[str, int]],
+    expected: str,
+) -> None:
+    assert (
+        orch.attempt_outcome(
+            {"returncode": returncode},
+            validations,
+        )
+        == expected
+    )
+
+
+def test_normalize_finish_reason_never_returns_raw_aborted() -> None:
+    assert orch.normalize_finish_reason("completed") == "completed"
+    assert orch.normalize_finish_reason("blocked") == "blocked"
+    assert orch.normalize_finish_reason("waiting_external") == "waiting_external"
+    assert orch.normalize_finish_reason("aborted") == "failed"
+    assert orch.normalize_finish_reason(None) == "failed"
+
+
+def test_final_result_semantics_stay_consistent_with_status(
+    queue_fs: tuple[Path, Path],
+) -> None:
+    _, results = queue_fs
+
+    completed = orch.write_final_result(
+        {"task_id": "GOLD-101", "title": "t"},
+        "completed",
+        [],
+    )
+    blocked = orch.write_final_result(
+        {"task_id": "GOLD-102", "title": "t"},
+        "blocked",
+        [],
+        note="Task failed after maximum retry count.",
+    )
+
+    assert completed["status"] == "completed"
+    assert completed["execution_outcome"] == "completed"
+    assert completed["normalized_finish_reason"] == "completed"
+    assert blocked["status"] == "blocked"
+    assert blocked["execution_outcome"] == "blocked"
+    assert blocked["normalized_finish_reason"] == "blocked"
+
+    on_disk = json.loads((results / "GOLD-101.json").read_text(encoding="utf-8"))
+    assert on_disk["execution_outcome"] == completed["execution_outcome"]
+    assert on_disk["normalized_finish_reason"] == "completed"
+
+
+def test_legacy_result_without_new_fields_is_still_readable(
+    queue_fs: tuple[Path, Path],
+) -> None:
+    _, results = queue_fs
+    legacy = {
+        "task_id": "GOLD-101",
+        "status": "completed",
+        "attempts": [{"attempt": 1, "finish_reason": "aborted"}],
+    }
+    path = results / "GOLD-101.json"
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    # 旧 result 仍可解析；历史结果绝不回写
+    assert orch.task_result_status("GOLD-101") == "completed"
+    assert orch.task_result_status("GOLD-999") == "pending"
+    assert json.loads(path.read_text(encoding="utf-8")) == legacy

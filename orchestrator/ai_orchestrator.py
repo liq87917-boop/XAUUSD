@@ -96,6 +96,42 @@ KNOWN_RESULT_STATUSES = (
     | UNRESOLVED_RESULT_STATUSES
 )
 
+# ============================================================
+# Orchestrator 判定语义（GOLD-020）
+# ============================================================
+#
+# Cline 的 raw finish reason（例如 "aborted"）只代表 CLI 自己的收尾原因，
+# 不能代表 Orchestrator 的最终判定。
+# 所以新 result 必须把两者分开保存：
+#   - cline_finish_reason_raw：CLI 原始值（审计用，可能是 aborted）；
+#   - execution_outcome / normalized_finish_reason：Orchestrator 稳定判定。
+# 绝不让「唯一 finish_reason」在一个已完成任务上显示 aborted。
+
+EXECUTION_OUTCOME_COMPLETED = "completed"
+
+EXECUTION_OUTCOME_BLOCKED = "blocked"
+
+EXECUTION_OUTCOME_FAILED = "failed"
+
+EXECUTION_OUTCOME_WAITING_EXTERNAL = "waiting_external"
+
+NORMALIZED_FINISH_REASONS = {
+    EXECUTION_OUTCOME_COMPLETED,
+    EXECUTION_OUTCOME_BLOCKED,
+    EXECUTION_OUTCOME_FAILED,
+    EXECUTION_OUTCOME_WAITING_EXTERNAL
+}
+
+# ============================================================
+# 单轮循环动作（GOLD-020）
+# ============================================================
+
+ITERATION_CONTINUE = "continue"
+
+ITERATION_SLEEP = "sleep"
+
+ITERATION_STOP = "stop"
+
 DEFAULT_MAX_ATTEMPTS = int(
     os.getenv(
         "AI_MAX_ATTEMPTS",
@@ -634,11 +670,48 @@ def sync_repository():
     # 但 push 因网络失败，
     # pull --rebase 可以安全同步远端，
     # 然后下面继续 retry push。
+    #
+    # 注意：pull --rebase 绝不 force push，也绝不 reset 已完成 commit；
+    # 任何失败都 fail-closed：本轮不执行任何任务，保留本地 commit/result。
     if not pull_latest():
+
+        _logger.error(
+            "Git sync 未完成（pull/rebase 失败）："
+            "本轮不执行任务，"
+            "本地 commit/result 保留，"
+            "下一轮继续恢复。"
+        )
 
         return False
 
-    return push_pending_commits()
+    if not push_pending_commits():
+
+        _logger.error(
+            "Git sync 未完成（push pending）："
+            "本轮不执行任务，"
+            "本地 commit/result 保留，"
+            "下一轮继续恢复。"
+        )
+
+        return False
+
+    cleared = clear_push_pending_states()
+
+    if cleared:
+
+        _logger.info(
+            "remote synced: push 成功，"
+            "已清理 push_pending 状态: %s",
+            ", ".join(cleared)
+        )
+
+    else:
+
+        _logger.info(
+            "remote synced: 远端与本地一致，无待推送 commit。"
+        )
+
+    return True
 
 
 # ============================================================
@@ -710,6 +783,73 @@ def clear_task_state(
         with contextlib.suppress(OSError):
 
             path.unlink()
+
+
+def push_pending_state_paths():
+    """列出 runtime 中所有 `push_pending` 任务状态文件。
+
+    仅用于审计与「远端已同步」后的清理，不读取/改写任何 result。
+    """
+
+    if not TASK_STATE_DIR.exists():
+
+        return []
+
+    paths = []
+
+    for path in sorted(
+        TASK_STATE_DIR.glob("*.json")
+    ):
+
+        state = read_json(
+            path,
+            default=None
+        )
+
+        if (
+            isinstance(state, dict)
+            and
+            state.get("status") == "push_pending"
+        ):
+
+            paths.append(path)
+
+    return paths
+
+
+def clear_push_pending_states():
+    """远端同步成功后清理 `push_pending` 运行时状态。
+
+    返回被清理的 task_id 列表（仅审计用）。
+    本地 commit 与 result 绝不删除；这里只删除 runtime 状态文件。
+    """
+
+    cleared = []
+
+    for path in push_pending_state_paths():
+
+        state = read_json(
+            path,
+            default=None
+        )
+
+        task_id = None
+
+        if isinstance(state, dict):
+
+            task_id = state.get("task_id")
+
+        cleared.append(
+            task_id
+            or
+            path.stem
+        )
+
+        with contextlib.suppress(OSError):
+
+            path.unlink()
+
+    return cleared
 
 
 # ============================================================
@@ -2784,6 +2924,68 @@ def reset_task_changes():
 # Attempt Result
 # ============================================================
 
+def normalize_finish_reason(
+    execution_outcome
+):
+    """把 Orchestrator 判定归一化成稳定的 finish reason。
+
+    只输出 Orchestrator 词表内的值，绝不复制 Cline raw finish reason。
+    """
+
+    if execution_outcome in NORMALIZED_FINISH_REASONS:
+
+        return execution_outcome
+
+    return EXECUTION_OUTCOME_FAILED
+
+
+def cline_finish_reason_raw(
+    cline_result
+):
+    """Cline CLI 自报的原始 finish reason（审计用，可能是 aborted）。"""
+
+    summary = (
+        cline_result.get(
+            "summary"
+        )
+        or
+        {}
+    )
+
+    return summary.get(
+        "finish_reason"
+    )
+
+
+def attempt_outcome(
+    cline_result,
+    validations
+):
+    """attempt 级 Orchestrator 判定，与最终 success 判定同源。
+
+    成功条件与旧实现完全一致：
+    Cline returncode == 0 且全部 validation returncode == 0。
+    """
+
+    if (
+        cline_result.get(
+            "returncode"
+        )
+        !=
+        0
+    ):
+
+        return EXECUTION_OUTCOME_FAILED
+
+    if validations_passed(
+        validations
+    ):
+
+        return EXECUTION_OUTCOME_COMPLETED
+
+    return EXECUTION_OUTCOME_FAILED
+
+
 def build_attempt_record(
     attempt,
     started_at,
@@ -2794,7 +2996,8 @@ def build_attempt_record(
     diff_stat,
     failure_class="none",
     failure_code=None,
-    recovery_path=None
+    recovery_path=None,
+    execution_outcome=EXECUTION_OUTCOME_FAILED
 ):
 
     summary = (
@@ -2836,9 +3039,26 @@ def build_attempt_record(
         "recovery_path":
             recovery_path,
 
+        # Orchestrator 判定（新语义，GOLD-020）。
+        "execution_outcome":
+            execution_outcome,
+
+        "normalized_finish_reason":
+            normalize_finish_reason(
+                execution_outcome
+            ),
+
+        # 兼容旧键：新结果写入归一化判定值，
+        # 保证成功任务不会再出现「唯一 finish_reason = aborted」的歧义。
         "finish_reason":
-            summary.get(
-                "finish_reason"
+            normalize_finish_reason(
+                execution_outcome
+            ),
+
+        # Cline raw finish reason 原文（只读审计用，可能是 aborted）。
+        "cline_finish_reason_raw":
+            cline_finish_reason_raw(
+                cline_result
             ),
 
         "model":
@@ -2894,11 +3114,18 @@ def write_final_result(
     attempts,
     changed_files=None,
     diff_stat="",
-    note=None
+    note=None,
+    execution_outcome=None
 ):
 
     task_id = (
         task["task_id"]
+    )
+
+    outcome = (
+        execution_outcome
+        or
+        status
     )
 
     result = {
@@ -2914,6 +3141,17 @@ def write_final_result(
 
         "status":
             status,
+
+        # Orchestrator 判定（新语义，GOLD-020）：
+        # execution_outcome / normalized_finish_reason 必须与 status 一致；
+        # Cline raw finish reason 只保留在 attempt.cline_finish_reason_raw。
+        "execution_outcome":
+            outcome,
+
+        "normalized_finish_reason":
+            normalize_finish_reason(
+                outcome
+            ),
 
         "finished_at":
             now_iso(),
@@ -3435,9 +3673,30 @@ def process_task(
 
         finished_at = now_iso()
 
+        # ====================================================
+        # 判断成功（唯一判定源，GOLD-020）
+        # ====================================================
+
+        outcome = attempt_outcome(
+
+            cline_result,
+
+            validations
+        )
+
+        success = (
+            outcome
+            ==
+            EXECUTION_OUTCOME_COMPLETED
+        )
+
         # ----------------------------------------------------
         # Attempt 记录
         # ----------------------------------------------------
+        #
+        # execution_outcome / normalized_finish_reason 与上面的 success
+        # 完全同源；Cline raw finish reason 只单独保存在
+        # cline_finish_reason_raw，不再冒充 Orchestrator 判定。
 
         attempt_record = (
             build_attempt_record(
@@ -3467,31 +3726,15 @@ def process_task(
                     failure_class,
 
                 failure_code=
-                    failure_code
+                    failure_code,
+
+                execution_outcome=
+                    outcome
             )
         )
 
         attempts.append(
             attempt_record
-        )
-
-        # ====================================================
-        # 判断成功
-        # ====================================================
-
-        success = (
-
-            cline_result[
-                "returncode"
-            ]
-            ==
-            0
-
-            and
-
-            validations_passed(
-                validations
-            )
         )
 
         # ====================================================
@@ -3528,7 +3771,16 @@ def process_task(
                     changed_files,
 
                 diff_stat=
-                    diff_stat
+                    diff_stat,
+
+                execution_outcome=
+                    EXECUTION_OUTCOME_COMPLETED
+            )
+
+            _logger.info(
+                "Task %s: completed locally, "
+                "result 已写入本地终态。",
+                task_id
             )
 
             pushed = (
@@ -3547,26 +3799,66 @@ def process_task(
             if pushed:
 
                 _logger.info(
-                    "Task %s: completed",
+                    "Task %s: remote synced (push ok); "
+                    "rolling queue continue.",
                     task_id
                 )
 
-            else:
+                return "completed"
 
-                _logger.warning(
+            # ====================================================
+            # push 失败：completed locally + push pending
+            # ====================================================
+            #
+            # 这是 Git 同步问题，不是 validation 失败：
+            # 严禁重跑 Cline，严禁 force push / reset，
+            # 本地 commit 与 result 一律保留。
+            write_task_state(
 
-                    "Task %s: "
-                    "completed locally, "
-                    "push pending",
+                task_id,
 
-                    task_id
-                )
+                "push_pending",
 
-            return (
-                "completed"
-                if pushed
-                else "push_pending"
+                attempt=
+                    attempt,
+
+                max_attempts=
+                    max_attempts,
+
+                finished_at=
+                    finished_at,
+
+                execution_outcome=
+                    EXECUTION_OUTCOME_COMPLETED,
+
+                local_result=
+                    "completed",
+
+                push_status=
+                    "pending",
+
+                remote=
+                    REMOTE_NAME,
+
+                branch=
+                    REQUIRED_BRANCH
             )
+
+            _logger.warning(
+
+                "Task %s: completed locally, "
+                "push pending. "
+
+                "本地 commit/result 保留，"
+                "不会重新执行 Cline；"
+
+                "下一轮先 Git sync/rebase + retry push，"
+                "只有同步成功后才允许 rolling queue 继续。",
+
+                task_id
+            )
+
+            return "push_pending"
 
         # ====================================================
         # FAILED
@@ -4045,6 +4337,149 @@ def sleep_interruptibly(
 
 
 # ============================================================
+# 单轮循环（GOLD-020）
+# ============================================================
+
+def run_iteration(
+    last_idle_log_at
+):
+    """执行一轮 Orchestrator 循环，返回本轮动作。
+
+    顺序与旧 main loop 完全一致，并显式固化 push recovery 契约：
+    1) 先 Git sync（pull --rebase + retry push pending commits）；
+    2) 同步失败 => fail-closed：本轮不执行任何任务
+       （completed locally + push pending 时绝不重跑 Cline，
+        本地 commit/result 一律保留）；
+    3) 只有 remote synced 之后，rolling queue 才允许检查/执行下一个 task。
+    """
+
+    # ========================================================
+    # Git Sync
+    # ========================================================
+
+    if not sync_repository():
+
+        _logger.warning(
+
+            "Git sync 未完成（push pending / pull-rebase 失败）："
+
+            "本轮不执行任何任务，"
+
+            "本地 commit/result 保留，"
+
+            "下一轮先恢复远端同步。"
+        )
+
+        return {
+
+            "action":
+                ITERATION_SLEEP,
+
+            "outcome":
+                "sync_pending",
+
+            "last_idle_log_at":
+                last_idle_log_at
+        }
+
+    # ========================================================
+    # Task
+    # ========================================================
+
+    (
+        task_file,
+        wait_reason
+    ) = find_next_task_with_reason()
+
+    if task_file:
+
+        outcome = process_task(
+            task_file
+        )
+
+        if outcome == "completed":
+
+            _logger.info(
+                "Rolling queue: remote synced, "
+                "checking next task immediately."
+            )
+
+            return {
+
+                "action":
+                    ITERATION_CONTINUE,
+
+                "outcome":
+                    outcome,
+
+                "last_idle_log_at":
+                    None
+            }
+
+        if outcome == "waiting_external":
+
+            _logger.error(
+                "Orchestrator 因外部 Provider "
+                "不可重试错误停止。"
+                "修复余额/认证/配额后重新运行 "
+                "start_agent.bat 即可从同一 Task 重试。"
+            )
+
+            return {
+
+                "action":
+                    ITERATION_STOP,
+
+                "outcome":
+                    outcome,
+
+                "last_idle_log_at":
+                    None
+            }
+
+        # push_pending / failed / blocked / deferred：
+        # 一律 sleeping 后重来，下一轮第一步仍是 Git sync。
+        return {
+
+            "action":
+                ITERATION_SLEEP,
+
+            "outcome":
+                outcome,
+
+            "last_idle_log_at":
+                None
+        }
+
+    now = time.monotonic()
+
+    if should_log_idle(
+        last_idle_log_at,
+        current_time=now
+    ):
+
+        _logger.info(
+            queue_diagnostic(
+                wait_reason
+            )
+        )
+
+        last_idle_log_at = now
+
+    return {
+
+        "action":
+            ITERATION_SLEEP,
+
+        "outcome":
+            "idle",
+
+        "last_idle_log_at":
+            last_idle_log_at
+    }
+
+
+# ============================================================
 # Main
 # ============================================================
 
@@ -4178,79 +4613,21 @@ def main():
 
             try:
 
-                # ============================================
-                # Git Sync
-                # ============================================
+                step = run_iteration(
+                    last_idle_log_at
+                )
 
-                if not sync_repository():
+                last_idle_log_at = step[
+                    "last_idle_log_at"
+                ]
 
-                    sleep_interruptibly(
-                        POLL_SECONDS
-                    )
+                if step["action"] == ITERATION_CONTINUE:
 
                     continue
 
-                # ============================================
-                # Task
-                # ============================================
+                if step["action"] == ITERATION_STOP:
 
-                (
-                    task_file,
-                    wait_reason
-                ) = find_next_task_with_reason()
-
-                if task_file:
-
-                    outcome = process_task(
-                        task_file
-                    )
-
-                    last_idle_log_at = None
-
-                    if (
-                        outcome
-                        ==
-                        "completed"
-                    ):
-
-                        _logger.info(
-                            "Rolling queue: "
-                            "checking next task immediately."
-                        )
-
-                        continue
-
-                    if (
-                        outcome
-                        ==
-                        "waiting_external"
-                    ):
-
-                        _logger.error(
-                            "Orchestrator 因外部 Provider "
-                            "不可重试错误停止。"
-                            "修复余额/认证/配额后重新运行 "
-                            "start_agent.bat 即可从同一 Task 重试。"
-                        )
-
-                        return 3
-
-                else:
-
-                    now = time.monotonic()
-
-                    if should_log_idle(
-                        last_idle_log_at,
-                        current_time=now
-                    ):
-
-                        _logger.info(
-                            queue_diagnostic(
-                                wait_reason
-                            )
-                        )
-
-                        last_idle_log_at = now
+                    return 3
 
                 # ============================================
                 # Sleep

@@ -3694,3 +3694,47 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
 - 建议下一步：真实授权 Author / News 语料按 GOLD-017 → GOLD-011 → GOLD-012 → GOLD-013 →
   显式落库 → GOLD-014 → GOLD-015 → GOLD-016 的九步路径推进，由人工完成授权与 L3 Gate。
 
+---
+
+## 第八十三轮（2026-09-23）：GOLD-020 —— Git Push 冲突恢复状态机与 Result 语义一致性加固
+
+### 1. 背景（GOLD-016 实际暴露的两个问题）
+
+- 任务 / validation / commit 全部成功，首次 `push` 因 `remote contains work` 被拒；
+  下一轮 `pull --rebase` 后 push 成功，且**没有重跑任务**——这条恢复路径实际有效，
+  本轮用 mock 回归测试把它锁死。
+- GOLD-016 result 同时出现 `status=completed` / `cline_exit_code=0` / 全部 validation 通过，
+  但唯一的 `finish_reason=aborted`（其实是 Cline raw 值）→ 结果语义歧义。
+
+### 2. 交付内容
+
+- `orchestrator/ai_orchestrator.py`：
+  - 新增 Orchestrator 判定词表（`EXECUTION_OUTCOME_*` / `NORMALIZED_FINISH_REASONS`）与
+    `normalize_finish_reason()` / `cline_finish_reason_raw()` / `attempt_outcome()`；
+  - `build_attempt_record()` 同时写 `cline_finish_reason_raw`（raw，可能是 `aborted`）与
+    `execution_outcome` / `normalized_finish_reason`；兼容旧键 `finish_reason` 改写入**归一化值**；
+  - `write_final_result()` 增加 result 级 `execution_outcome` / `normalized_finish_reason`；
+  - `process_task()` 把 success 判定收敛为 `outcome == EXECUTION_OUTCOME_COMPLETED`
+    （attempt 记录与最终成功判定**同源**，不再可能自相矛盾）；
+  - push 失败时写 runtime `push_pending` 状态（`local_result=completed` /
+    `push_status=pending` / `remote` / `branch`），本轮不启动任何任务、不重跑 Cline；
+  - `sync_repository()` 增加 fail-closed 日志，并在 `remote synced` 后清理 `push_pending` 状态；
+  - 抽出 `run_iteration()`（main loop 单轮），固化「先 Git sync，同步成功后才允许 rolling queue 继续」。
+- `tests/unit/test_ai_orchestrator_queue.py`：+16 用例（`FakeGit` 全 mock，零真实远端）：
+  非 fast-forward 首推失败 → 下一轮 rebase + push 成功；`pull --rebase` 冲突严格停线且
+  Cline 不重跑、本地 commit/result 保留；`ahead=0/1/unknown` 兼容且无 force push / reset；
+  raw `aborted` 与归一化 `completed` 并存；旧 result（无新字段）仍可解析且不回写。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.2「Result 字段与 Git Push 恢复契约」。
+
+### 3. 范围守规
+
+- 未新增第三方依赖；Git 行为全部 mock，**不访问真实 GitHub**；未对真实仓库 force push / reset / rebase；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`src/**`、`database/**`；
+- 未改业务 Phase、数据资格 Gate、`LIVE_TRADING`；Cline 未执行任何 git 写操作。
+
+### 4. 遗留 / 下一步
+
+- 历史 result（含 GOLD-016 的 `finish_reason=aborted`）**保持原样**，新字段/语义只对新 result 生效；
+- 建议下一步：真实语料继续按 Evidence 九步路径推进（授权 → inbox → review → plan → 显式落库 →
+  receipt → 决策包 → L3 Gate），Phase 切换仍需人工 L3。
+
