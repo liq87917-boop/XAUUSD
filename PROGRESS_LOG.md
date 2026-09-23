@@ -4007,3 +4007,66 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
 - 「临时路径」允许根取自 `tempfile.gettempdir()`：测试用 monkeypatch 固定，避免依赖 basetemp 位置；
 - 建议下一步：GPT 消费 v2 快照（`facts_digest` 可直接比对）决定队列补充与状态指针更新。
 
+## 第八十八轮（2026-09-23）：GOLD-025 — GPT Review Ledger 与状态推进一致性门禁
+
+### 1. 背景
+
+- §2 状态机要求「COMPLETED 先 Review，Review PASS 才能更新 PROJECT_STATE 并创建下一任务」，
+  但这条规则此前**无法机器验证**：Executor 只要写出 `status=completed` 的 result，
+  就与「已被 GPT Review 通过」在状态上无法区分；`last_reviewed_task` 指针可以凭空
+  超前 / 落后于 results；被 review 过的 result 之后被替换 / 改写时旧 review 会静默继续有效。
+- 本轮只建立 review 契约与只读一致性门禁：**不**由 Cline / DeepSeek 签发任何 PASS review，
+  不修改 `.ai/PROJECT_STATE.json`、不补队列、不改 Phase / 数据资格 Gate / L3-L4。
+
+### 2. 交付内容
+
+- `orchestrator/review_ledger.py`（新增，**纯只读**）：
+  - 版本化契约：`REVIEW_LEDGER_SCHEMA=gold-ai/gpt-review-ledger/v1` + 整数
+    `schema_version=1`，canonical 路径 `.ai/GPT_REVIEW_LEDGER.json`；
+  - `validate_review_ledger()`：schema + 条目级 fail-closed 校验（verdict 词表、
+    `reviewer_role=GPT`、`reviewed_result` 的 result sha256 / status / finished_at、
+    `reviewed_commit` 的 40 位 commit sha + branch、`acceptance_summary`、`reviewed_at`），
+    非法 / 不完整 / 冲突条目**永远不算通过**；
+  - `build_review_report()`：`last_reviewed_task` 超前 / 落后（指针倒退）/ 缺失、
+    completed-but-unreviewed、review identity mismatch（result 被替换）、PASS 落在 blocked、
+    queue 首任务依赖（missing / blocked / not completed / unreviewed）、L3-L4 停线、
+    可选 `--verify-ancestry`（只读 `git merge-base --is-ancestor`）→ 统一 `issues` +
+    `gate.advance_allowed` 门禁结论；
+  - `review_write_contract()` / `review_authority()`：只有 GPT 能签发 review，
+    Cline / DeepSeek / 未知身份 fail-closed 拒绝；模块内**没有**任何写入 ledger 的 API；
+  - CLI `python -m orchestrator.review_ledger`：只读 stdout（纯 ASCII JSON）+ stderr 摘要，
+    退出码 `0` 一致 / `2` 漂移或阻塞 / `3` PROJECT_STATE 不可读。
+- `tests/unit/test_ai_orchestrator_review_ledger.py`（新增 42 项）：合法 reviewed chain、
+  completed-but-unreviewed、ledger 缺失 / 损坏 / schema 不支持 / 条目非法、
+  result 被替换 / 非终态 / branch 不符、指针超前 / 倒退 / 缺失 / FAIL / unknown task、
+  queue 依赖 missing / blocked / not completed / unreviewed（含传递依赖与覆盖下限）、
+  L3-L4 永不跨越、ancestry 默认关闭与 fail-closed、只读性与确定性（工作树逐字节不变、
+  facts_digest 可复算）、CLI 退出码与选项契约、源码守卫（无写入路径 / 无 planning API /
+  唯一子进程为只读 git）。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.7「GPT Review Ledger 与状态推进一致性门禁（GOLD-025）」。
+
+
+### 3. 测试结果
+
+- `pytest tests/unit/test_ai_orchestrator_review_ledger.py -q` → `42 passed`；
+- `pytest tests/unit/test_ai_orchestrator_queue.py -q` → 全绿；
+- `pytest tests -q` → 全量通过；
+- `ruff check .` → All checks passed；`mypy config database src scripts` → Success。
+
+### 4. 范围守规
+
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`src/**`、`database/**`；
+- 未改 Phase 3.3 blocker、数据资格 Gate、L3/L4 档位、`LIVE_TRADING=false`、
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+- 未新增依赖 / 模型 / 供应商 API / 网络调用；Cline 未执行任何 Git 写操作；
+- 写入测试全部发生在 `tmp_path`（含 fake `.git`），对真实仓库零写入。
+
+### 5. 遗留 / 下一步
+
+- `.ai/GPT_REVIEW_LEDGER.json` 目前**尚不存在**（本任务禁止 Executor 建档），
+  因此 `python -m orchestrator.review_ledger` 当前按设计 fail-closed 报
+  `REVIEW_LEDGER_MISSING` + 历史 completed 未 review + queue 依赖未 review，
+  门禁 `advance_allowed=false`（只报告，不阻断 Orchestrator 运行）；
+- 建议下一步：GPT 依据 §2.7 用真实 result sha256 与对应 commit sha 建档
+  （可声明 `reviewed_from` 作为历史覆盖下限），此后门禁才可能转绿；建档属 GPT 职责，
+  Cline / DeepSeek 永远只读。

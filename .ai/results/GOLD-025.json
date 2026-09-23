@@ -1,0 +1,77 @@
+{
+  "task_id": "GOLD-025",
+  "title": "建立 GPT Review Ledger 与状态推进一致性门禁",
+  "status": "completed",
+  "finished_at": "2026-09-23T14:44:24+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    "?? orchestrator/review_ledger.py",
+    "?? tests/unit/test_ai_orchestrator_review_ledger.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 58 +++++++++++++++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 63 +++++++++++++++++++++++++++++++++++++++++++++\n 2 files changed, 121 insertions(+)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T14:23:06+08:00",
+      "finished_at": "2026-09-23T14:44:24+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 106,
+      "duration_ms": 934043,
+      "usage": {
+        "inputTokens": 18716673,
+        "outputTokens": 129767,
+        "cacheReadTokens": 18574464,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.15491494199999997
+      },
+      "cline_final_text": "Submission recorded (verified): GOLD-025 完成。新增 `orchestrator/review_ledger.py`（纯只读、1639 行）：定义版本化 review ledger 契约（`gold-ai/gpt-review-ledger/v1`，canonical `.ai/GPT_REVIEW_LEDGER.json`，条目含 task_id/verdict/reviewer_role=GPT/reviewed_result(result sha256+status+finished_at)/reviewed_commit(40位 sha+branch)/acceptance_summary/reviewed_at），`validate_review_ledger()` 做 schema+条目级 fail-closed 校验（非法/重复/冲突条目永不算 PASS），`build_review_report()` 做状态推进一致性门禁（last_reviewed_task 超前/落后/缺失、COMPLETED_BUT_UNREVIEWED、result 被替换 identity mismatch、PASS 落在 blocked、queue 首任务依赖闭包 missing/blocked/not-completed/unreviewed、L3/L4 QUEUE_HEAD_HUMAN_GATE、可选只读 `--verify-ancestry`），`review_write_contract()`/`review_authority()` 界定「GPT 可写、Executor 只读」（cline/deepseek/未知身份 fail-closed，模块无任何写入 ledger API），CLI `python -m orchestrator.review_ledger` 输出纯 ASCII JSON，退出码 0/2/3。新增 `tests/unit/test_ai_orchestrator_review_ledger.py`（42 项），并在 `.ai/DEVELOPMENT_PROTOCOL.md` 增加 §2.7、`PROGRESS_LOG.md` 追加本轮记录。实测证据：新测试 42 passed；`pytest tests/unit/test_ai_orchestrator_queue.py -q` 67 passed；`pytest tests -q` 2911 passed/1 skipped（334s）；`ruff check .` All checks passed；`mypy config database src scripts` Success；真实仓库调用报告 read_only=true、exit_code=2、fail-closed 列明 REVIEW_LEDGER_MISSING 与 queue 首任务依赖未 reviewed、advance_allowed=false；报告前后工作树逐字节不变（只读守卫测试）。git status 仅含 4 个预期变更（2 改 2 增），未触碰 .ai/tasks、.ai/results、.ai/PROJECT_STATE.json、src/**、database/**。遗留：`.ai/GPT_REVIEW_LEDGER.json` 尚不存在（本任务禁止 Executor 建档），门禁按设计 fail-closed，需 GPT 用真实 result sha256 与 commit sha 建档（可声明 reviewed_from）后方可转绿。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        "?? orchestrator/review_ledger.py",
+        "?? tests/unit/test_ai_orchestrator_review_ledger.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 58 +++++++++++++++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 63 +++++++++++++++++++++++++++++++++++++++++++++\n 2 files changed, 121 insertions(+)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "...................................................................      [100%]\n67 passed in 0.42s\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 17%]\n........................................................................ [ 19%]\n........................................................................ [ 22%]\n........................................................................ [ 24%]\n........................................................................ [ 27%]\n........................................................................ [ 29%]\n........................................................................ [ 32%]\n........................................................................ [ 34%]\n........................................................................ [ 37%]\n........................................................................ [ 39%]\n........................................................................ [ 42%]\n........................................................................ [ 44%]\n........................................................................ [ 46%]\n........................................................................ [ 49%]\n........................................................................ [ 51%]\n........................................................................ [ 54%]\n........................................................................ [ 56%]\n........................................................................ [ 59%]\n........................................................................ [ 61%]\n........................................................................ [ 64%]\n........................................................................ [ 66%]\n........................................................................ [ 69%]\n........................................................................ [ 71%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 79%]\n........................................................................ [ 81%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 89%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 96%]\n...........................................................s............ [ 98%]\n................................                                         [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2911 passed, 1 skipped in 336.17s (0:05:36)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 172 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

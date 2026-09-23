@@ -202,6 +202,64 @@ Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任�
   `LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；Executor 依然不具备
   follow-on planning / 改状态 / 决定 Phase 权限（`role_contract` + 契约测试锁定）。
 
+## 2.7 GPT Review Ledger 与状态推进一致性门禁（GOLD-025）
+
+- **规则来源**：§2 状态机要求 `COMPLETED` 先 Review、Review PASS 之后才允许更新
+  `.ai/PROJECT_STATE.json` 并创建下一任务。§2.7 把这条规则变成**机器可审计**的记录，
+  消除「Executor 写完 `status=completed` 就自称 reviewed」的语义黑洞。
+- **契约与位置**：ledger 是**单个**版本化 JSON 文件，canonical 路径
+  `.ai/GPT_REVIEW_LEDGER.json`（`schema=gold-ai/gpt-review-ledger/v1` + 整数
+  `schema_version=1`）。每条 entry 必须记录：
+  - `task_id`；
+  - `verdict`（`PASS` / `FAIL`，大小写不敏感，规范化后入库）；
+  - `reviewer_role`（必须是 `GPT`）与 `reviewer`（必须是 planner agent；`cline` /
+    `deepseek` / 未知身份一律 `EXECUTOR_REVIEW_FORBIDDEN` / `REVIEWER_ROLE_INVALID`）；
+  - `reviewed_result`：被 review 的 result **文件 sha256** + `status` + `finished_at`
+    （result 一旦被替换 / 改写，旧 review 立即失效 → `REVIEW_RESULT_IDENTITY_MISMATCH`）；
+  - `reviewed_commit`：完整 40 位 commit sha + branch（Git identity；sha 非法报
+    `REVIEW_COMMIT_INVALID`，branch 与现行事实不符报 `REVIEW_BRANCH_MISMATCH`）；
+  - `acceptance_summary`（非空验收结论摘要）与 `reviewed_at`（ISO-8601）。
+  ledger 级可选字段 `reviewed_from`（历史覆盖下限 task_id，声明「从哪个任务起纳入 review
+  覆盖」）；未知字段一律忽略（向后兼容）。
+- **职责边界（不可协商）**：GPT 是**唯一**能写 ledger / 签发 verdict 的角色；
+  Executor（Cline / DeepSeek）**只读**：不能写 ledger、不能声明 verdict，更不能凭自己的
+  `completed` result 冒充 reviewed。机器可读契约见 `orchestrator/review_ledger.py` 的
+  `review_write_contract()`（`schema=gold-ai/review-write-contract/v1`，
+  `executor_can_write_ledger=false` / `executor_can_sign_review=false` /
+  `ledger_can_cross_human_gate=false` / `ledger_can_transition_phase=false`）与
+  `review_authority(agent) -> (allowed, reason)`（未知身份 fail-closed 拒绝）。
+  该模块**没有**任何写入 / 追加 / 修复 ledger 的 API。
+- **一致性门禁（`python -m orchestrator.review_ledger`，只读）**：
+  - `last_reviewed_task` 不得**超前**于 `completed` result
+    （`REVIEW_POINTER_AHEAD_OF_COMPLETION`），也不得**落后**于 ledger 最新 PASS review
+    （`REVIEW_POINTER_BEHIND_LEDGER`：指针倒退）；
+  - 指针指向的任务若已 `completed` 却没有有效 GPT PASS 记录，报
+    `COMPLETED_BUT_UNREVIEWED`；`FAIL` 结论不得推进（`REVIEW_POINTER_ON_FAILED_REVIEW`）；
+  - rolling queue **首任务**（第一个非终态任务，严格文件顺序，§2.1）的依赖闭包必须已
+    `completed`（`QUEUE_HEAD_DEPENDENCY_MISSING` / `_BLOCKED` / `_NOT_COMPLETED`），
+    且若协议要求 review（§2 COMPLETED→Review→下一任务）则已 GPT-reviewed
+    （`QUEUE_HEAD_DEPENDENCY_UNREVIEWED`）；
+  - 覆盖下限（`reviewed_from`，否则最新 PASS review）之前的历史不做追溯误报；
+    下限之后出现未 review 的 `completed` 一律报 `COMPLETED_BUT_UNREVIEWED`；
+  - 同一 task 多条 review（verdict 冲突）报 `REVIEW_ENTRY_DUPLICATE`，并把该 task 的
+    review **整体作废**（绝不挑一个更宽松的 verdict）；非法 / 不完整条目永远不算通过；
+  - ledger 缺失 / 损坏 / schema 不认识（`REVIEW_LEDGER_MISSING` / `_UNREADABLE` /
+    `_SCHEMA_UNSUPPORTED` / `_ENTRIES_INVALID`）一律 fail-closed：`advance_allowed=false`；
+  - queue 首任务处于 L3/L4 报 `QUEUE_HEAD_HUMAN_GATE`（warning）且
+    `gate.crosses_human_gate=true`：本工具只报告，**永不跨越**。
+- **可选 Git identity 可达性**：`--verify-ancestry` 时对每条有效 review 执行只读
+  `git merge-base --is-ancestor <reviewed_sha> HEAD`；不可达报 `REVIEW_COMMIT_UNREACHABLE`，
+  无法验证（git 不可用 / 超时 / 非 Git 仓库）报 `REVIEW_ANCESTRY_UNVERIFIABLE`。
+  默认**不**运行任何子进程；除该命令外本模块不执行任何 Git / 网络命令。
+- **只读保证**：报告只写 stdout（纯 ASCII JSON，`stderr` 只有人类摘要）；模块内不存在任何
+  写入路径（源码守卫测试锁定），绝不写 ledger / `PROJECT_STATE` / tasks / results，
+  绝不回写历史 result，也绝不 commit / reset / checkout。
+- **退出码**：`0` 一致（`advance_allowed=true`）/ `2` 检出漂移或阻塞 /
+  `3` `PROJECT_STATE` 不可读。
+- **边界不变**：§2.7 不改变 Phase 3.3 blocker、数据资格 Gate、L1~L4 档位、
+  `LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；ledger 只记录 review
+  结论，不能解除 blocker、不能资格化数据、也不能代替人工 Gate。
+
 ## 3. 恢复任务命名
 
 原任务失败或阻塞后不得修改既有审计历史。
