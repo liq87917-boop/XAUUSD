@@ -1543,6 +1543,75 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   "除 `as_of` 外无任何时间戳、mtime 绝不出现"、"候选证据内容与 mtime 零变化"、
   "无网络 / 无写库 / 无 `open` / 无 `os.stat`"等源码级与运行期守卫。
 
+### 材料级人工核验凭证（`scripts/evidence_human_verification_attestation.py`，GOLD-028）
+
+> **合规红线**：本项**只做纯本地只读预检 + 人工凭证绑定** —— 不采集、不写库、不联网、不绕过
+> robots / 证书、不放宽任何资格门槛；`all_required_verified` **只**代表**材料级人工核验完成**，
+> `PHASE3_3_DATA` **保持 BLOCKED**，L3 / L4 只能人工推进。
+
+- **一句话**：把 GOLD-027 的 handoff **结构完整预检**进一步转换为**可审计的材料级人工核验
+  凭证** —— 明确记录「授权证明 / 来源身份与出处 / `published_at` / `collected_at` /
+  `effective_at` 独立时间语义 / availability-OOS 独立证据」分别**由谁、何时、依据哪条独立引用**
+  核验成了什么；
+- **内容寻址**（`attestation_id`）：由「硬编码策略块 + `revision` / `supersedes` + package 绑定
+  + 逐材料核验」派生（**不含**审计时间，同输入 → byte-stable），并硬绑定**当前**候选包
+  `fingerprint` + package 内容身份 + GOLD-027 handoff / manifest 内容身份
+  （`handoff_content_sha256`）+ `scope`；任何 package / manifest / content fingerprint 漂移都使
+  旧凭证**失效**（`verify` 模式给出 `PACKAGE_FINGERPRINT_DRIFT` / `PACKAGE_CONTENT_DRIFT` /
+  `HANDOFF_CONTENT_DRIFT`，**绝不静默继承**）；
+- **受控人工输入**（`--verification`，本地 JSON）：每个必核验材料必须有
+  `VERIFIED` / `REJECTED` / `NEEDS_CHANGES` 决策 + 稳定大写 `reason_code` + 显式 `reviewer`
+  label（**不采集任何凭据**）+ 带时区 `reviewed_at`（**不是**证据时间，naive / 未来一律拒绝）
+  + 独立 `evidence_reference`（`https://...` 或 `docs/legal/...`）；未知字段 / 重复材料 / 疑似
+  凭据 / 裸文件名一律 fail-closed；
+- **必看结论**：`all_required_verified=true` **只**表示「非 Mock / 模板 / 示例 / 合成、
+  GOLD-027 `preflight_pass=true`、每个必核验材料都有带独立引用的 `VERIFIED`」；
+  `evidence_qualified` / `data_qualification_passed` / `phase_transition_allowed` /
+  `advance_allowed` / `l3_l4_auto_advance_allowed` 恒为 `false`；`blocker_active` /
+  `human_gate_required` / `gate_blocked` 恒为 `true`（**硬编码**）；
+- **Mock 永不 qualify**：Mock / 模板 / 示例 / 合成、`preflight_pass=false`、以及结构上不是
+  `HUMAN_VERIFICATION_REQUIRED` 的材料**一律拒绝**被声明为 `VERIFIED`
+  （`NON_QUALIFYING_PACKAGE` / `PREFLIGHT_NOT_PASSED` / `MATERIAL_NOT_VERIFIABLE`）；
+- **既有凭证不可静默改写**：同 `attestation_id` 幂等；否则必须显式
+  `--revision >= 2 --supersedes <attestation_id>`；凭证被改写（决策 / 计数 / 安全字段 /
+  独立引用）→ `verify` 一律 `ATTESTATION_TAMPERED` fail-closed；
+- 用法：
+
+  ```bash
+  # ① 打印版本化凭证契约（零写入、零网络）
+  .venv\Scripts\python.exe -m scripts.evidence_human_verification_attestation --schema
+
+  # ② 只读预检：按人工核验输入生成凭证（默认只打印 stdout；零写入、零数据库）
+  .venv\Scripts\python.exe -m scripts.evidence_human_verification_attestation \
+      --inbox-dir logs/evidence/inbox \
+      --verification logs/evidence/human_verification.json --json
+
+  # ③ 唯一写开关：显式 --out 原子落盘凭证（不写库、不 intake、不解除 BLOCKED）
+  .venv\Scripts\python.exe -m scripts.evidence_human_verification_attestation \
+      --inbox-dir logs/evidence/inbox \
+      --verification logs/evidence/human_verification.json --json \
+      --out logs/evidence/phase33_human_verification_attestation.json
+
+  # ④ 防伪核验（纯只读）：重新绑定当前 package 并检测漂移 / 篡改 / 缺引用
+  .venv\Scripts\python.exe -m scripts.evidence_human_verification_attestation \
+      --inbox-dir logs/evidence/inbox \
+      --verify-attestation logs/evidence/phase33_human_verification_attestation.json --json
+  ```
+
+- 退出码：`0` 全部必核验材料已有 `VERIFIED`（仍**不是**资格通过）/ `2` 参数或输入错误 /
+  `3` 路径 / 输出不可用（含把凭证写进 inbox 或覆盖核验输入的拒绝）/
+  `4` 漂移 / 篡改 / 冲突 / 非法人工输入（fail-closed，零写入）/
+  `5` 未全部核验或不可核验（**当前预期**：`PHASE3_3_DATA` 保持 BLOCKED）；
+- 回归测试：`tests/unit/test_evidence_human_verification_attestation.py`（41 项）+
+  `tests/integration/test_evidence_human_verification_attestation_integration.py`（18 项），
+  其中包含「材料级核验 ≠ 资格通过」「缺授权证明 / 缺独立时间语义 / 缺 availability-OOS 全部
+  fail-closed」「Mock / 模板永不 qualify」「package / handoff 内容漂移使旧凭证失效」
+  「凭证篡改 / 安全字段削弱 / 伪造 `all_required_verified` 全部 fail-closed」
+  「重复幂等 + 显式 `revision` / `supersedes`」「敏感值 / naive 或未来 `reviewed_at` 一律拒绝」
+  「除审计时点与人工 `reviewed_at` 外无任何时间戳、mtime 绝不出现」
+  「候选证据内容与 mtime 零变化」「无网络 / 无写库 / 无 `open` / 无 `os.stat`」等源码级与
+  运行期守卫。
+
 ## 8. 数据模型
 
 

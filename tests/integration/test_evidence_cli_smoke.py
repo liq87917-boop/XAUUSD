@@ -34,6 +34,7 @@ EVIDENCE_CLI_MODULES: tuple[str, ...] = (
     "scripts.evidence_decision_record",
     "scripts.evidence_gap_diagnostic",
     "scripts.evidence_handoff",
+    "scripts.evidence_human_verification_attestation",
     "scripts.evidence_inbox",
     "scripts.evidence_intake_handoff",
     "scripts.evidence_intake_plan",

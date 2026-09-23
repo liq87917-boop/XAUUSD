@@ -4284,3 +4284,142 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
   `evidence_operator workflow --no-dry-run` / `evidence_gap_diagnostic` 与 **L3 人工 Gate**；
   `PHASE3_3_DATA` 仍 BLOCKED。
 
+
+## 第九十一轮（2026-09-23）：GOLD-028 — 材料级 Human Verification Attestation 与证据绑定审计
+
+### 1. 背景
+
+- GOLD-027 已能回答"材料是否齐全、字段是否可解析、来源 / 时间声明是否带独立证据引用"，
+  但对"**每一项关键材料到底有没有被人工核验、由谁核验、依据哪条独立引用、结论是什么**"
+  没有任何**可审计凭证**：`HUMAN_VERIFICATION_REQUIRED` 只是"可以进入人工核验队列"，
+  核验结果只存在于人的脑子里或聊天记录里，无法被机器复核、无法检测 package / manifest 漂移、
+  也无法防止事后静默改写；
+- 本轮把结构完整预检进一步转换为**材料级人工核验凭证**（Human Verification Attestation）：
+  受控决策 + 稳定 reason code + 显式 reviewer label + 带时区 `reviewed_at` + 独立引用，
+  **硬绑定**当前候选 package fingerprint + GOLD-027 handoff / manifest 内容身份 + scope，
+  并提供**纯只读防伪核验**（检测 stale / tampered / missing reference）；
+  `all_required_verified` **只**代表材料级人工核验完成，`PHASE3_3_DATA` **保持 BLOCKED**，
+  L3 / L4 只能人工推进。
+
+### 2. 交付内容
+
+- `src/evidence/human_verification_attestation.py`（新增，**纯本地只读 + 显式人工输入**）：
+  - **版本化契约** `attestation_schema()`：`kind=phase33_human_verification_attestation` /
+    `schema_version=1` / `contract_version=human-verification-attestation-v1` / 必核验材料清单
+    （**只引用** GOLD-027 `MATERIAL_SPECS` 的非 Gate 材料：`evidence_records` /
+    `source_identity` / `authorization_declaration` / `time_semantics` / `published_at` /
+    `collected_at` / `effective_at` / `availability_oos` + Author 专有 `author_identity`）/
+    受控决策词表 / 稳定原因码 / 核验输入文件格式 / `all_required_verified` 的诚实语义与
+    `all_required_verified_does_not_imply` 列表；`_check_material_coverage()` 在运行期
+    fail-closed 校验"至少覆盖 authorization / source / 独立时间语义 / availability-OOS"，
+    **不新增、不降低**任何资格门槛；
+  - `VerificationDecision`（`VERIFIED` / `REJECTED` / `NEEDS_CHANGES`）+ `MaterialDecision` +
+    `VerificationInput` + `load_verification_input()`：人工核验输入**必须**显式声明
+    `package_fingerprint`（+ 可选 handoff 内容身份 / scope），逐材料校验受控决策 / 稳定
+    `reason_code` / 显式 reviewer label / 带时区 `reviewed_at`（naive 或晚于审计时点一律拒绝）/
+    独立 `evidence_reference`（只接受 `https://...` 或 `docs/legal/...`，拒绝裸文件名）；
+    未知字段 / 未知材料 / 重复材料 / Gate 材料 / 疑似凭据（token / key / blob 形态）一律 fail-closed；
+  - `MaterialAttestation` / `HumanVerificationAttestation`：每材料给出 `intake_status` /
+    `decision` / `reason_code` / `reviewer` / `reviewed_at` / `evidence_reference` /
+    `counts_as_verified` / 稳定原因码；凭证级别给出 `required_material_count` /
+    `verified_material_count` / `rejected_material_count` / `needs_changes_material_count` /
+    `missing_decision_material_count` 与内容寻址 `attestation_id`（由「硬编码策略块 +
+    `revision` / `supersedes` + package 绑定 + 逐材料核验」派生，**不含**审计时间 → 同输入
+    byte-stable）；安全字段**硬编码**：`evidence_qualified` / `data_qualification_passed` /
+    `phase_transition_allowed` / `advance_allowed` / `l3_l4_auto_advance_allowed` 恒 false、
+    `blocker_active` / `human_gate_required` / `gate_blocked` 恒 true；
+  - `handoff_content_sha256()` / `package_content_sha256()`：GOLD-027 handoff / manifest 与
+    候选包材料结构的**内容身份**（不含 `as_of`，可复现）；漂移检测的唯一口径；
+  - `build_attestation()`（纯函数）：核验输入的 fingerprint / handoff 内容身份 / scope 与
+    **当前**候选目录不一致 → `PACKAGE_FINGERPRINT_MISMATCH` / `HANDOFF_CONTENT_MISMATCH` /
+    `SCOPE_MISMATCH`；对 Mock / 模板 / 示例 / 合成声明 `VERIFIED` → `NON_QUALIFYING_PACKAGE`；
+    对 `preflight_pass=false` 的包声明 `VERIFIED` → `PREFLIGHT_NOT_PASSED`；对结构上不是
+    `HUMAN_VERIFICATION_REQUIRED` 的材料声明 `VERIFIED` → `MATERIAL_NOT_VERIFIABLE`；
+    缺材料决策 → `MATERIAL_DECISION_MISSING` 且 `all_required_verified=false`；
+  - `run_attestation()`：默认**零写入**；只有显式 `out_path` 才先做既有凭证冲突检查
+    （同 `attestation_id` 幂等；内容不同必须显式 `supersedes` + 更大 `revision`，否则
+    `ATTESTATION_CONFLICT` / `SUPERSEDES_MISMATCH` / `REVISION_INVALID`）再**原子**落盘；
+    拒绝把凭证写进 `inbox_dir`（否则改变候选集）或覆盖核验输入文件；
+  - `verify_attestation()`（**纯只读防伪核验**）：重新推导 `attestation_id`、逐项复核
+    kind / schema / 契约 / 策略块 / 安全字段 / 计数与合取自洽 / 无证据时间键 / 独立引用非空，
+    任一被改写 → `ATTESTATION_TAMPERED` / `ATTESTATION_ID_MISMATCH`；重新绑定**当前**候选目录并
+    检测 `PACKAGE_FINGERPRINT_DRIFT` / `PACKAGE_CONTENT_DRIFT` / `HANDOFF_CONTENT_DRIFT` /
+    `PREFLIGHT_DRIFT` / `MATERIAL_NOT_VERIFIABLE` / `MATERIAL_REFERENCE_MISSING`；
+  - `render_attestation_summary()`（脱敏 Markdown，不解除 blocker）+ `exit_code_for()` /
+    `main_verification_exit_code()` 稳定退出码映射；
+- `scripts/evidence_human_verification_attestation.py`（新增）：`--schema` 打印契约 /
+  `--inbox-dir` / `--package`（目录名或 fingerprint；候选唯一时可省略）/ `--verification` /
+  `--as-of` / `--revision` / `--supersedes` / `--json` / `--out`（**唯一**写开关，复用
+  `atomic_write_text`）/ `--verify-attestation`（纯只读重新绑定核验模式，与写参数互斥）；
+  **没有**任何 intake / 写库 / `qualify` / `approve` / `advance` 参数；退出码
+  `0` 全部必核验材料已 `VERIFIED`（**不是**资格通过）/ `2` 参数或输入错误 /
+  `3` 路径或输出不可用 / `4` 漂移 / 篡改 / 冲突 / 非法人工输入（fail-closed，零写入）/
+  `5` 未全部核验或不可核验（**当前预期**：`PHASE3_3_DATA` 保持 BLOCKED）；
+- `src/evidence/__init__.py`：新增 `human_verification_attestation` 惰性导出（34 个名字），
+  包 docstring 与 CLI 入口清单同步更新（`__all__` 与惰性表同源门禁仍绿）；
+- `tests/integration/test_evidence_cli_smoke.py`：登记新 CLI（现覆盖 15 个
+  `scripts/evidence_*.py` + 单步 intake 入口）；
+- 文档：`README.md` 新增 GOLD-028 小节（用法 / 语义 / 退出码 / 回归测试）；`TECH_DEBT.md`
+  登记 **TD-63** 与变更日志行。
+
+
+### 3. 测试结果
+
+- `pytest tests/unit/test_evidence_human_verification_attestation.py -q` → **41 passed**：
+  版本化契约（只引用 GOLD-027 材料契约 / 必核验类别覆盖 / 决策词表 / 诚实语义）、
+  正向（作者与新闻 scope、内容寻址 `attestation_id` 与审计时点无关、byte-stable）、
+  缺授权证明 / 缺独立时间语义 / 缺 availability-OOS 一律 fail-closed、
+  Mock / 模板永不 qualify、REJECTED / NEEDS_CHANGES 绝不计入、
+  fingerprint / handoff 内容 / scope 漂移被拒、写入后内容漂移使旧凭证失效、
+  篡改（决策 / 安全字段 / 伪造 `all_required_verified` / 缺引用）全部 fail-closed、
+  重复幂等 + 显式 revision / supersedes、敏感值 / 未知字段 / 重复材料 / Gate 材料拒绝、
+  naive 或未来 `reviewed_at` 拒绝、naive `--as-of` 拒绝、`--out` 不得进 inbox 或覆盖核验输入、
+  候选证据内容与 mtime 零变化、除审计时点与人工 `reviewed_at` 外无任何时间戳且 mtime 绝不出现、
+  源码级守卫（只 import 既有模块；无 `open` / `os.stat` / `getmtime` / `utime` / 网络 /
+  `intake_evidence` / 直接 `write_text`；安全布尔硬编码）；
+- `pytest tests/integration/test_evidence_human_verification_attestation_integration.py -q`
+  → **18 passed**：`--help` 仅暴露只读开关（五类禁止参数退出 `2`）、`--schema` 输出契约且默认
+  零写入、缺 `--inbox-dir` / `--verification` 退出 `2`、naive `--as-of` fail-closed（stdout 空）、
+  全部核验 → 退出 `0` 且安全布尔全为 false / true、默认零写入、`--out` 只写 artifact、
+  `--out` 不可写退出 `3`、未全部核验与 Mock → 退出 `5`、空候选 → `PACKAGE_NOT_FOUND`、
+  防伪核验通过 / 漂移 / 篡改 → `0` / `4` / `4`、`--verify-attestation` 与写参数互斥、
+  **fresh subprocess** 端到端 cwd 零写入；
+- `pytest tests/unit/test_lazy_package_exports.py -q` → **15 passed**（`__all__` 与惰性表同源，
+  34 个新名字全部 `is` 定义子模块对象）；
+- `pytest tests/integration/test_evidence_cli_smoke.py -q` → 新 CLI 的 fresh-subprocess
+  import / `--help` / 空 cwd **零写入**门禁全部通过（覆盖 15 个 `scripts/evidence_*.py`）；
+- 全量 `pytest tests -q` → **3060 passed, 1 skipped in 395.65s**（`1 skipped` 仍为
+  `tests/unit/test_text_similarity.py` 的「本环境已安装 jieba，跳过未安装分支」——
+  与基线一致；新 CLI 的 fresh-subprocess import / `--help` / 空 cwd **零写入**门禁已含在内）；
+- `ruff check .` → **All checks passed!**；`mypy config database src scripts` →
+  **Success: no issues found in 178 source files**（GOLD-027 为 176，新增本模块 + 本 CLI）。
+
+### 4. 范围守规
+
+- 只读：零网络（不抓取、不绕过 robots / 证书）、零数据库访问（模块与 CLI 不建 engine、
+  不 import `sqlalchemy`）、零模型训练、零交易；默认只打印 stdout，唯一写开关是显式 `--out`
+  （原子写），且拒绝写进候选目录或覆盖人工核验输入；
+- 未新增 / 未升级任何依赖，未新增 migration / schema，未修改 `.ai/**`（任务 / 结果 /
+  `PROJECT_STATE`）、`src/alpha/**`、`src/execution/**`、`database/**`、
+  `config/rss_sources.json`、`docs/**`、`.env`；
+- 未改 Phase 3.3 blocker / 数据资格阈值 / L3-L4 Gate / `LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；`PHASE3_3_DATA` 仍 BLOCKED；
+- 写入测试全部发生在 `tmp_path`（临时候选包 / 临时凭证），对真实仓库零写入；
+- Cline 未执行任何 Git 写操作（提交由 Orchestrator 负责）。
+
+### 5. 遗留 / 下一步
+
+- 凭证**不是**资格判定器：`all_required_verified` 只表示材料级人工核验完成，
+  授权法律效力 / 许可范围 / 签认人身份与独立可用时间出处的判定仍属人工与 L3（TD-63）；
+- 材料级判定仍只消费既有 inbox 预检的字段级事实：行级具体原因码未透传，
+  "存在被隔离行"统一按 `PRESENT_UNVERIFIED` 报告（fail-closed）；
+- 未实现单实例锁（与 GOLD-016 不同）：并发写入依赖原子写 + 既有凭证冲突检查，
+  如需强并发保证可在后续任务引入（TD-63）；
+- 建议下一步：业务方以 `scripts.evidence_intake_handoff --schema` 准备真实授权 Author / News
+  材料 → 放入显式 `--inbox-dir` → 按 `--schema` 写出人工核验输入 →
+  `scripts.evidence_human_verification_attestation --inbox-dir ... --verification ... --out ...`
+  生成材料级核验凭证 → 再用 `--verify-attestation` 复核（漂移 / 篡改 / 缺引用）→
+  最后走 `evidence_inbox` / `evidence_review` / `evidence_intake_plan` /
+  `evidence_operator workflow --no-dry-run` / `evidence_gap_diagnostic` 与 **L3 人工 Gate**；
+  `PHASE3_3_DATA` 仍 BLOCKED。
+

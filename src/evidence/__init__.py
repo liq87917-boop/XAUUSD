@@ -82,6 +82,19 @@
   **逐字节一致** → 幂等，**内容不同** → ``MANIFEST_CONFLICT`` fail-closed（**没有**
   ``--force`` / ``--overwrite``）；**绝不**自动 intake、**绝不**写数据库、**绝不**移动 / 删除 /
   改写原始 evidence、**绝不**解除 ``PHASE3_3_DATA``（生成 manifest ≠ 授权已核验 ≠ 资格通过）。
+- :mod:`src.evidence.human_verification_attestation`：**纯本地、显式人工输入、默认零写入**的
+  材料级人工核验凭证（GOLD-028）：把 GOLD-027 的结构完整预检进一步转换为**可审计的材料级
+  人工核验凭证** —— 每个必核验材料记录受控决策（``VERIFIED`` / ``REJECTED`` /
+  ``NEEDS_CHANGES``）、稳定 reason code、显式 reviewer label、带时区的 ``reviewed_at`` 与
+  **独立 evidence reference**，并**硬绑定**当前候选 package fingerprint + GOLD-027
+  handoff / manifest 内容身份 + scope（``attestation_id`` 内容寻址；任何 package / manifest /
+  content fingerprint 漂移都使旧凭证失效，**绝不静默继承**）；``all_required_verified``
+  **只**代表材料级人工核验完成，``data_qualification_passed`` / ``phase_transition_allowed`` /
+  ``l3_l4_auto_advance_allowed`` / ``evidence_qualified`` / ``advance_allowed`` **恒为** false、
+  ``blocker_active`` / ``human_gate_required`` / ``gate_blocked`` **恒为** true（**硬编码**）；
+  Mock / 模板 / 示例 / 合成、``preflight_pass=false``、非 ``HUMAN_VERIFICATION_REQUIRED`` 材料
+  一律**拒绝**被声明为 ``VERIFIED``（fail-closed）；``verify_attestation`` 提供**防伪核验**
+  （重新推导 ``attestation_id``、与**当前**候选目录比对 package / handoff 内容身份）。
 
 红线（与 `.clinerules` 一致）：
 
@@ -100,7 +113,10 @@
 为纯只读防伪核验模式，且**没有**任何 intake / 写库参数）；
 ``scripts/evidence_package.py``（GOLD-017 本地 package / manifest builder；元数据与文件清单
 **必须**显式给出，默认 dry-run，唯一写入口是显式 ``--out``，且只能写
-``<package-dir>/manifest.json``；**没有**任何 intake / 写库参数）。
+``<package-dir>/manifest.json``；**没有**任何 intake / 写库参数）；
+``scripts/evidence_human_verification_attestation.py``（GOLD-028 材料级人工核验凭证；**必须**
+显式给出 ``--verification``，默认只读，唯一写入口是显式 ``--out``，``--verify-attestation``
+为纯只读重新绑定核验模式，且**没有**任何 intake / 写库参数）。
 """
 
 # src.evidence 的公开导出改用 PEP 562 **惰性导出**（GOLD-018）。
@@ -176,6 +192,20 @@ _LAZY_EXPORTS_BY_MODULE: Final[dict[str, tuple[str, ...]]] = {
         "HANDOFF_SCHEMA_VERSION", "PENDING_HUMAN_REVIEW_STATUS", "ScopeGap",
         "build_evidence_checklist", "build_excluded_evidence", "build_handoff_report",
         "render_handoff_markdown",
+    ),
+    "human_verification_attestation": (
+        "ALL_REQUIRED_VERIFIED_SEMANTICS", "ATTESTATION_CONTRACT_VERSION",
+        "ATTESTATION_EXECUTION_MODE", "ATTESTATION_FILE_NAME", "ATTESTATION_KIND",
+        "ATTESTATION_NOTE", "ATTESTATION_REPORT_NAME", "ATTESTATION_SCHEMA_VERSION",
+        "ATTESTATION_SCOPE", "ATTESTATION_TIME_SEMANTICS_NOTE",
+        "ATTESTATION_VERIFICATION_KIND", "AttestationArgumentError", "AttestationCode",
+        "AttestationError", "AttestationNotAttestableError", "AttestationPathError",
+        "AttestationStateError", "AttestationVerification", "AttestationWriteError",
+        "HumanVerificationAttestation", "MaterialAttestation", "MaterialDecision",
+        "VerificationDecision", "attestable_material_keys", "attestation_schema",
+        "build_attestation", "compute_attestation_id", "handoff_content_sha256",
+        "load_attestation_document", "load_verification_input", "package_content_sha256",
+        "render_attestation_summary", "run_attestation", "verify_attestation",
     ),
     "inbox": (
         "CandidatePackage", "EXIT_NO_CANDIDATES", "EXIT_UNUSABLE",
@@ -343,10 +373,21 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "ALLOWED_AUTHORIZATION_BASES",
+    "ALL_REQUIRED_VERIFIED_SEMANTICS",
     "APPROVAL_SCOPE",
     "APPROVED_ENTRY_KEYS",
     "APPROVED_KIND",
     "APPROVED_NOTE",
+    "ATTESTATION_CONTRACT_VERSION",
+    "ATTESTATION_EXECUTION_MODE",
+    "ATTESTATION_FILE_NAME",
+    "ATTESTATION_KIND",
+    "ATTESTATION_NOTE",
+    "ATTESTATION_REPORT_NAME",
+    "ATTESTATION_SCHEMA_VERSION",
+    "ATTESTATION_SCOPE",
+    "ATTESTATION_TIME_SEMANTICS_NOTE",
+    "ATTESTATION_VERIFICATION_KIND",
     "AUTHOR_CHAIN_NOTE",
     "AUTHOR_CHAIN_SCHEMA_VERSION",
     "BLOCKED_STATUS",
@@ -498,6 +539,14 @@ __all__ = [
     "ApprovedIntakeList",
     "ApprovedListDocument",
     "ArtifactWriteError",
+    "AttestationArgumentError",
+    "AttestationCode",
+    "AttestationError",
+    "AttestationNotAttestableError",
+    "AttestationPathError",
+    "AttestationStateError",
+    "AttestationVerification",
+    "AttestationWriteError",
     "AuthorizationDeclaration",
     "AuthorChainReport",
     "CandidatePackage",
@@ -540,6 +589,7 @@ __all__ = [
     "HandoffMaterial",
     "HumanDecision",
     "HumanDecisionRecord",
+    "HumanVerificationAttestation",
     "InboxArtifactWriteError",
     "InboxDirError",
     "InboxError",
@@ -576,6 +626,8 @@ __all__ = [
     "ManifestFileEntry",
     "ManifestFileRef",
     "ManifestWriteStatus",
+    "MaterialAttestation",
+    "MaterialDecision",
     "MaterialSpec",
     "NormalizedRow",
     "OperatorHandoffStep",
@@ -630,14 +682,18 @@ __all__ = [
     "TickPaths",
     "TickReport",
     "TickStateError",
+    "VerificationDecision",
     "WatchEvent",
     "WatchEventType",
     "WorkDirError",
     "WriteGateDecision",
     "assess_row",
     "atomic_write_text",
+    "attestable_material_keys",
+    "attestation_schema",
     "attribute_gateway_author_evidence",
     "build_approved_intake_list",
+    "build_attestation",
     "build_decision_packet",
     "build_decision_record",
     "build_evidence_checklist",
@@ -650,6 +706,7 @@ __all__ = [
     "build_quarantine_summary",
     "build_snapshot",
     "build_snapshot_from_session",
+    "compute_attestation_id",
     "compute_decision_id",
     "compute_packet_id",
     "compute_plan_id",
@@ -663,6 +720,7 @@ __all__ = [
     "example_rows",
     "exit_code_for",
     "gateway_author_evidence",
+    "handoff_content_sha256",
     "inbox_exit_code_for",
     "intake_evidence",
     "intake_handoff_schema",
@@ -671,6 +729,7 @@ __all__ = [
     "intake_receipt_exit_code_for",
     "ledger_from_raw_json",
     "load_approved_intake_list",
+    "load_attestation_document",
     "load_decision_packet",
     "load_event_journal",
     "load_evidence_ledger",
@@ -686,15 +745,18 @@ __all__ = [
     "load_readiness_state_document",
     "load_review_ledger",
     "load_snapshot_state",
+    "load_verification_input",
     "main_verification_exit_code",
     "manifest_bytes",
     "manifest_digest",
     "normalize_input_row",
     "package_builder_exit_code_for",
+    "package_content_sha256",
     "preflight_rows",
     "quarantine_payload",
     "read_input_file",
     "record_review_decision",
+    "render_attestation_summary",
     "render_decision_packet_summary",
     "render_decision_record_summary",
     "render_handoff_markdown",
@@ -713,6 +775,7 @@ __all__ = [
     "required_field_names",
     "resolve_format",
     "review_exit_code_for",
+    "run_attestation",
     "run_decision_packet",
     "run_decision_record",
     "run_inbox_scan",
@@ -726,6 +789,7 @@ __all__ = [
     "template_columns",
     "template_output_name",
     "unknown_contract_fields",
+    "verify_attestation",
     "verify_decision_packet",
     "verify_decision_record",
     "verify_intake_plan_inputs",

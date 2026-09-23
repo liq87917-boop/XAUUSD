@@ -1231,6 +1231,62 @@
 
 ---
 
+### TD-63 材料级人工核验凭证的剩余边界（P0，2026-09-23，GOLD-028）
+
+- **已交付**（`src/evidence/human_verification_attestation.py` +
+  `scripts/evidence_human_verification_attestation.py`）：把 GOLD-027 的**结构完整预检**进一步
+  转换为**可审计的材料级人工核验凭证** —— 对每个必核验材料记录受控决策
+  （`VERIFIED` / `REJECTED` / `NEEDS_CHANGES`）、稳定 `reason_code`、显式 `reviewer` label、
+  带时区 `reviewed_at` 与**独立 `evidence_reference`**，并**硬绑定**当前候选包 fingerprint +
+  GOLD-027 handoff / manifest 内容身份 + scope；
+- **版本化契约**（`attestation_schema()` / `--schema`）：`kind` + `schema_version=1` +
+  `contract_version=human-verification-attestation-v1` + 必核验材料清单（**只引用** GOLD-027
+  `MATERIAL_SPECS` 的非 Gate 材料，覆盖 authorization / source / time_semantics /
+  published_at / collected_at / effective_at / availability_oos，Author 额外 author_identity）
+  + 决策词表 + 稳定原因码 + 核验输入文件格式 + `all_required_verified` 的诚实语义；**不新增、
+  不降低**任何资格门槛；
+- **内容寻址**（`attestation_id`）：由「硬编码策略块 + `revision` / `supersedes` + package 绑定
+  + 逐材料核验」派生；**不含**审计时间（换 `--as-of` 不改变 id），同输入 → byte-stable；
+- **关键保证（已由 59 项测试锁定）**：
+  1. **材料级核验 ≠ 资格通过**：`all_required_verified=true` 只表示「非 Mock / 模板 / 示例 /
+     合成、GOLD-027 `preflight_pass=true`、每个必核验材料都有带独立引用的 `VERIFIED`」；
+     `evidence_qualified` / `data_qualification_passed` / `phase_transition_allowed` /
+     `advance_allowed` / `l3_l4_auto_advance_allowed` 恒 false、`blocker_active` /
+     `human_gate_required` / `gate_blocked` 恒 true（**硬编码**，文档与机器字段都写明）；
+  2. **对不可核验材料声明 `VERIFIED` 一律 fail-closed**：Mock / 模板 / 合成 →
+     `NON_QUALIFYING_PACKAGE`；`preflight_pass=false` → `PREFLIGHT_NOT_PASSED`；材料状态不是
+     `HUMAN_VERIFICATION_REQUIRED` → `MATERIAL_NOT_VERIFIABLE`；缺材料决策 →
+     `MATERIAL_DECISION_MISSING` 且 `all_required_verified=false`；Gate 材料不可被核验；
+  3. **漂移不继承**：核验输入声明的 fingerprint / handoff 内容身份 / scope 与**当前**候选目录
+     不一致 → `PACKAGE_FINGERPRINT_MISMATCH` / `HANDOFF_CONTENT_MISMATCH` / `SCOPE_MISMATCH`；
+     `verify` 模式重新绑定当前 package，检测 `PACKAGE_FINGERPRINT_DRIFT` /
+     `PACKAGE_CONTENT_DRIFT` / `HANDOFF_CONTENT_DRIFT` / `PREFLIGHT_DRIFT` 与缺引用；
+  4. **防伪 / 防静默改写**：`verify` 重新推导 `attestation_id` 并逐项复核安全字段、计数 /
+     合取自洽、无证据时间键，任一被改写 → `ATTESTATION_TAMPERED`；同 id 幂等，内容不同必须显式
+     `--revision >= 2 --supersedes <attestation_id>`；
+  5. **零证据改写 / 零伪造时间**：候选证据内容与 mtime 零变化；`reviewed_at` naive / 未来、
+     疑似凭据、未知字段、重复材料、裸文件名引用一律拒绝；除审计时点与人工 `reviewed_at` 外
+     报告中没有任何时间戳，候选文件 mtime 绝不出现；
+  6. **只读**：源码级守卫断言模块与 CLI 只 import 既有模块且不调用
+     `open` / `os.stat` / `getmtime` / `utime` / 网络 / `intake_evidence` / 直接 `write_text`
+     （CLI 唯一写开关是显式 `--out`，复用 `atomic_write_text` 原子写；默认零写入）；
+- **剩余边界（本条目跟踪）**：
+  1. 库内仍**没有**足量真实授权证据，`PHASE3_3_DATA` 保持 `active=true`
+     （TD-43/44/45/47~63 中的资格项均未解除）；凭证**不解除** blocker，也不采集数据；
+  2. 凭证**不是**资格判定器：CLI 没有任何 `qualify` / `approve` / `advance` 参数
+     （未知参数一律退出 `2`），不写 `PROJECT_STATE`、不签发 L3 / L4 review；
+  3. 材料级判定仍只消费**既有** inbox 预检的字段级事实：行级具体原因码未透传到材料级，
+     "存在被隔离行"统一按 `PRESENT_UNVERIFIED` 报告（fail-closed）；
+  4. `reviewed_at` / `reviewer` 的**真实性**（谁核验、何时核验、引用是否真的支撑该结论）
+     永远属于人工与 L3 责任：凭证只保证"人工显式声明 + 可追溯 + 不可静默改写"；
+  5. 未实现单实例锁（与 GOLD-016 不同）：并发写入依赖原子写与既有凭证冲突检查；
+     如需强并发保证，可在后续任务中引入锁；
+- **不变量**：凭证永不采集、永不写库、永不联网、永不用当前时间 / 文件 mtime / 抓取时间 /
+  推断值填补 `published_at` / `collected_at` / `effective_at` / `available_at` / OOS 证据；
+  永不因代码完成或测试通过解除 `PHASE3_3_DATA` 或推进 L3 / L4。
+
+---
+
 ## 4. 已知限制（设计取舍，非缺陷）
 
 | 项 | 说明 | 依据 |
@@ -1290,6 +1346,8 @@
 | 包边界惰性导出与 Import-Order 门禁（2026-09-23，GOLD-018） | 修复 GOLD-017 任务外发现、纯净 HEAD 复现的 `src.monitoring` ↔ `src.evidence` **包初始化期循环导入**（`import src.monitoring` 后再进入 `src.evidence` 链 → `ImportError: cannot import name 'BatchQuantification' from partially initialized module 'src.monitoring.evidence_readiness'`；反向顺序却正常）：`src/evidence/__init__.py`（376 个公开名）/ `src/monitoring/__init__.py`（39 个公开名）改为 **PEP 562 惰性导出**（模块级 `__getattr__` + `__dir__`，包初始化阶段不加载任何子模块），惰性表只登记 `公开名 -> 定义子模块`（别名单独登记，**不复制**任何业务类 / 阈值 / 枚举 / 常量），`__all__` 逐字节未变、既有 `from src.evidence import X` / `from src.monitoring import Y` / `from src.<pkg> import <子模块>` 用法**完全兼容**；新增 **56 项**测试（单元 15 + 集成 41：9 种导入顺序的 fresh-subprocess 回归 + "包初始化不拉入对方包" + 公开名 `is` 同源 + 源码级禁止 eager 子模块导入 + 13 个证据 / 观测 CLI 的 import 与 `--help` 冒烟并以空 cwd 断言零写入）；登记 **TD-60**；**未改**任何资格算法 / 阈值 / 证据契约 / 安全字段，`PHASE3_3_DATA` **保持 BLOCKED** |
 | 证据缺口只读诊断（2026-09-23，GOLD-026） | 新增 `src/monitoring/evidence_gap_diagnostic.py`（**只读**四态缺口诊断：`ReadinessClass`（`CODE_READY` / `EVIDENCE_MISSING` / `HUMAN_VERIFICATION_REQUIRED` / `GATE_BLOCKED`）/ `DiagnosticItem`（key / category / scope / readiness / machine_fact / human_next_step / current / required / missing_fields / missing_count / references / 证据时间窗，`mock_or_template_qualifies` 恒 false）/ `ManifestFact` / `ManifestDiagnostic`（复用 GOLD-011 `scan_inbox` 的**只读** manifest 字段级事实，`qualifies` 恒 false）/ `HumanStep` + `MANDATORY_HUMAN_STEPS`（6 步固定清单，阈值文本由 `src.alpha.evidence_gate` 常量格式化）/ `EvidenceGapDiagnostic`（顶层 `readiness` 恒 `GATE_BLOCKED`；`blocker_active` / `human_gate_required` 恒 true；`data_qualification_passed` / `phase_transition_allowed` / `advance_allowed` / `l3_l4_auto_advance_allowed` 恒 false，**硬编码**）/ `build_gap_diagnostic`（纯函数，25 个诊断项、确定性排序）/ `build_manifest_diagnostic`（纯映射）/ `load_gap_diagnostic`（只读台账 + 可选**本地** `--inbox-dir` 预检，缺目录 fail-closed）/ `render_gap_diagnostic_markdown`；**复用而不复制** readiness（GOLD-006）/ handoff（GOLD-008）/ inbox（GOLD-011）/ `evidence-intake-v1` 字段与原因码 / `src.alpha.evidence_gate` 阈值，**不新增、不降低**任何阈值，也未改动既有 evidence 模块与 `src/alpha/**`）+ `scripts/evidence_gap_diagnostic.py`（`--inbox-dir` / `--as-of` / `--json` / `--out`（唯一写开关，复用 `atomic_write_text` 原子写）；**没有**任何 intake / 写库 / `qualify` / `approve` / `advance` 参数；退出码 `0` 无实质证据缺口（gate 仍 BLOCKED）/ `2` 参数或输入错误 / `4` `--out` 不可写 / `5` 仍有实质证据缺口（预期 BLOCKED））+ `src/monitoring/__init__.py` 惰性导出 21 个新名字；**不伪造缺失字段**：缺失时只报告字段名与缺口计数，测试以正则断言"报告中除 `as_of` 外没有任何时间戳"并断言候选文件 mtime（2019-01-02）**绝不出现**；源码级守卫断言模块与 CLI 只 import 既有模块且不调用 `open` / `os.stat` / `getmtime` / `utime` / 网络 / `intake_evidence` / `commit`；新增 **33 项**测试（单元 25 + 集成 8，含"量化门槛全达标仍 BLOCKED 且只剩人工核验"、"合成候选永不 qualify"、"缺 `--inbox-dir` fail-closed"、"默认零写入 / 数据库零变化"），并把新 CLI 登记进 `tests/integration/test_evidence_cli_smoke.py`（13 个 `scripts/evidence_*.py`）；登记 **TD-61**；**未解除** `PHASE3_3_DATA`（诊断 ≠ 资格，Phase 切换仍须 L3 人工 Gate） |
 | 人工证据 Intake Handoff 预检（2026-09-23，GOLD-027） | 新增 `src/evidence/intake_handoff.py`：**版本化** intake handoff schema + **纯本地只读**预检，把 GOLD-026 的缺口诊断转成"业务人员按单一契约提交真实授权 Author / News 材料"的可执行 handoff。`intake_handoff_schema()`（`kind=phase33_evidence_intake_handoff` / `schema_version=1` / `contract_version=evidence-intake-v1` / 目录契约（沿用 GOLD-011 inbox：`manifest.json` 声明 `files[path,sha256]`）/ Author + News 必需契约字段（`required_field_names`，Author 额外 `author_name` / `external_account_id`）/ 10 条材料契约 / 6 条独立时间语义要求 / 状态词表 / `preflight_pass` 的诚实语义；阈值**只引用** `src.alpha.evidence_gate`（经 `handoff.thresholds`），**不新增、不降低**任何门槛）；`MaterialSpec` + `MATERIAL_SPECS`（`evidence_records` / `source_identity` / `authorization_declaration` / `time_semantics` / `published_at` / `collected_at` / `effective_at` / `availability_oos` / `author_identity` / `phase33_data_gate`，category 与 GOLD-026 缺口分类同词表）；`IntakeStatus` **五态**（`MISSING` / `PRESENT_UNVERIFIED` / `HUMAN_VERIFICATION_REQUIRED` / `NON_QUALIFYING` / `GATE_BLOCKED`）+ `HandoffMaterial` / `PackageHandoff` / `IntakeHandoffDocument`（`preflight_pass` 只表示**结构完整**，`evidence_qualified` / `data_qualification_passed` / `phase_transition_allowed` / `advance_allowed` / `l3_l4_auto_advance_allowed` 恒 false，`blocker_active` / `human_gate_required` / `gate_blocked` 恒 true，**硬编码**；每个材料带 `present_fields` / `missing_fields` / `machine_fact` / `human_next_step`，`counts_toward_eligibility` 恒 false）+ `build_intake_handoff`（纯函数）/ `load_intake_handoff`（只读 `scan_inbox`；缺目录 fail-closed）/ `render_intake_handoff_markdown` / `unknown_contract_fields`（机器可检查"只引用既有契约字段"）+ `scripts/evidence_intake_handoff.py`（`--schema` 打印契约 / `--inbox-dir`（除 `--schema` 外必填）/ `--as-of` / `--json` / `--out`（**唯一**写开关，复用 `atomic_write_text`）；**没有**任何 intake / 写库 / `qualify` / `approve` / `advance` 参数；退出码 `0` 至少一个包结构完整（**不是**资格通过）/ `2` 参数或输入错误 / `4` `--out` 不可写 / `5` 没有任何结构完整的包（预期 BLOCKED））+ `src/evidence/__init__.py` 惰性导出 20 个新名字；**不伪造时间事实**（缺 `time_semantics` / `available_at` 时只报字段名与人工下一步，测试断言"除 `as_of` 外无任何时间戳"且 mtime 2019-01-02 绝不出现）+ **只读**（源码级禁 `open` / `os.stat` / `getmtime` / `utime` / 网络 / `intake_evidence` / 直接 `write_text`；测试断言候选包内容与 mtime 零变化）；新增 **45 项**测试（单元 32 + 集成 13，含 `--schema` 契约、Mock / 缺授权 / 缺独立时间语义 / 缺独立可用证据全部 fail-closed、"结构完整 ≠ 资格通过"、fresh subprocess 空 cwd 零写入），并把新 CLI 登记进 `tests/integration/test_evidence_cli_smoke.py`（14 个 `scripts/evidence_*.py`）；登记 **TD-62**；**未解除** `PHASE3_3_DATA`（预检 ≠ 资格，Phase 切换仍须 L3 人工 Gate） |
+| 材料级人工核验凭证（2026-09-23，GOLD-028） | 新增 `src/evidence/human_verification_attestation.py`：**版本化** Human Verification Attestation + **纯本地只读**材料级人工核验，把 GOLD-027 的**结构完整预检**进一步转换为「每项关键材料是否被人工核验、由谁核验、依据哪条独立引用」的可审计凭证。`attestation_schema()`（`kind=phase33_human_verification_attestation` / `schema_version=1` / `contract_version=human-verification-attestation-v1` / 必核验材料清单**只引用** GOLD-027 `MATERIAL_SPECS` 的非 Gate 材料（覆盖 authorization / source / time_semantics / published_at / collected_at / effective_at / availability_oos，Author 额外 author_identity）/ 决策词表 `VERIFIED` / `REJECTED` / `NEEDS_CHANGES` / 稳定原因码 / 核验输入文件格式 / `all_required_verified` 的诚实语义；**不新增、不降低**任何门槛）；`VerificationDecision` + `MaterialDecision` + `VerificationInput`（`load_verification_input`：未知字段 / 重复材料 / 未知材料 / Gate 材料 / 非受控决策 / 非稳定 `reason_code` / 非独立引用（只接受 `https://` 或 `docs/legal/`）/ 疑似凭据 / naive 或未来 `reviewed_at` 一律 fail-closed）+ `MaterialAttestation` / `HumanVerificationAttestation`（内容寻址 `attestation_id` 由「硬编码策略块 + `revision` / `supersedes` + package 绑定 + 逐材料核验」派生、**不含**审计时间；`evidence_qualified` / `data_qualification_passed` / `phase_transition_allowed` / `advance_allowed` / `l3_l4_auto_advance_allowed` 恒 false、`blocker_active` / `human_gate_required` / `gate_blocked` 恒 true，**硬编码**）+ `build_attestation`（纯函数；核验输入声明的 fingerprint / handoff 内容身份 / scope 与**当前**候选目录不一致 → `PACKAGE_FINGERPRINT_MISMATCH` / `HANDOFF_CONTENT_MISMATCH` / `SCOPE_MISMATCH`；对 Mock / 合成 / `preflight_pass=false` / 非 `HUMAN_VERIFICATION_REQUIRED` 材料声明 `VERIFIED` → `NON_QUALIFYING_PACKAGE` / `PREFLIGHT_NOT_PASSED` / `MATERIAL_NOT_VERIFIABLE` fail-closed）+ `run_attestation`（默认零写入；只有显式 `out_path` 才先做既有凭证冲突检查（同 id 幂等，否则必须显式 `supersedes` + 更大 `revision`）再原子落盘；拒绝把凭证写进 `inbox_dir` 或覆盖核验输入）+ `verify_attestation`（纯只读**防伪核验**：重新推导 `attestation_id`、复核安全字段 / 计数 / 合取自洽 / 无证据时间键，任一被改写 → `ATTESTATION_TAMPERED`；重新绑定**当前**候选目录并检测 `PACKAGE_FINGERPRINT_DRIFT` / `PACKAGE_CONTENT_DRIFT` / `HANDOFF_CONTENT_DRIFT` / `PREFLIGHT_DRIFT` 与缺引用）+ `handoff_content_sha256` / `package_content_sha256` / `render_attestation_summary` / `exit_code_for` + `scripts/evidence_human_verification_attestation.py`（`--schema` / `--inbox-dir` / `--package` / `--verification` / `--as-of` / `--revision` / `--supersedes` / `--json` / `--out`（**唯一**写开关，复用 `atomic_write_text`）/ `--verify-attestation`（纯只读模式）；**没有**任何 intake / 写库 / `qualify` / `approve` / `advance` 参数；退出码 `0` 全部必核验材料已 `VERIFIED`（**不是**资格通过）/ `2` 参数或输入错误 / `3` 路径或输出不可用 / `4` 漂移 / 篡改 / 冲突 / 非法人工输入（fail-closed，零写入）/ `5` 未全部核验或不可核验（预期 BLOCKED））+ `src/evidence/__init__.py` 惰性导出 34 个新名字；**不伪造时间事实**（`reviewed_at` / `attested_at` 只是审计操作时间；除审计时点与人工 `reviewed_at` 外报告无任何时间戳，测试断言候选文件 mtime（2019-01-02）绝不出现）；源码级守卫断言模块与 CLI 只 import 既有模块且不调用 `open` / `os.stat` / `getmtime` / `utime` / 网络 / `intake_evidence` / 直接 `write_text`；新增 **59 项**测试（单元 41 + 集成 18，含「材料级核验 ≠ 资格通过」「缺授权证明 / 缺独立时间语义 / 缺 availability-OOS 全部 fail-closed」「Mock / 模板永不 qualify」「package / handoff 内容漂移使旧凭证失效」「凭证篡改 / 安全字段削弱 / 伪造 `all_required_verified` 全部 fail-closed」「重复幂等 + 显式 revision / supersedes」「候选证据内容与 mtime 零变化」），并把新 CLI 登记进 `tests/integration/test_evidence_cli_smoke.py`（15 个 `scripts/evidence_*.py`）；登记 **TD-63**；**未解除** `PHASE3_3_DATA`（材料级人工核验 ≠ 资格，Phase 切换仍须 L3 人工 Gate） |
+
 
 
 
