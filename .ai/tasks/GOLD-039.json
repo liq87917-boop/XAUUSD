@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-039",
+  "type": "CONTROL_PLANE_RESULT_TERMINAL_CONSISTENCY",
+  "title": "建立 Result 顶层状态与 attempt 终态一致性门禁",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-038"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "修复并防止 result 顶层 status=completed 但最终 attempt.finish_reason=aborted/failed 等语义矛盾，让 GPT Review 与 Orchestrator 只消费自洽的终态事实；不得借此改变业务资格或 Planner 权限。",
+  "requirements": [
+    "定位 GOLD-035 暴露的 completed + final attempt finish_reason=aborted 矛盾产生路径，优先修正 Orchestrator result 写入/终态归一逻辑，而不是对单个历史 result 做静默篡改。",
+    "建立确定性 terminal consistency validator：completed 只能对应成功完成语义；blocked/failed/provider-fatal/retry-exhausted 等顶层状态必须与最终 attempt 的 finish_reason/failure_class/failure_code 组合自洽；未知组合 fail-closed。",
+    "把一致性检查接入 GPT review binding/backlog 或其共享客观事实层，使 formal review 遇到矛盾 result 时标记 facts_complete=false 并给出稳定 reason code，不得猜测或自动签发 PASS。",
+    "增加回归测试覆盖 completed+aborted、completed+failed、blocked+completed、正常 completed、provider fatal、timeout/retry exhausted，以及历史 result 只读兼容路径。",
+    "不得由 Executor 修改 GPT_REVIEW_LEDGER、PROJECT_STATE 或生成后续 task；不得把历史异常自动改写成通过。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "PROGRESS_LOG.md", "TECH_DEBT.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行已批准任务。",
+    "历史 result 默认只读；任何修复必须通过代码/门禁阻止未来矛盾并把既有矛盾显式暴露给 GPT。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "未来不再能生成 status=completed 但最终 attempt 为 aborted/failed 的自相矛盾 result；矛盾历史事实被 review tooling fail-closed 暴露。",
+    "正常成功、blocked、provider fatal 与 retry exhausted 路径均有明确且稳定的终态语义，不破坏既有 rolling queue/Git 恢复行为。",
+    "全量 pytest/ruff/mypy 通过；Phase 3.3 blocker、L3/L4、交易安全边界和 GPT 独占规划权不变。"
+  ]
+}
