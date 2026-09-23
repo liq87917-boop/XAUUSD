@@ -1,0 +1,65 @@
+{
+  "task_id": "GOLD-020",
+  "type": "AUTOMATION_INFRA",
+  "title": "加固 Git Push 冲突恢复与任务结果语义一致性",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-019"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "针对 GOLD-016 实际出现的 non-fast-forward push 冲突和成功任务 finish_reason=aborted 元数据不一致，完善 Orchestrator 的 Git 恢复状态机与结果语义，确保已完成任务不会重跑、失败同步不会放行下一任务、raw Cline 原因与 Orchestrator 最终结论可同时审计。",
+  "recovery_context": [
+    "GOLD-016 日志：任务/validation/commit 均成功，首次 push 因 remote contains work 被拒；下一轮 pull --rebase 后 push 成功，且没有重新执行任务。这条恢复路径实际有效，需要回归测试锁定。",
+    "GOLD-016 result 同时出现 status=completed、cline_exit_code=0、全部 validation=0，但 raw finish_reason=aborted；这不是任务失败，却造成结果语义歧义。",
+    "当前 process_task 的 success 依据为 cline returncode==0 且 validations_passed；build_attempt_record 直接把 Cline raw finish_reason 写到 finish_reason。"
+  ],
+  "requirements": [
+    "明确区分 raw Cline 元数据与 Orchestrator 判定：保留原始 finish reason（例如 cline_finish_reason_raw），同时提供稳定 execution_outcome/normalized_finish_reason；最终 completed 必须与 Orchestrator success 判定一致，不能同时让唯一 finish_reason 表面显示 aborted。",
+    "历史 result 不回写；仅新结果使用新增字段/语义，解析旧 result 仍兼容。",
+    "为 push-pending 状态增加明确可审计语义：本地 result=completed 后若 push 失败，不得重新调用 Cline；下一轮必须先 Git sync/rebase + retry push，只有同步成功后才允许 rolling queue 执行后续任务。",
+    "对 non-fast-forward/fetch-first 场景建立 mock 回归测试：首次 push fail -> pull --rebase -> second push success；断言 process_task/Cline 不被重复调用。",
+    "对 pull --rebase conflict/网络失败建立 fail-closed 测试：不得执行下一个 task，保留本地 commit/result，下一轮继续恢复。",
+    "对 already-ahead=0、ahead>0、ahead unknown 路径保留兼容；不得 force-push，不得 reset/drop 已完成 commit。",
+    "日志明确区分 completed locally / push pending / remote synced / rolling queue continue，避免把 Git 同步问题误报为任务 validation 失败。",
+    "补充 orchestrator 单元测试；测试不得操作真实 remote。",
+    "更新 DEVELOPMENT_PROTOCOL/PROGRESS_LOG 或自动化文档说明 result 字段和 push recovery 契约。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/**",
+      "tests/unit/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      "src/**",
+      "database/**"
+    ]
+  },
+  "constraints": [
+    "禁止 force push、reset --hard 已完成 commit、静默丢弃 result/commit。",
+    "Git 测试必须使用 mock/fake，不访问真实 GitHub。",
+    "不得改变业务 Phase、数据资格 Gate、交易开关。",
+    "本任务修改的 Orchestrator 代码允许在下一次手工重启后生效；不得自杀式重启当前进程。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；当前 Orchestrator 负责本任务自身提交。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "新 result 同时保留 raw Cline finish reason 与一致的 Orchestrator normalized outcome；成功任务不再出现唯一 finish_reason=aborted 的歧义。",
+    "mock non-fast-forward 恢复测试证明：首次 push 失败后下一轮 rebase+push，Cline 不重跑且后续 task 只在远端同步成功后启动。",
+    "sync/rebase 失败严格停线且不丢本地 commit/result；无 force push。",
+    "全量 pytest、ruff、mypy 通过；业务 Phase/安全 Gate 无变化。"
+  ]
+}
