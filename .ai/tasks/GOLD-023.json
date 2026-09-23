@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-023",
+  "type": "AUTOMATION_INFRA",
+  "title": "建立 GPT Planner 只读项目快照与职责边界契约",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-022"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "为 GPT 作为唯一 Planner/Reviewer/Architect 建立机器可读、确定性的项目快照与职责边界；Cline/DeepSeek 只消费已批准 task，不具备规划、Phase 决策或自动补队列权限。",
+  "requirements": [
+    "定义并实现只读 planner snapshot/diagnostic，汇总 PROJECT_STATE、非终态 task、依赖、result 终态、最近 reviewed/completed 指针和安全 Gate；输出必须确定、可审计且不修改项目状态。",
+    "在 DEVELOPMENT_PROTOCOL 明确 GPT=Planner/Reviewer/Architect，Cline/DeepSeek=Executor；Executor 禁止生成 follow-on task、修改 PROJECT_STATE、决定 Phase、放宽 acceptance 或跨 L3/L4。",
+    "增加一致性诊断：PROJECT_STATE 指针落后于 results、queue 声明与实际非终态不一致、未知 task/result status、Gate 不一致时报告问题但不自行修复。",
+    "提供单元测试覆盖本轮实际出现的 PROJECT_STATE 落后（state 仍 GOLD-017/018 而 results 已到 GOLD-020）场景。",
+    "不得接入新的模型/供应商 API，不得把 GPT 规划权下放到本地模型；本任务只建设 handoff/diagnostic 契约。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "scripts/**", "tests/unit/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", "src/**", "database/**"]
+  },
+  "constraints": [
+    "Planner snapshot 必须只读；不得自动改写 PROJECT_STATE/tasks/results。",
+    "Cline/DeepSeek 永远不得成为 planner 或 reviewer。",
+    "不得改变 Phase 3.3 blocker、L3/L4 Gate、LIVE_TRADING 或外部订单开关。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 与 Executor 的职责边界有机器可测试契约，Executor 无 follow-on planning 权限。",
+    "只读 snapshot 能发现 state/result/queue 漂移并给 GPT 提供确定性输入，不自行修复或跨 Gate。",
+    "全量 pytest/ruff/mypy 通过；业务 Phase 与安全 Gate 不变。"
+  ]
+}
