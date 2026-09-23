@@ -1,0 +1,39 @@
+{
+  "task_id": "GOLD-021",
+  "type": "AUTOMATION_INFRA",
+  "title": "加固 start_agent 启动前自更新与版本可见性",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-020"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "消除本轮实际出现的‘Python 进程启动后才 pull，导致磁盘已更新但运行中的 Orchestrator 仍是旧代码’问题，使 start_agent 在加载 Python 前先安全同步 cline-agent，并把实际运行版本/Provider 清晰打印出来。",
+  "requirements": [
+    "审计 start/start_agent.bat 与 orchestrator 启动顺序；Git 同步必须发生在 Python import/进程启动之前。",
+    "启动前仅允许安全的 fast-forward/rebase 兼容同步；dirty worktree、冲突、网络失败必须 fail-closed，禁止覆盖用户修改。",
+    "启动日志打印 branch、HEAD short SHA、Cline provider/model 与 bootstrap sync 结果，便于确认当前进程实际加载的版本。",
+    "保持 DeepSeek provider hard-pin 与现有 provider fail-fast 语义，不泄露 API key。",
+    "补充 Windows launcher/bootstrap 可测试逻辑或等价回归测试，证明 pull 后加载的是新版本而不是旧进程内存。",
+    "不得由 Cline/DeepSeek规划或生成后续任务。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["start/**", "orchestrator/**", "tests/unit/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", "src/**", "database/**"]
+  },
+  "constraints": [
+    "禁止 force push、reset --hard、静默清理 dirty worktree。",
+    "不得改变业务 Phase、数据资格 Gate、LIVE_TRADING 或外部订单开关。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；提交仍由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "启动顺序明确为 bootstrap sync -> Python/Orchestrator load；不存在‘pull 成功但当前进程仍运行旧代码’窗口。",
+    "dirty/conflict/sync failure 均安全停线且不丢本地修改。",
+    "日志可确认实际 HEAD 与 DeepSeek provider；全量 pytest/ruff/mypy 通过。"
+  ]
+}
