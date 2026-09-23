@@ -1,0 +1,49 @@
+{
+  "task_id": "GOLD-016",
+  "type": "BLOCKER_TOOLING",
+  "title": "建立 Phase 3.3 L3 Human Gate 决策记录与防伪审计闭环",
+  "max_attempts": 3,
+  "goal": "在 PHASE3_3_DATA 继续 BLOCKED 的前提下，为 GOLD-015 的 deterministic decision packet 增加纯本地、显式人工输入、内容绑定且 fail-closed 的 L3 Gate decision record。该记录只能证明某个具体 packet_id 收到明确的人工作出 approve/reject/needs_changes 决策，不得自行生成批准、不得自动判定 data qualification PASS、不得修改 PROJECT_STATE、不得切换 Phase。",
+  "recovery_context": [
+    "GOLD-015 已 completed 并通过工程验收：2282 passed / 1 skipped，ruff 全通过，mypy 168 source files 全通过；完成提交 1059635c8247918ae31d3f7eecf77338f3e79f49。",
+    "GOLD-015 已提供 deterministic/redacted/content-addressed L3 decision packet，并将 submit_to_l3_human_gate 与 data_qualification_passed/phase_transition_allowed 严格分离。",
+    "真实 PHASE3_3_DATA 仍 BLOCKED；当前仓库仍无足量真实授权 Author/News evidence，任何 Mock/模板/示例仅允许测试控制流。"
+  ],
+  "requirements": [
+    "先阅读 .ai/DEVELOPMENT_PROTOCOL.md、.ai/PROJECT_STATE.json、GOLD-015 task/result、TECH_DEBT.md、PROGRESS_LOG.md、README.md 和最近 commits/diff；只处理 PHASE3_3_DATA blocker-facing tooling。",
+    "复用 GOLD-015 decision packet 的 packet_id、reason codes、redaction、atomic write 与 single-instance lock 契约；不得复制或降低资格规则。",
+    "提供纯本地 L3 decision record API/CLI；人工必须显式提供 decision=approve/reject/needs_changes，并绑定具体 packet_id 与当前 packet 内容摘要。默认只读预检，只有显式 --out 才原子写记录。",
+    "只有 GOLD-015 packet 本身 submit_to_l3_human_gate=true 且完整性验证通过时才允许记录 approve；packet BLOCKED/stale/tampered/mismatch 时 approve 必须 fail-closed。reject/needs_changes 可被记录但不得改变资格状态。",
+    "记录必须区分 human_decision_recorded、human_decision、packet_verified、data_qualification_passed、phase_transition_allowed；本工具自身不得把后两项置为 true，也不得修改 .ai/PROJECT_STATE.json。",
+    "人工身份只接受显式、非敏感 operator/reviewer label，不采集凭据；reason/note 必须脱敏并限制长度。不得把 decision_at/generated_at/file mtime 当作 published_at/collected_at/effective_at/availability/OOS 证据。",
+    "相同 packet + 相同人工决策重复生成必须幂等/byte-stable；packet_id、decision、reviewer 或受约束 note 变化必须产生新 record_id；冲突覆盖必须显式 revision/supersedes，不得静默改写历史。",
+    "任一 packet 缺失、损坏、stale、packet_id/content digest 不一致、禁止字段出现或并发锁冲突时 fail-closed，并输出稳定 reason code；失败路径零写入。",
+    "新增 unit/integration tests，使用临时目录/Mock/SQLite 且禁止联网；Mock 仅测试控制流，必须断言不会被宣称为真实数据资格。覆盖 approve gate、reject/needs_changes、tamper/stale、幂等、revision、脱敏、原子写、并发与 fail-closed。",
+    "更新 README、TECH_DEBT、PROGRESS_LOG，明确这是 L3 人工决策审计层而非 Phase transition executor；真实 evidence 不足时 PHASE3_3_DATA 必须继续 BLOCKED。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["src/evidence/**", "src/common/redaction.py", "scripts/evidence_*.py", "tests/unit/**", "tests/integration/**", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md", ".gitignore"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".env", "database/migrations/**", "src/alpha/**"]
+  },
+  "constraints": [
+    "不新增第三方依赖或 migration/schema。",
+    "不联网、不接第三方推送、不自动修改 OS 计划任务；默认零数据库写入。",
+    "不新增或启用未授权数据源，不绕过授权、robots、证书或安全限制。",
+    "不用 Mock/模板/示例数据宣称真实数据资格，不降低资格阈值或 human gate。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号，不启用实盘；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得弱化。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "存在纯本地 deterministic L3 decision record builder/verifier，显式绑定 GOLD-015 packet_id/content digest 与人工 decision。",
+    "approve 只有在 packet 可提交 L3 且完整性通过时可记录；blocked/stale/tampered/mismatch packet 的 approve 必须 fail-closed。",
+    "记录幂等、可 revision/supersedes、脱敏且不把操作时间冒充证据时间；冲突不会静默覆盖历史。",
+    "decision record 不自动宣称 data qualification PASS，不修改 PROJECT_STATE/blocker，不执行 Phase transition。",
+    "默认不写数据库、不联网、不解除 blocker、不进入 Phase 3.4；真实资格与 Phase transition 仍需独立复核和明确 L3 人工 Gate。",
+    "全量 pytest、ruff、mypy 在项目 .venv 全部通过，README/TECH_DEBT/PROGRESS_LOG 同步且明确 PHASE3_3_DATA 仍 BLOCKED。"
+  ]
+}
