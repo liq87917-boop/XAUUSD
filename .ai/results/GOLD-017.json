@@ -1,0 +1,75 @@
+{
+  "task_id": "GOLD-017",
+  "title": "建立真实 Evidence Package 本地 Manifest Builder 与安全交付入口",
+  "status": "completed",
+  "finished_at": "2026-09-23T09:16:39+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    "?? scripts/evidence_package.py",
+    "?? src/evidence/package_builder.py",
+    "?? tests/integration/test_evidence_package_builder_integration.py",
+    "?? tests/unit/test_evidence_package_builder.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md          | 141 ++++++++++++++++++++++++++++++++++++++++++++++-\n README.md                | 108 +++++++++++++++++++++++++++++++++---\n TECH_DEBT.md             |  70 +++++++++++++++++++++++\n src/evidence/__init__.py |  95 ++++++++++++++++++++++++++++++-\n 4 files changed, 404 insertions(+), 10 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T08:42:54+08:00",
+      "finished_at": "2026-09-23T09:16:39+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 212,
+      "duration_ms": 1739751,
+      "usage": {
+        "inputTokens": 54579512,
+        "outputTokens": 186077,
+        "cacheReadTokens": 54226304,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.32730631199999977
+      },
+      "cline_final_text": "Submission recorded (verified): # GOLD-017 完成报告（BLOCKER_TOOLING · PHASE3_3_DATA 仍 BLOCKED）\n\n## 1. 完成内容\n在 `PHASE3_3_DATA` 继续 BLOCKED 的前提下，补齐「业务方如何把真实授权 Author/News 文件制作成 GOLD-011 可直接扫描的 evidence package」的**纯本地 manifest builder 入口**，只做机械整理、绝不推断：\n\n- **`src/evidence/package_builder.py`（纯本地 / 零网络 / 零数据库 / 零新增依赖）**\n  - 元数据（`evidence_type` 大小写敏感 / `source` / `authorization_reference` / `time_semantics` / `availability_semantics` / `historical_oos_applicable` 严格布尔）与文件清单**必须人工显式给出**；绝不从文件名 / 正文 / URL / mtime / 当前时间推断授权与时间语义；\n  - manifest 字段 / 允许键 / 必填项 / 格式词表**复用** GOLD-011 的 `MANIFEST_REQUIRED_FIELDS` / `ALLOWED_MANIFEST_KEYS` / `FILE_ENTRY_REQUIRED_FIELDS` / `SUPPORTED_FILE_FORMATS` / `INBOX_SCHEMA_VERSION` 与 `evidence-intake-v1`；引用校验复用 `valid_reference`、逐行预检复用 `read_input_file` + `assess_row`（与 GOLD-005/011 同源）；另加内部契约自检；\n  - 每文件按**原始字节**算 SHA-256、`files` 确定性排序、同输入 **byte-stable**；manifest **无任何时间字段**；\n  - fail-closed：绝对路径 / `..` / 多级路径 / 符号链接（文件与目录均不跟随）/ 目录 / `manifest.json` 自引用 / 未支持扩展 / 重复与大小写冲突 / 包内未声明文件 / 示例合成名称 / 敏感值（凭据键名、疑似 blob、可被脱敏规则命中的取值，错误信息绝不回显取值）；\n  - 默认 **dry-run 零写入**；`--out` 是唯一写开关且**必须正好**是 `<package-dir>/manifest.json`（单实例锁 → 原子写 → 写后复读自检；锁文件**刻意放在 package 目录之外**，避免成为包内未声明文件）；既有 manifest 逐字节一致 → 幂等、内容不同 → `MANIFEST_CONFLICT`（**没有** `--force`/`--overwrite`）；\n  - 写盘前同源预检输出 `accepted`/`quarantined`/`not_oos_eligible` + 稳定原因码 + 逐文件计数；安全字段硬编码 `blocker_active=true`/`human_gate_required=true`/`requires_human_action=true`/`data_qualification_passed=false`/`phase_transition_allowed=false`/`auto_intake_allowed=false`/`writes_database=false`。\n- **`scripts/evidence_package.py`**：必填 8 项元数据 + `--file`（可重复）；`--notes`/`--out`/`--lock`/`--as-of`/`--json`；**没有**任何 intake / `--no-dry-run` / `--force` 参数；退出码 `0/2/3/4/5/6`，失败 stdout 为空、stderr 已脱敏、`--json` stdout 纯 JSON。\n- **`src/evidence/__init__.py`**：新增导出与包文档边界说明（仅新增，未改动既有行为）。\n- **文档**：README §1 新增行 + §7 新章节（含真实证据人工路径**第一步改为 package builder → inbox**）+ §10 更新；TECH_DEBT 新增 **TD-59** 与变更日志行；PROGRESS_LOG 新增**第八十一轮**（含**九步**人工路径）；并把 GOLD-016 文档中的全量 pytest 数字对齐权威结果（2488 → **2490 passed / 1 skipped**，未改历史 result artifact）。\n\n## 2. 修改 / 新增文件\n- 新增：`src/evidence/package_builder.py`、`scripts/evidence_package.py`、`tests/unit/test_evidence_package_builder.py`、`tests/integration/test_evidence_package_builder_integration.py`\n- 修改：`src/evidence/__init__.py`、`README.md`、`TECH_DEBT.md`、`PROGRESS_LOG.md`\n- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`（git status 已确认）；未执行任何 git 写操作；未新增依赖 / migration；`.gitignore` 未改（`.tmp_pytest*` 已覆盖临时产物，临时文件已清理）。\n\n## 3. 执行的测试与结果（项目 `.venv`，实测）\n- `python -m pytest tests -q` → **2557 passed, 1 skipped in 285.01s (0:04:45)**（收集 2558 项；唯一 skip = jieba 已安装分支）\n- `python -m ruff check .` → **All checks passed!**\n- `python -m mypy config database src scripts` → **Success: no issues found in 172 source files**\n- 端到端：`evidence_package`（dry-run → `--out` 原子写）→ **真实 GOLD-011 `evidence_inbox` scanner** `preflight_pass=1 / quarantined=0 / skipped=0 / digest_verified=true`；证据被追加一行后 scanner 判 `EVIDENCE_DIGEST_MISMATCH` 并隔离、builder 再次写入被 `MANIFEST_CONFLICT` 拒绝（旧 manifest 逐字节保留）；无 manifest 的裸包仍被 `MANIFEST_MISSING` 隔离；含真实子进程冒烟与真实子进程 CLI 打印（Markdown 摘要 + 写出的 manifest 仅含 GOLD-011 契约键、**无时间字段**）。\n\n## 4. 未解决问题 / 备注\n- 真实合格授权证据仍不存在 → `PHASE3_3_DATA` **保持 BLOCKED**；本工具只降低交付摩擦，不产生证据、不判断法律效力。\n- **任务外发现（未修改，遵守最小修改原则）**：`import src.monitoring`（monitoring 先于 evidence 导入）会触发**既有**循环导入 `ImportError: cannot import name 'BatchQuantification' from partially initialized module 'src.monitoring.evidence_readiness'`；已用 `git archive HEAD` 导出纯净树复现同样报错，确认**与 GOLD-017 无关**（链路全部为未改动文件，HEAD 的 `__init__.py` 同样在 `decision_packet` 处进入该链）。全量 pytest 的收集顺序不受影响（2558 项全部通过）。\n- 建议：package 位于 inbox 内时显式 `--lock <inbox 之外>/xxx.lock`，避免在 inbox 根目录留下锁文件痕迹（已在 README/TD-59 记录）。\n\n## 5. 是否满足 acceptance\n全部满足：①存在纯本地确定性 manifest builder（预览 + 文件）且产物被真实 GOLD-011 scanner 消费；②不推断授权/时间/availability/OOS、不改写原始 evidence、不联网不写库、路径与敏感值全 fail-closed；③SHA-256 来自真实字节 + 确定性排序 + 同输入 byte-stable + 不同内容不可静默覆盖；④预检与 `evidence-intake-v1`/GOLD-011 同源且只表示进入人工队列，安全字段恒为 blocker；⑤端到端证明兼容与坏包/篡改包 fail-closed；⑥全量 pytest / ruff / mypy 通过、三份文档同步、`PHASE3_3_DATA` 保持 BLOCKED。\n\n## 6. 建议下一步\n业务方按 README §7「Evidence 本地 Package / Manifest Builder」与 PROGRESS_LOG 第八十一轮**九步**路径交付真实授权数据：`evidence_package`（GOLD-017）→ `evidence_inbox` → `evidence_review` → `evidence_intake_plan` → 显式 `evidence_operator workflow --no-dry-run` → `recheck` → `evidence_intake_receipt` → `evidence_decision_packet` → `evidence_decision_record`，最终由 **L3 人工 Gate** 决定 Phase 切换（不由工具完成）。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        "?? scripts/evidence_package.py",
+        "?? src/evidence/package_builder.py",
+        "?? tests/integration/test_evidence_package_builder_integration.py",
+        "?? tests/unit/test_evidence_package_builder.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md          | 141 ++++++++++++++++++++++++++++++++++++++++++++++-\n README.md                | 108 +++++++++++++++++++++++++++++++++---\n TECH_DEBT.md             |  70 +++++++++++++++++++++++\n src/evidence/__init__.py |  95 ++++++++++++++++++++++++++++++-\n 4 files changed, 404 insertions(+), 10 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  5%]\n........................................................................ [  8%]\n........................................................................ [ 11%]\n........................................................................ [ 14%]\n........................................................................ [ 16%]\n........................................................................ [ 19%]\n........................................................................ [ 22%]\n........................................................................ [ 25%]\n........................................................................ [ 28%]\n........................................................................ [ 30%]\n........................................................................ [ 33%]\n........................................................................ [ 36%]\n........................................................................ [ 39%]\n........................................................................ [ 42%]\n........................................................................ [ 45%]\n........................................................................ [ 47%]\n........................................................................ [ 50%]\n........................................................................ [ 53%]\n........................................................................ [ 56%]\n........................................................................ [ 59%]\n........................................................................ [ 61%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 70%]\n........................................................................ [ 73%]\n........................................................................ [ 75%]\n........................................................................ [ 78%]\n........................................................................ [ 81%]\n........................................................................ [ 84%]\n........................................................................ [ 87%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 95%]\n.................................................................s...... [ 98%]\n......................................                                   [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2557 passed, 1 skipped in 279.29s (0:04:39)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 172 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

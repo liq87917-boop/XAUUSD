@@ -66,6 +66,22 @@
   ``packet_id`` / 内容摘要、判定当初的 ``approve`` 是否仍成立）；默认零写入（只有显式 ``--out``
   才先取单实例锁再原子落盘记录本身），**绝不**修改 ``PROJECT_STATE``、**绝不**解除
   ``PHASE3_3_DATA``；Phase 切换仍是 **L3 人工 Gate**。
+- :mod:`src.evidence.package_builder`：**纯本地、显式人工输入、默认 dry-run** 的 evidence package
+  manifest builder（GOLD-017）：把**人工显式**给出的 ``evidence_type`` / ``source`` /
+  ``authorization_reference`` / ``time_semantics`` / ``availability_semantics`` /
+  ``historical_oos_applicable`` 与**人工指定**的现有 evidence 文件（package 目录内的**单级**文件名）
+  整理成 GOLD-011 inbox 可直接消费的 ``manifest.json``（**复用** GOLD-011 的
+  ``MANIFEST_REQUIRED_FIELDS`` / ``ALLOWED_MANIFEST_KEYS`` / ``FILE_ENTRY_REQUIRED_FIELDS`` /
+  ``SUPPORTED_FILE_FORMATS`` 与 ``evidence-intake-v1`` 契约，**不复制、不降低**任何规则）；
+  每个文件按**原始字节**计算 SHA-256、``manifest.files`` 按规范化相对路径确定性排序（同输入 →
+  **byte-stable**，manifest 里**没有任何时间字段**）；写 manifest 前先做与 GOLD-005 / GOLD-011
+  **同源**的逐行预检（``read_input_file`` + ``assess_row``）；拒绝绝对路径 / ``..`` / 多级路径 /
+  符号链接 / 目录 / ``manifest.json`` 自引用 / 未支持格式 / 重复或大小写冲突路径 / 包内未声明文件 /
+  敏感值与示例名称；默认**零写入**（只有显式 ``--out`` 才写，且**必须正好**是
+  ``<package-dir>/manifest.json``，先取单实例锁再**原子写 + 写后复读自检**），既有 manifest
+  **逐字节一致** → 幂等，**内容不同** → ``MANIFEST_CONFLICT`` fail-closed（**没有**
+  ``--force`` / ``--overwrite``）；**绝不**自动 intake、**绝不**写数据库、**绝不**移动 / 删除 /
+  改写原始 evidence、**绝不**解除 ``PHASE3_3_DATA``（生成 manifest ≠ 授权已核验 ≠ 资格通过）。
 
 红线（与 `.clinerules` 一致）：
 
@@ -81,7 +97,10 @@
 ``--out``，且**没有**任何 intake 参数）；
 ``scripts/evidence_decision_record.py``（GOLD-016 L3 人工决策记录；**必须**显式给出
 ``--decision`` / ``--reviewer``，默认只读预检，唯一写入口是显式 ``--out``，``--verify-record``
-为纯只读防伪核验模式，且**没有**任何 intake / 写库参数）。
+为纯只读防伪核验模式，且**没有**任何 intake / 写库参数）；
+``scripts/evidence_package.py``（GOLD-017 本地 package / manifest builder；元数据与文件清单
+**必须**显式给出，默认 dry-run，唯一写入口是显式 ``--out``，且只能写
+``<package-dir>/manifest.json``；**没有**任何 intake / 写库参数）。
 """
 
 from __future__ import annotations
@@ -321,6 +340,44 @@ from src.evidence.ledger import (
     ledger_from_raw_json,
     load_evidence_ledger,
 )
+from src.evidence.package_builder import (
+    EVIDENCE_TYPES,
+    EXIT_INPUT_INVALID,
+    EXIT_MANIFEST_CONFLICT,
+    MANIFEST_LOCK_SUFFIX,
+    MAX_FILE_COUNT,
+    MAX_NOTES_CHARS,
+    MAX_NOTES_INPUT_CHARS,
+    MAX_REFERENCE_CHARS,
+    MAX_SEMANTICS_CHARS,
+    MAX_SOURCE_CHARS,
+    PACKAGE_BUILDER_EXECUTION_MODE,
+    PACKAGE_BUILDER_KIND,
+    PACKAGE_BUILDER_NOTE,
+    PACKAGE_BUILDER_REPORT_NAME,
+    PACKAGE_BUILDER_SCHEMA_VERSION,
+    PREFLIGHT_NOTE,
+    EvidencePackageArgumentError,
+    EvidencePackageCode,
+    EvidencePackageConflictError,
+    EvidencePackageError,
+    EvidencePackageInputError,
+    EvidencePackageInternalError,
+    EvidencePackagePathError,
+    EvidencePackagePreview,
+    EvidencePackageWriteError,
+    ManifestFileEntry,
+    ManifestWriteStatus,
+    PreflightOutcome,
+    RowPreflight,
+    build_manifest_preview,
+    manifest_bytes,
+    manifest_digest,
+    preflight_rows,
+    render_package_summary,
+    run_package_builder,
+)
+from src.evidence.package_builder import exit_code_for as package_builder_exit_code_for
 from src.evidence.readiness_runner import (
     DEFAULT_JOURNAL_LIMIT,
     EVENTS_FILE_NAME,
@@ -488,6 +545,7 @@ __all__ = [
     "DEFAULT_JOURNAL_LIMIT",
     "EVIDENCE_CONTRACT_VERSION",
     "EVIDENCE_SCHEMA_VERSION",
+    "EVIDENCE_TYPES",
     "EXAMPLE_MARKER_COLUMNS",
     "EXAMPLE_MARKER_FLAG_FIELDS",
     "EXAMPLE_MARKER_KIND_FIELDS",
@@ -495,7 +553,9 @@ __all__ = [
     "EVENTS_FILE_NAME",
     "EXIT_BLOCKED",
     "EXIT_CONFIG_ERROR",
+    "EXIT_INPUT_INVALID",
     "EXIT_LOCK_CONFLICT",
+    "EXIT_MANIFEST_CONFLICT",
     "EXIT_NO_CANDIDATES",
     "EXIT_NO_DECISION",
     "EXIT_OK",
@@ -530,20 +590,32 @@ __all__ = [
     "LOCK_FILE_NAME",
     "LOCK_KIND",
     "MANIFEST_FILE_NAME",
+    "MANIFEST_LOCK_SUFFIX",
     "MANIFEST_REQUIRED_FIELDS",
+    "MAX_FILE_COUNT",
     "MAX_NOTE_CHARS",
+    "MAX_NOTES_CHARS",
+    "MAX_NOTES_INPUT_CHARS",
     "MAX_PATH_CHARS",
+    "MAX_REFERENCE_CHARS",
     "MAX_RECORD_NOTE_CHARS",
     "MAX_RECORD_NOTE_INPUT_CHARS",
     "MAX_RECORD_REASON_CODE_CHARS",
     "MAX_RECORD_REVIEWER_CHARS",
     "MAX_RECORD_REVISION",
     "MAX_REVIEWER_CHARS",
+    "MAX_SEMANTICS_CHARS",
+    "MAX_SOURCE_CHARS",
     "NEXT_STEP_NOTE",
     "OPERATOR_EXPLICIT_FLAG",
     "OPERATOR_MANIFEST_REPORT",
     "OPERATOR_STEPS",
     "OPERATOR_WORKFLOW_SCHEMA_VERSION",
+    "PACKAGE_BUILDER_EXECUTION_MODE",
+    "PACKAGE_BUILDER_KIND",
+    "PACKAGE_BUILDER_NOTE",
+    "PACKAGE_BUILDER_REPORT_NAME",
+    "PACKAGE_BUILDER_SCHEMA_VERSION",
     "PACKAGE_SUMMARY_KEYS",
     "PACKET_CHECKS",
     "PACKET_EXECUTION_MODE",
@@ -555,6 +627,7 @@ __all__ = [
     "PENDING_LOCK_SUFFIX",
     "PLAN_ENTRY_DOCUMENT_KEYS",
     "PLAN_EXECUTION_MODE",
+    "PREFLIGHT_NOTE",
     "QUALIFICATION_RECHECK_REPORT",
     "QUARANTINE_REASON_CODES",
     "READINESS_CHECK_KEYS",
@@ -614,6 +687,15 @@ __all__ = [
     "EvidenceHandoffReport",
     "EvidenceIntakeReport",
     "EvidenceLedger",
+    "EvidencePackageArgumentError",
+    "EvidencePackageCode",
+    "EvidencePackageConflictError",
+    "EvidencePackageError",
+    "EvidencePackageInputError",
+    "EvidencePackageInternalError",
+    "EvidencePackagePathError",
+    "EvidencePackagePreview",
+    "EvidencePackageWriteError",
     "EvidenceRecord",
     "EvidenceScope",
     "ExcludedEvidence",
@@ -652,7 +734,9 @@ __all__ = [
     "LockConflictError",
     "LockInfo",
     "LockUnavailableError",
+    "ManifestFileEntry",
     "ManifestFileRef",
+    "ManifestWriteStatus",
     "NormalizedRow",
     "OperatorHandoffStep",
     "OperatorResult",
@@ -666,6 +750,7 @@ __all__ = [
     "PlanEntryDocument",
     "PlanVerificationCode",
     "PlanViolation",
+    "PreflightOutcome",
     "QualificationError",
     "QualificationRecheck",
     "QuarantineEntry",
@@ -691,6 +776,7 @@ __all__ = [
     "ReviewTargetError",
     "RowAssessment",
     "RowOutcome",
+    "RowPreflight",
     "RowStatus",
     "RunnerError",
     "ScopeChange",
@@ -718,6 +804,7 @@ __all__ = [
     "build_handoff_report",
     "build_intake_plan",
     "build_intake_receipt",
+    "build_manifest_preview",
     "build_quarantine_summary",
     "build_snapshot",
     "build_snapshot_from_session",
@@ -756,7 +843,11 @@ __all__ = [
     "load_review_ledger",
     "load_snapshot_state",
     "main_verification_exit_code",
+    "manifest_bytes",
+    "manifest_digest",
     "normalize_input_row",
+    "package_builder_exit_code_for",
+    "preflight_rows",
     "quarantine_payload",
     "read_input_file",
     "record_review_decision",
@@ -767,6 +858,7 @@ __all__ = [
     "render_intake_plan_summary",
     "render_intake_receipt_summary",
     "render_intake_report",
+    "render_package_summary",
     "render_quarantine_summary",
     "render_review_summary",
     "render_template",
@@ -781,6 +873,7 @@ __all__ = [
     "run_inbox_scan",
     "run_intake_plan",
     "run_intake_receipt",
+    "run_package_builder",
     "run_review",
     "run_tick",
     "scan_inbox",

@@ -3414,7 +3414,7 @@ GOLD-014 verified receipt 与 qualification recheck 聚合成**确定性、脱�
   冒烟（stdout 为纯 JSON）。全链路临时目录 / 临时 SQLite / 零网络，且断言**数据库零变化**、
   packet 与原始 evidence 零改写；
 - **全量门禁**（本轮实测，项目 `.venv`）：
-  - `.venv\Scripts\python.exe -m pytest tests -q` → **2488 passed / 1 skipped**（新增 206 项）；
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **2490 passed / 1 skipped**（新增 206 项）；
   - `.venv\Scripts\python.exe -m ruff check .` → **All checks passed!**；
   - `.venv\Scripts\python.exe -m mypy config database src scripts` → **Success: no issues found
     in 170 source files**（GOLD-015 为 168）。
@@ -3452,3 +3452,142 @@ GOLD-014 verified receipt 与 qualification recheck 聚合成**确定性、脱�
 - 记录**不缓存**任何输入：packet 内容 / `packet_id` / 人工决策 / reviewer / note / revision 任一
   变化 → 新 `record_id` 或直接 fail-closed（旧记录不会"升级"）；`decision_at` / `generated_at` /
   `packet.generated_at` 都**只是审计操作时间**，产出里根本没有证据时间键。
+## 第八十一轮（2026-09-23）：GOLD-017 —— 真实 Evidence Package 本地 Manifest Builder 与安全交付入口
+
+### 1. 交付内容
+
+在 `PHASE3_3_DATA` 仍 **BLOCKED** 的前提下，补齐"业务方如何把真实授权 Author / News 文件制作成
+GOLD-011 可直接扫描的 evidence package"这一**实际交付入口**的最后摩擦点（此前业务方仍要**手工**写
+manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）：
+
+- **核心 `src/evidence/package_builder.py`**（零网络 / 零数据库 / 零新增依赖）：
+  - **人工显式输入，绝不推断**：`evidence_type`（`author` / `news`，大小写敏感不做静默归一）/
+    `source` / `authorization_reference` / `time_semantics` / `availability_semantics` /
+    `historical_oos_applicable`（严格布尔）与要纳入 package 的文件清单**必须**由人工给出；
+    工具**绝不**从文件名 / 正文 / URL / mtime / 当前时间或其他上下文推断、补造授权、发布时间、
+    采集时间、availability 或 OOS 语义；
+  - **复用而不复制契约**：manifest 字段 / 允许键 / 必填项 / 格式词表**直接复用** GOLD-011 的
+    `MANIFEST_REQUIRED_FIELDS` / `ALLOWED_MANIFEST_KEYS` / `FILE_ENTRY_REQUIRED_FIELDS` /
+    `SUPPORTED_FILE_FORMATS` / `INBOX_SCHEMA_VERSION` 与 `evidence-intake-v1`
+    （`schema_version` / `contract_version` 自动写入），引用校验复用 `valid_reference`、
+    逐行预检复用 `read_input_file` + `assess_row`，**不复制、不降低**任何资格规则与阈值；
+    另加**内部自检** `_check_manifest_contract(...)`：生成的 manifest 必须**正好**满足 GOLD-011
+    契约（键 / 必填声明 / 文件条目键 / 格式词表 / 64 位小写摘要），否则 `EvidencePackageInternalError`；
+  - **内容级 SHA-256 且确定性排序**：每个文件按**原始字节**计算 SHA-256，`manifest.files` 按规范化
+    相对路径**确定性排序**；同一输入 + 同一显式元数据（含声明顺序不同）→ **byte-stable** manifest；
+    manifest 里**没有任何时间字段**（无 `generated_at`、不读 mtime / ctime），
+    真实身份 = 文件内容摘要 + 结构标记；
+  - **只读既有 evidence + fail-closed 清单**：拒绝绝对路径（POSIX / Windows / UNC）/ `..` 路径穿越 /
+    多级路径 / 符号链接（文件与 package 目录都不跟随）/ 目录 / `manifest.json` 自引用 /
+    未支持扩展或格式（`auto` 按后缀解析，未知后缀拒绝） / 重复声明 / 大小写冲突路径 /
+    package 目录不存在或不可读 / **包内未声明文件** / package 目录名或文件名命中示例合成词表
+    （`SYNTHETIC_EVIDENCE`）；**绝不**移动 / 删除 / 改名 / 改写任何原始 evidence（越界文件从不被读取）；
+  - **默认 dry-run / 唯一写开关**：`run_package_builder(..., out_path=None)` 只返回预览（**不取锁、
+    不写任何文件**）；只有显式 `out_path` 才写，且**必须正好**是 `<package-dir>/manifest.json`
+    （写到其它任意路径 → `MANIFEST_OUT_NOT_TARGET`，退出码 `3`、零写入）；
+  - **原子写 + 单实例锁 + 不静默覆盖**：写盘前先取 GOLD-010 **单实例锁**（缺省锁文件**刻意放在
+    package 目录之外**：同父目录 `<package-dir>.manifest.lock`，否则会成为"包内未声明文件"
+    并让 scanner 整包隔离），锁内**重新**读取文件、重新计算摘要与预检（防 TOCTOU），再做既有
+    manifest 核验 —— **不存在 → 创建**；**逐字节一致 → 幂等成功**（`IDEMPOTENT_UNCHANGED`，
+    不重写）；**内容不同 → `MANIFEST_CONFLICT`** fail-closed（**没有** `--force` / `--overwrite`，
+    更正必须新建 package 目录 / 新内容身份）；落盘后**复读自检**（字节不一致 → `MANIFEST_VERIFY_FAILED`）；
+  - **写入前同源预检**：`preflight_rows(...)` 复用 `read_input_file` + `assess_row`，输出
+    `accepted` / `quarantined` / `not_oos_eligible` / 稳定原因码计数与**逐文件计数**，
+    并给出描述性 `outcome`（`NO_ROWS` / `HAS_QUARANTINED_ROWS` / `NO_ACCEPTABLE_ROWS` /
+    `ACCEPTED_WITHOUT_OOS` / `ACCEPTED_WITH_OOS`）；预检结果**不写入** evidence 原始行，
+    **绝不**把预检通过宣称为"授权已人工确认"或"data qualification PASS"；
+  - **凭据与敏感值 fail-closed**：`authorization_reference` 走 `valid_reference`；
+    `source` / `time_semantics` / `availability_semantics` / `notes` 走长度 / 控制字符校验；
+    凭据类键名（`api_key` / `token` / `secret` …）、疑似凭据 blob、以及**会被既有脱敏规则命中的
+    取值**一律**拒绝**（宁拒绝不静默改写），错误信息只给字段名与稳定原因码、**绝不回显取值**；
+    `notes` 走 `safe_text` 脱敏 + 限长（输入上限 `MAX_NOTES_INPUT_CHARS=4000`，超长 fail-closed）；
+  - **持续硬编码 blocker**：所有 artifact 恒为 `blocker_active=true` / `human_gate_required=true` /
+    `requires_human_action=true` / `data_qualification_passed=false` /
+    `phase_transition_allowed=false` / `auto_intake_allowed=false` / `writes_database=false` /
+    `writes_project_state=false`；`PACKAGE_BUILDER_NOTE` / `PREFLIGHT_NOTE` /
+    `MANIFEST_TIME_FREE_NOTE` 明示"生成 manifest ≠ 授权已核验 ≠ 资格通过 ≠ 可提交 L3"，
+    `PHASE3_3_DATA` **保持 BLOCKED**；
+  - `EvidencePackageCode`（复用 GOLD-011 inbox / `evidence-intake-v1` 同义原因码 + builder 专有码）、
+    `ManifestWriteStatus` / `PreflightOutcome` / `ManifestFileEntry` / `RowPreflight` /
+    `EvidencePackagePreview`（`to_dict()` 稳定机器可读）。
+- **CLI `scripts/evidence_package.py`**：`--package-dir` / `--file`（可重复）/
+  `--evidence-type` / `--source` / `--authorization-reference` / `--time-semantics` /
+  `--availability-semantics` / `--historical-oos-applicable true|false` **必填**；`--notes` / `--out` /
+  `--lock` / `--as-of`（ISO8601 必须带时区）/ `--json` 可选；**没有**任何 intake / `--no-dry-run` /
+  `--force` / `--overwrite` 参数；`--json` 时 stdout 保持纯 JSON（提示走 stderr）、失败路径 stdout
+  为空且 stderr 已脱敏；退出码 `0`（预览 / 写入 / 幂等）`2`（参数）`3`（目录或输出不可用）`4`
+  （输入 fail-closed）`5`（`MANIFEST_CONFLICT`）`6`（锁冲突）；
+- **`src/evidence/__init__.py`**：导出新 API（`package_builder_exit_code_for` / `EvidencePackage*` /
+  `ManifestFileEntry` / `ManifestWriteStatus` / `PreflightOutcome` / `RowPreflight` /
+  `EVIDENCE_TYPES` / `PACKAGE_BUILDER_*` / `PREFLIGHT_NOTE` / `MAX_*` 等）并在包文档说明边界。
+
+### 2. 测试与验收
+
+- **`tests/unit/test_evidence_package_builder.py`（57 项）**：确定性摘要与排序 / byte-stability /
+  GOLD-011 契约自洽（键与必填项）/**递归无任何时间键** / csv & jsonl & `.json` 格式解析 /
+  显式元数据缺失与非法值（含大小写敏感、`http://`、`docs/legal/`、非布尔 OOS）/
+  空文件清单 / naive 时点 / package 目录缺失或符号链接 / 绝对路径 / `..` / 多级路径 /
+  `manifest.json` 自引用 / 未支持格式 / 缺失文件 / 重复声明 / 大小写冲突 / 目录 / 未声明文件 /
+  被链接的 evidence 文件 / 示例合成名称 / 凭据类引用（不回显）/ 凭据类 notes / notes 脱敏限长 /
+  预检隔离与 not_oos 计数 / 非法行 `ROW_UNREADABLE` / 声明 OOS=false 的告警 /
+  `--out` 越界拒绝 / 原子写无残留且锁在包外 / 幂等同内容 / 不同内容冲突且旧 manifest 保留 /
+  既有损坏 manifest 不被覆盖 / 锁冲突零写入 / News scope / Markdown 保留 blocker 且不泄密 /
+  源码守卫（无网络 / 无数据库 / 无 `unlink`/`rmtree`/`os.remove`/`os.rename`/`shutil.move` /
+  无 `intake_evidence` / 无 `getmtime`/`getctime`/`st_mtime`/`st_ctime` / 无 `datetime.now` /
+  无 `PROJECT_STATE.json` / 无常驻循环）；
+- **`tests/integration/test_evidence_package_builder_integration.py`（8 项）**：**真链路** ——
+  CLI dry-run（零写入）→ CLI `--out` 原子写 → **真实 GOLD-011 inbox scanner** 只读预检
+  （`preflight_pass=1`、`quarantined=0`、`skipped=0`、逐文件 `digest_verified=true`、
+  摘要等于真实字节摘要、安全字段恒定）；**坏包仍 fail-closed** —— 证据被追加一行后 scanner 判
+  `EVIDENCE_DIGEST_MISMATCH` 并隔离（退出 `5`、`preflight_pass=0`），builder 再次写入 →
+  `MANIFEST_CONFLICT`（退出 `5`、零写入、旧 manifest 逐字节保留）；无 manifest 的"裸"包
+  由 scanner 判 `MANIFEST_MISSING`（证明 builder 产物**不是**绕过手段）；CLI 退出码
+  `2`（缺参数 / naive `--as-of` / 非法枚举）`3`（package 目录缺失、`--out` 越界）`4`（声明文件缺失）
+  `6`（锁冲突零写入）与 stdout / stderr 纯净性；**真实子进程**冒烟
+  （`python -m scripts.evidence_package` 写入 + 幂等复跑 → `python -m scripts.evidence_inbox` 预检）。
+  全部临时目录 / 本地文件 / 零网络 / 零数据库；
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **2557 passed / 1 skipped**（新增 65 项）；
+  - `.venv\Scripts\python.exe -m ruff check .` → **All checks passed!**；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` → **Success: no issues found
+    in 172 source files**（GOLD-016 为 170）。
+
+### 3. 范围守规
+
+- 只读输入、显式人工输入、默认零写入；`--out` 是唯一写开关（先取单实例锁再原子写 + 写后复检），
+  且只能写 `<package-dir>/manifest.json`；
+- 未新增 / 未升级任何第三方依赖；未新增 migration / schema；未联网、未接第三方推送、
+  未读取浏览器 / 邮件 / 云盘凭据、未修改任何 OS 计划任务、零数据库写入；
+- *复用而不复制*：manifest 契约 / 原因码 / 引用校验 / 逐行预检 / 脱敏 / 原子写 / 单实例锁全部复用
+  GOLD-005 / GOLD-010 / GOLD-011 的既有实现；`src/alpha/**`、`src/monitoring/**`、
+  `src/scheduler/**`、`src/collectors/**`、`src/processors/**` 与 GOLD-005 ~ GOLD-016 的既有模块
+  **均未改动**（`src/evidence/__init__.py` 仅新增导出与说明）；
+- **未降低任何阈值 / 资格规则**，未用 Mock / 模板 / 示例宣称真实数据资格；
+- **未解除** `PHASE3_3_DATA`：artifact 持续显式 `blocker_active=true` /
+  `human_gate_required=true` / `data_qualification_passed=false` /
+  `phase_transition_allowed=false` / `auto_intake_allowed=false` / `writes_database=false`；
+  未进入 Phase 3.4、未训练 Alpha、未生成任何交易信号或订单；`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；未执行任何 git
+  写操作（commit / push / reset / rebase / merge 由 Orchestrator 负责）；
+- 顺手把 GOLD-016 文档中的全量 pytest 数字对齐 `.ai/results/GOLD-016.json` 的权威结果
+  （2488 → **2490 passed / 1 skipped**），**未改**历史 result artifact。
+
+### 4. 遗留 / 下一步
+
+- 仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 **BLOCKED**。GOLD-017 **只是**"把人工显式元数据 +
+  人工指定的现有文件机械整理成 GOLD-011 可直接扫描的 manifest"的**交付入口**：它**不产生**任何
+  真实授权证据、**不判断**法律效力、**不具备**解除 blocker 的能力；
+- 完整人工路径（**九步**）：①业务方把真实授权 Author / News 文件放进 package 目录 →
+  **`evidence_package`（GOLD-017）** 用显式元数据生成 `manifest.json`（默认 dry-run，确认后
+  `--out`）→ ② `evidence_inbox --out` 只读预检 → ③ `evidence_review --decision approve
+  --approved-out` 人工复核 → ④ `evidence_intake_plan --out` 生成计划 → ⑤ 人工**显式**执行
+  `evidence_operator workflow --no-dry-run --manifest` 落库 → ⑥ `evidence_operator recheck
+  --no-dry-run --report` 复核 → ⑦ `evidence_intake_receipt --out` 生成收据 →
+  ⑧ `evidence_decision_packet --out` 生成决策包 → ⑨ `evidence_decision_record --decision approve
+  --reviewer <label> --out` 记录 L3 人工决策 → `--verify-record` 事后防伪复核 →
+  **L3 人工确认**（由人工 / Orchestrator 显式更新 `PROJECT_STATE`）；
+- builder **不缓存**任何输入：元数据 / 文件内容 / 声明顺序任一变化 → 新 manifest 内容（新摘要）
+  或直接 fail-closed；既有 manifest 内容不同时**绝不**静默覆盖，更正必须新建 package 目录；
+- `--out` 是**唯一**写入口；package 位于 inbox 内时建议显式 `--lock <inbox 之外>/xxx.lock`，
+  避免在 inbox 根目录留下锁文件痕迹（锁文件**绝不**放在 package 目录内）。

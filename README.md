@@ -66,6 +66,7 @@ Strategy 事实，不进入实盘。
 | **Evidence 显式 Intake Receipt 与资格复核审计闭环**（GOLD-014：`scripts/evidence_intake_receipt.py` 把 GOLD-013 plan、**当前** inbox / review 状态、人工**显式** Evidence Operator 执行结果（`--no-dry-run --manifest` 产物）与随后的 qualification recheck 绑定成**确定性、脱敏、内容寻址**（`receipt_id`）的**只读**收据 —— plan 结构自洽 + plan 必须**当前仍成立**（用**当前** inbox + ledger + 批准清单重新算出的 `plan_id` 与条目摘要完全一致，plan stale / fingerprint drift / 候选消失 / preflight 回退 / **review override** 一律 fail-closed）+ 执行结果必须按**内容 SHA-256** 覆盖每条批准且 `dry_run=false` / `persisted>=1`（dry-run / 空落库 / 计数自相矛盾 / scope 不符 / 用了**未被批准**的输入 / 覆盖不全 → fail-closed）+ recheck 必须存在且**不早于**显式执行（缺失 / 早于执行 / 声称 blocker 已解除 → fail-closed）；明确区分四个布尔：`intake_executed` / `receipt_verified` 恒与 `data_qualification_passed` / `phase_transition_allowed`（**恒为** false）**互不蕴含**；`receipt_id` 只由（策略块 + plan_id + 批准条目 + 执行摘要 + 复核摘要 + 两个布尔）派生（**不含** `receipt_at`；同输入幂等、同审计时点逐字节稳定）；只有显式 `--out` 才**原子**落盘收据本身（先取单实例锁）；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除 / 改写原始 evidence、零网络**；四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/intake_receipt.py`、`scripts/evidence_intake_receipt.py` |
 | **Evidence Qualification L3 人工决策包**（GOLD-015：`scripts/evidence_decision_packet.py` 把最新 readiness / handoff（GOLD-008/010）、批准清单与 GOLD-013 intake plan、GOLD-014 verified receipt 与 qualification recheck 聚合成**确定性、脱敏、内容寻址**（`packet_id`）的**只读**决策包 —— handoff 必须结构自洽（内部算术 / `thresholds` 必须等于**当前**唯一阈值来源 / 安全字段不可被削弱 / 拒绝任何证据时间键）、`--readiness` 快照必须与 handoff **同源**（含指纹）、plan stale / fingerprint drift / review override / 执行结果缺失或被改写 / recheck 缺失或早于执行或结论不一致 / handoff 早于最近一次显式落库（stale）一律 fail-closed、可选 GOLD-014 收据文件再做一次内容寻址交叉核对（`receipt_id` / `plan_id` / 指纹 / review revision / 执行摘要 / recheck 摘要不一致 → 稳定原因码）；显式区分 `evidence_ready_for_human_review` / `receipt_verified` / `qualification_recheck_ready`，`data_qualification_passed` / `phase_transition_allowed` **恒为** false、`blocker_active` / `human_gate_required` 恒为 true（**硬编码**），只能给出 `submit_to_l3_human_gate` 与缺口 / 原因码；`packet_id` 只由（策略块 + handoff / readiness 摘要 + plan + 收据 + recheck + 五个布尔）派生（**不含** `generated_at`）；只有显式 `--out` 才**原子**落盘 packet 本身（先取单实例锁）；**绝不自动 intake、绝不写数据库、绝不移动 / 删除 / 改写原始 evidence、零网络**；`PHASE3_3_DATA` **保持 BLOCKED**） | `src/evidence/decision_packet.py`、`scripts/evidence_decision_packet.py` |
 | **Evidence Qualification L3 人工决策记录**（GOLD-016：`scripts/evidence_decision_record.py` 把**人工显式**给出的 `approve` / `reject` / `needs_changes` 绑定到**具体**的 GOLD-015 packet（`packet_id` + 内容摘要 `content_sha256` + 产物摘要 `artifact_sha256`），生成**确定性、脱敏、内容寻址**（`record_id`）的决策记录 —— packet **逐项**完整性核验（文档身份 / schema / 契约版本 / 安全字段不可被削弱 / 缺口与检查**算术可重算** / 三个布尔必须等于 `submit_to_l3_human_gate` 的合取 / readiness 快照**指纹同源** / 收据与 `receipt_verified` 往返一致 / recheck 与 `qualification_recheck_ready` 合取一致 / 批准与执行计数自洽 / `verification.violations` 必须为空 / **递归禁止任何证据时间键** / **禁止未来时间**）任一不一致 → **fail-closed**（稳定原因码 + 零写入）；`approve` **只**允许落在 packet 本身 `submit_to_l3_human_gate=true` 且完整性核验通过时（BLOCKED → `PACKET_NOT_SUBMITTABLE`，退出 `5`），`reject` / `needs_changes` 可记录但**绝不**改变任何资格状态；`human_decision_recorded` / `human_decision` / `packet_verified` 三个事实独立，`data_qualification_passed` / `phase_transition_allowed` / `phase_transition_executed` **恒为** false、`blocker_active` / `human_gate_required` 恒为 true、`human_gate_level` 恒为 `L3`（**硬编码**）；`record_id` **不含**任何审计时间（同 packet + 同人工决策幂等、同审计时点逐字节稳定），写下的记录**绝不**被静默覆盖（覆盖必须显式 `--revision` + `--supersedes`）；`--verify-record` 提供**防伪核验**（重新推导 `record_id`、与**当前** packet 比对 `packet_id` / 内容摘要、判定当初的 `approve` 是否仍成立）；人工身份只接受**非敏感 label**（不采集凭据），note / reason-code 一律脱敏 + 限长，`decision_at` / `generated_at` **绝不当证据时间**；只有显式 `--out` 才**原子**落盘记录本身（先取单实例锁）；**绝不写数据库、绝不调用 intake / commit、绝不修改 `PROJECT_STATE`、零网络**；`PHASE3_3_DATA` **保持 BLOCKED**） | `src/evidence/decision_record.py`、`scripts/evidence_decision_record.py` |
+| **Evidence 本地 Package / Manifest Builder**（GOLD-017：`scripts/evidence_package.py` 把**人工显式**给出的 `evidence_type` / `source` / `authorization_reference` / `time_semantics` / `availability_semantics` / `historical_oos_applicable` 与**人工指定**的现有 evidence 文件（package 目录内**单级**文件名）整理成 GOLD-011 inbox 可直接消费的 `manifest.json` —— 字段 / 允许键 / 必填项 / 格式词表**复用** GOLD-011 契约（`MANIFEST_REQUIRED_FIELDS` / `ALLOWED_MANIFEST_KEYS` / `FILE_ENTRY_REQUIRED_FIELDS` / `SUPPORTED_FILE_FORMATS`）与 `evidence-intake-v1`，**不复制、不降低**任何规则；每个文件按**原始字节**计算 SHA-256，`manifest.files` 按规范化相对路径**确定性排序**（同输入 → **byte-stable**，manifest 里**没有任何时间字段**，绝不用 mtime / 当前时间充数）；**默认 dry-run 零写入**，只有显式 `--out` 才写，且**必须正好**是 `<package-dir>/manifest.json`（先取单实例锁 → **原子写** → **写后复读自检**），既有 manifest **逐字节一致** → 幂等、**内容不同** → `MANIFEST_CONFLICT` fail-closed（**没有** `--force` / `--overwrite`，更正必须新建 package 目录）；写盘前先做与 GOLD-005 / GOLD-011 **同源**的本地逐行预检（`read_input_file` + `assess_row`）并输出 `accepted` / `quarantined` / `not_oos_eligible` 与稳定原因码；绝对路径 / `..` / 多级路径 / 符号链接 / 目录 / `manifest.json` 自引用 / 未支持格式 / 重复或大小写冲突路径 / 包内未声明文件 / 示例或合成名称 / 敏感值（凭据键名、疑似 blob、可被脱敏规则命中的取值）一律 **fail-closed**；**绝不**移动 / 删除 / 改写原始 evidence、**绝不**自动 intake、**绝不**写数据库、零网络，四个安全字段恒定，`PHASE3_3_DATA` **保持 BLOCKED**） | `src/evidence/package_builder.py`、`scripts/evidence_package.py` |
 | **Evidence Approved-for-Explicit-Intake Intake Plan 与最终写入前门禁**（GOLD-013：`scripts/evidence_intake_plan.py` 把 GOLD-012 的批准清单与**当前** inbox / review ledger **重新绑定核验** —— 清单结构自洽（文档标识 / schema / 契约版本 / 计数与列表长度一致 / 安全字段与 `approval_scope` 不可被削弱 / **不得**出现证据时间字段）、每条批准必须**当前仍是** ledger 上该指纹的**最新有效**决策（`review override` 后旧批准失效）、候选**当前仍在** inbox 且仍 `PREFLIGHT_PASS` 且非合成、清单与"用当前 inbox + ledger 重新算出的批准集合"完全一致；任一不一致 → **fail-closed**（退出码 `4`、**零写入**）；输出**确定性脱敏**、**内容级** `plan_id`（不含 `generated_at`；同输入同 `plan_id`、同审计时点逐字节稳定）的**只读**计划，`approved_for_explicit_intake` 与 `data_qualification_passed` 是两个独立字段（后者恒 false、`data_qualification_passed_count` 恒 0）；只有显式 `--out` 才**原子**落盘计划本身（先取单实例锁），`handoff` 只给**字符串**命令模板（必带 `--no-dry-run` 与显式 `--input`），`auto_intake_allowed` / `writes_database` 恒 false、`requires_explicit_operator_action` 恒 true；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除原始 evidence、零网络**；四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/intake_plan.py`、`scripts/evidence_intake_plan.py` |
 
 
@@ -1329,6 +1330,92 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
 显式更新 `PROJECT_STATE`（**不由**本工具完成）。真实证据不足时 `PHASE3_3_DATA` 仍保持
 **BLOCKED**。
 
+### Evidence 本地 Package / Manifest Builder（`scripts/evidence_package.py`，GOLD-017）
+
+> **合规红线**：本工具是 **纯本地机械整理** 入口 —— 只把**人工显式提供**的授权 / 时间 /
+> availability / OOS 元数据与**人工指定的现有 evidence 文件**整理成 GOLD-011 inbox 可直接消费的
+> `manifest.json`；**不推断授权**、**不伪造发布时间 / 采集时间 / availability 语义**、
+> 不联网、不写数据库、**不移动 / 删除 / 改写**任何原始 evidence、**不自动 intake**。
+> `blocker_active` / `human_gate_required` / `requires_human_action` 恒为 true；
+> `data_qualification_passed` / `phase_transition_allowed` / `auto_intake_allowed` /
+> `writes_database` 恒为 false；`PHASE3_3_DATA` **保持 BLOCKED**。
+> **生成 manifest ≠ 授权已核验 ≠ 资格通过 ≠ 可提交 L3。**
+
+```powershell
+# ① 默认 dry-run：只打印确定性、脱敏的 manifest 预览与逐行预检（零写入、零网络）
+.\.venv\Scripts\python.exe -m scripts.evidence_package `
+  --package-dir logs/evidence/inbox/vendor-author-2026-06 `
+  --file author-2026-06.jsonl `
+  --evidence-type author --source vendor-author `
+  --authorization-reference https://vendor.example/terms `
+  --time-semantics provider_export_iso8601_with_tz `
+  --availability-semantics provider_archive_export_daily_snapshot `
+  --historical-oos-applicable true --json
+
+# ② 唯一写开关：--out 必须**正好**是 <package-dir>/manifest.json（原子写 + 单实例锁）
+.\.venv\Scripts\python.exe -m scripts.evidence_package ... `
+  --out logs/evidence/inbox/vendor-author-2026-06/manifest.json --json
+
+# ③ 端到端：写完后交给**真实** GOLD-011 inbox scanner 做只读预检
+.\.venv\Scripts\python.exe -m scripts.evidence_inbox --inbox-dir logs/evidence/inbox --json
+```
+
+- **元数据必须显式**：`--evidence-type`（`author` / `news`，大小写敏感）/ `--source` /
+  `--authorization-reference` / `--time-semantics` / `--availability-semantics` /
+  `--historical-oos-applicable true|false` 与 `--file`（可重复）**缺一即 fail-closed**；
+  工具**绝不**从文件名 / 正文 / URL / mtime / 当前时间或其他上下文推断 / 补造授权、发布时间、
+  采集时间、availability 或 OOS 语义；
+- **复用同一契约**：manifest 字段 / 允许键 / 必填项 / 格式词表**直接复用** GOLD-011 的
+  `MANIFEST_REQUIRED_FIELDS` / `ALLOWED_MANIFEST_KEYS` / `FILE_ENTRY_REQUIRED_FIELDS` /
+  `SUPPORTED_FILE_FORMATS` 与 `evidence-intake-v1`（`schema_version` / `contract_version` 自动写入），
+  引用校验复用 `valid_reference`、逐行预检复用 `assess_row`，**不复制、不降低**任何规则；
+- **内容级 SHA-256 且确定性排序**：每个文件按**原始字节**计算 SHA-256；`manifest.files` 按规范化
+  相对路径排序；同一输入 + 同一显式元数据（含声明顺序不同）→ **byte-stable** manifest；
+  manifest 里**没有**任何时间字段（真实身份 = 文件内容摘要），文件 mtime / ctime 绝不写入；
+- **默认零写入**：不传 `--out` 时只打印 stdout（不取锁、不写任何文件）；`--out` 只能指向
+  `<package-dir>/manifest.json`，指向任何其它路径 → 退出码 `3`、零写入；
+- **不静默覆盖**：既有 manifest 与本次规范化内容**逐字节一致** → 幂等（`IDEMPOTENT_UNCHANGED`）；
+  **内容不同** → `MANIFEST_CONFLICT`（退出码 `5`、零写入）；**没有** `--force` / `--overwrite`，
+  更正必须新建 package 目录 / 新的内容身份；
+- **写盘前同源预检**：先做与 GOLD-005 / GOLD-011 **同源**的只读逐行预检，输出 `accepted` /
+  `quarantined` / `not_oos_eligible` / `NO_ROWS` 与稳定原因码（含逐文件计数）；
+  预检**不写入** evidence 原始行，`preflight` 通过**不表示**授权已人工核验、**不表示**数据资格通过；
+- **fail-closed 清单**：绝对路径 / `..` / 多级路径 / 符号链接 / 目录 / `manifest.json` 自引用 /
+  未支持扩展或格式 / 重复或大小写冲突声明 / 包目录不存在 / 包内未声明文件 / package 目录名或文件名
+  命中示例合成词表 / 敏感值（凭据键名、疑似 blob、`api_key=` 之类可被脱敏规则命中的取值）；
+  **越界文件从不被读取**；
+- **锁文件刻意放在 package 目录之外**（缺省 = 同父目录 `<package-dir>.manifest.lock`），
+  否则锁文件会成为「包内未声明文件」并让 scanner 整包隔离；package 位于 inbox 内时建议显式
+  `--lock <inbox 之外的工作目录>/xxx.lock`；
+- **退出码**：`0` 预览已生成 / manifest 已写入或幂等未变（**仍不是**资格通过）/ `2` 参数错误 /
+  `3` package 目录或输出路径不可用（含 `--out` 越界）/ `4` 输入未通过 fail-closed 校验 /
+  `5` `MANIFEST_CONFLICT` / `6` 锁冲突；失败路径 stdout 为空、stderr 已脱敏；
+- **测试**：`tests/unit/test_evidence_package_builder.py`、
+  `tests/integration/test_evidence_package_builder_integration.py`（全部临时目录 / Mock / 本地文件、
+  零网络、零数据库；端到端用例先用 builder 生成 manifest，再用**真实** GOLD-011 scanner 预检，
+  并验证「证据被改写后 scanner 仍 fail-closed、builder 再次写入被 `MANIFEST_CONFLICT` 拒绝」）；
+- **仍未解决（保持 BLOCKED）**：本工具**只降低真实证据的交付摩擦**（免手工写 manifest / 手工算
+  SHA-256），**不产生**任何真实授权证据、**不解除** `PHASE3_3_DATA`；真实资格仍需业务方授权 +
+  人工核验 + L3 人工 Gate。
+
+真实 evidence 的**人工路径从「package builder → inbox」开始**（完整九步见 `PROGRESS_LOG.md`）：
+
+```powershell
+# ⓪ GOLD-017：显式元数据 → manifest（默认 dry-run；确认无误后再加 --out）
+.\.venv\Scripts\python.exe -m scripts.evidence_package `
+  --package-dir logs/evidence/inbox/vendor-author-2026-06 --file author-2026-06.jsonl `
+  --evidence-type author --source vendor-author `
+  --authorization-reference https://vendor.example/terms `
+  --time-semantics provider_export_iso8601_with_tz `
+  --availability-semantics provider_archive_export_daily_snapshot `
+  --historical-oos-applicable true --json
+.\.venv\Scripts\python.exe -m scripts.evidence_package ... `
+  --out logs/evidence/inbox/vendor-author-2026-06/manifest.json
+
+# ① GOLD-011：真实 scanner 只读预检 → 交付**人工确认队列**
+.\.venv\Scripts\python.exe -m scripts.evidence_inbox --inbox-dir logs/evidence/inbox --json
+```
+
 ## 8. 数据模型
 
 
@@ -1457,24 +1544,29 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   作者链已由 GOLD-007 交付，人工交接包已由 GOLD-008 交付，readiness 状态变更通知层已由
   GOLD-009 交付，readiness **周期 tick runner** 已由 GOLD-010 交付，**本地 inbox 发现与预检**
   已由 GOLD-011 交付，**人工复核决策与审计层**已由 GOLD-012 交付，**最终写入前 intake plan
-  门禁**已由 GOLD-013 交付，**执行后的只读 Intake Receipt 与资格复核审计层**已由 GOLD-014 交付，**L3 人工决策包**已由 GOLD-015 交付，**L3 人工决策记录（防伪审计闭环）**已由 GOLD-016 交付（见 §7「授权证据接收入口」、
+  门禁**已由 GOLD-013 交付，**执行后的只读 Intake Receipt 与资格复核审计层**已由 GOLD-014 交付，**L3 人工决策包**已由 GOLD-015 交付，**L3 人工决策记录（防伪审计闭环）**已由 GOLD-016 交付，**本地 package / manifest builder（真实证据人工路径第一步）**已由 GOLD-017 交付（见 §7「授权证据接收入口」、
   §7「证据就绪度与一键资格复核」、§7「单入口 Evidence Operator 工作流」、
   §7「Evidence 人工交接包」、§7「Evidence Readiness 状态变更通知」、
   §7「Evidence Readiness 单次本地 tick runner」、§7「Evidence 本地 Inbox 发现与预检」、
   §7「Evidence Inbox 人工复核决策与审计」、§7「Evidence Intake Plan」、
-  §7「Evidence 显式 Intake Receipt」、「Evidence Qualification 人工决策包」与
-  §7「Evidence Qualification L3 人工决策记录」），
+  §7「Evidence 显式 Intake Receipt」、「Evidence Qualification 人工决策包」、
+  §7「Evidence Qualification L3 人工决策记录」与
+  §7「Evidence 本地 Package / Manifest Builder」），
   但**仓库内没有任何经该入口认证的真实授权证据**，
   因此 `PHASE3_3_DATA` 保持 `active=true`；下一步是业务方按 `evidence-intake-v1` 契约
-  提交已授权数据 + 人工核验授权（详见 `TECH_DEBT.md` TD-47 / TD-48 / TD-49 / TD-50 /
-  TD-51 / TD-52 / TD-53 / TD-54 / TD-55 / TD-56 / TD-57 / TD-58）。GOLD-007 ~ GOLD-016 的工具**只减少人工交接、盯盘、
-  定时执行、候选摆放 / 预检、「谁批了哪一版内容」与「落库前清单是否还是当前事实」、
+  提交已授权数据（**第一步**：把真实授权文件放进 package 目录后用 `scripts/evidence_package.py`
+  生成 `manifest.json`（GOLD-017），再交给 `scripts/evidence_inbox.py` 预检）+ 人工核验授权
+  （详见 `TECH_DEBT.md` TD-47 / TD-48 / TD-49 / TD-50 /
+  TD-51 / TD-52 / TD-53 / TD-54 / TD-55 / TD-56 / TD-57 / TD-58 / TD-59）。GOLD-007 ~ GOLD-017 的工具**只减少人工交接、盯盘、
+  定时执行、候选摆放 / 预检、「候选包的 manifest 该写什么 / 摘要算对了吗」、
+  「谁批了哪一版内容」与「落库前清单是否还是当前事实」、
   「落库后有没有可复核的收据」、「能不能提交人工 Gate」与「有没有可核验的人工决策记录」的审计摩擦**，
   不解除该 blocker；任何数量达标（含全部候选被 approve / 计划状态为
   `READY_FOR_EXPLICIT_INTAKE` / 收据为 `VERIFIED_EXECUTION_RECORDED` /
   决策包为 `READY_FOR_L3_HUMAN_GATE` / 决策记录为 `human_decision_recorded=true`）最多只到
-  `ready_for_human_review=true` / 有批准清单 / 有计划 / 有收据 / 有决策包 / 有人工决策记录，
-  人工批准、计划、收据、决策包与决策记录**都不等于** data qualification PASS，Phase 切换仍是 L3 人工 Gate。
+  `ready_for_human_review=true` / 有 manifest / 有批准清单 / 有计划 / 有收据 / 有决策包 / 有人工决策记录，
+  生成 manifest、人工批准、计划、收据、决策包与决策记录**都不等于** data qualification PASS，
+  Phase 切换仍是 L3 人工 Gate。
 
 ## 11. 强制约束速查（团队决定）
 
