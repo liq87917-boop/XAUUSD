@@ -7,6 +7,10 @@
   输出机器可读的 Phase 3.3 Author / News 资格缺口（blocker 保持 BLOCKED）；
 - :mod:`src.monitoring.evidence_readiness`：证据就绪度 / preflight（GOLD-006），
   量化证据入口台账与阈值之间的 remaining gap，并支持一键资格复核（blocker 恒为 active）；
+- :mod:`src.monitoring.evidence_gap_diagnostic`：``PHASE3_3_DATA`` 人工证据缺口的只读
+  Readiness Diagnostic（GOLD-026），以四态分类（code-ready / evidence-missing /
+  human-verification-required / gate-blocked）汇总缺口与必须人工完成的步骤
+  （blocker 恒为 active，工具永不推进 L3 / L4）；
 - :mod:`src.monitoring.report`：组合报告（Markdown / 稳定 JSON）。
 
 调用入口见 ``scripts/report_collector_health.py`` 与 ``scripts/evidence_readiness.py``。
@@ -55,6 +59,15 @@ _LAZY_EXPORTS_BY_MODULE: Final[dict[str, tuple[str, ...]]] = {
         "QualificationGap", "QualificationReport", "build_evidence_intake_section",
         "load_qualification_report", "render_qualification_report",
     ),
+    "evidence_gap_diagnostic": (
+        "AUTHORIZATION_CONTRACT_FIELDS", "AVAILABILITY_CONTRACT_FIELDS", "DIAGNOSTIC_KIND",
+        "DIAGNOSTIC_NOTE", "DIAGNOSTIC_SCHEMA_VERSION", "GAP_CATEGORIES",
+        "MANDATORY_HUMAN_STEPS", "TIME_CONTRACT_FIELDS", "DiagnosticItem",
+        "EvidenceGapDiagnostic", "HumanStep", "HumanStepSpec", "ManifestDiagnostic",
+        "ManifestFact", "NonQualifyingEvidenceItem", "ReadinessClass",
+        "StepVerification", "build_gap_diagnostic", "build_manifest_diagnostic",
+        "load_gap_diagnostic", "render_gap_diagnostic_markdown",
+    ),
     "report": (
         "MONITORING_SCHEMA_VERSION", "MonitoringReport", "REPORT_TITLE",
         "load_monitoring_report", "render_monitoring_report",
@@ -99,40 +112,61 @@ def __dir__() -> list[str]:
     return sorted(set(globals()) | set(_LAZY_EXPORTS))
 
 __all__ = [
+    "AUTHORIZATION_CONTRACT_FIELDS",
+    "AVAILABILITY_CONTRACT_FIELDS",
     "DEFAULT_STALE_AFTER",
     "DEFAULT_WINDOW_HOURS",
+    "DIAGNOSTIC_KIND",
+    "DIAGNOSTIC_NOTE",
+    "DIAGNOSTIC_SCHEMA_VERSION",
     "EVIDENCE_INTAKE_NOTE",
     "EVIDENCE_INTAKE_SCHEMA_VERSION",
     "FAILED_STREAK_THRESHOLD",
+    "GAP_CATEGORIES",
+    "MANDATORY_HUMAN_STEPS",
     "MONITORING_SCHEMA_VERSION",
     "PHASE3_3_BLOCKER_CODE",
     "READINESS_NOTE",
     "READINESS_REPORT_TITLE",
     "READINESS_SCHEMA_VERSION",
     "REPORT_TITLE",
+    "TIME_CONTRACT_FIELDS",
     "AuthorGap",
     "BatchQuantification",
     "CheckStatus",
+    "DiagnosticItem",
+    "EvidenceGapDiagnostic",
     "EvidenceIntakeSection",
     "EvidenceReadinessReport",
     "HealthReport",
     "HealthState",
+    "HumanStep",
+    "HumanStepSpec",
+    "ManifestDiagnostic",
+    "ManifestFact",
     "MonitoringReport",
+    "NonQualifyingEvidenceItem",
     "ProcessorCounts",
     "ProcessorState",
     "ProcessorSummary",
     "QualificationGap",
     "QualificationReport",
     "ReadinessCheck",
+    "ReadinessClass",
     "SchedulerSummary",
     "ScopeReadiness",
     "SourceHealth",
+    "StepVerification",
     "build_evidence_intake_section",
+    "build_gap_diagnostic",
+    "build_manifest_diagnostic",
     "build_readiness_report",
     "classify_source_state",
+    "load_gap_diagnostic",
     "load_health_report",
     "load_monitoring_report",
     "load_qualification_report",
+    "render_gap_diagnostic_markdown",
     "render_health_report",
     "render_monitoring_report",
     "render_qualification_report",

@@ -1445,9 +1445,49 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   from-import / star-import / 重复与交错导入）在 **fresh subprocess** 中全部成功，且包初始化不再
   拉入对方包（`tests/integration/test_evidence_import_order.py`）；`__all__` 与惰性表同源、每个
   公开名 `is` 其定义子模块上的对象、源码级禁止 eager 子模块导入
-  （`tests/unit/test_lazy_package_exports.py`）；12 个 `scripts/evidence_*.py` +
+  （`tests/unit/test_lazy_package_exports.py`）；13 个 `scripts/evidence_*.py` +
   `scripts/intake_evidence.py` + `scripts/report_collector_health.py` 均可 import + `--help`
   可用，且 cwd 为空的临时目录 → 断言**零文件写入**（`tests/integration/test_evidence_cli_smoke.py`）。
+
+### PHASE3_3_DATA 证据缺口只读诊断（`scripts/evidence_gap_diagnostic.py`，GOLD-026）
+
+> **合规红线**：本项**只做只读诊断** —— 不采集、不写库、不联网、不绕过 robots / 证书、
+> 不放宽任何资格门槛；`PHASE3_3_DATA` **保持 BLOCKED**，L3 / L4 只能人工推进。
+
+- **一句话**：把"还缺什么、必须由谁完成"汇总成**单一**诊断（机器可读 JSON + 人类可读 Markdown），
+  供 GPT 与人工判断剩余的真实授权 Author / News 证据缺口；
+- **复用而不复制**：缺口 / 阈值 / 清单完全复用 readiness（GOLD-006）+ handoff（GOLD-008）+
+  inbox manifest 预检（GOLD-011）+ `evidence-intake-v1` 契约字段与原因码，**不新增 / 不降低**阈值；
+- **四态分类**（每项机器可读）：`CODE_READY`（代码 / 契约已就绪）/
+  `EVIDENCE_MISSING`（真实证据缺失、未 ingest 或未达标）/
+  `HUMAN_VERIFICATION_REQUIRED`（证据已在，法律效力 / 出处 / 时间语义只能人工核验）/
+  `GATE_BLOCKED`（`PHASE3_3_DATA` 与 L3 / L4 人工 Gate，工具永不解除）；
+- **必看结论**：顶层 `readiness` 恒为 `GATE_BLOCKED`；`advance_allowed` /
+  `l3_l4_auto_advance_allowed` / `data_qualification_passed` / `phase_transition_allowed`
+  恒为 `false`；Mock / 模板 / 示例一律 `counts_toward_eligibility=false`；
+- **不伪造缺失字段**：`published_at` / `collected_at` / `effective_at` / `available_at` / OOS
+  证据缺失时只报告事实与人工下一步，**绝不**用当前时间 / 文件 mtime / 抓取时间 / 推断值填补；
+- 用法：
+
+  ```bash
+  # ① 只读诊断（默认只打印 stdout；零写入、零网络）
+  .venv\Scripts\python.exe -m scripts.evidence_gap_diagnostic --json
+
+  # ② 固定审计时点 + 纳入本地候选 manifest 事实（仍零写入、不 ingest）
+  .venv\Scripts\python.exe -m scripts.evidence_gap_diagnostic \
+      --as-of 2026-09-22T12:00:00+00:00 --inbox-dir logs/evidence/inbox
+
+  # ③ 唯一写开关：显式 --out 原子落盘诊断本身（不写库、不 intake、不解除 BLOCKED）
+  .venv\Scripts\python.exe -m scripts.evidence_gap_diagnostic --json \
+      --out logs/evidence/gap_diagnostic.json
+  ```
+
+- 退出码：`0` 无实质证据缺口（gate 仍 BLOCKED）/ `2` 参数或输入错误 /
+  `4` `--out` 不可写 / `5` 仍有实质证据缺口（**当前预期**：`PHASE3_3_DATA` 保持 BLOCKED）；
+- 回归测试：`tests/unit/test_evidence_gap_diagnostic.py`（25 项）+
+  `tests/integration/test_evidence_gap_diagnostic_integration.py`（8 项），其中包含
+  "量化门槛全达标仍 BLOCKED"、"mtime 绝不作为证据时间"、"无网络 / 无写库 / 无 `os.stat`"
+  等源码级与运行期守卫。
 
 ## 8. 数据模型
 

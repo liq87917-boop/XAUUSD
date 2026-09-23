@@ -4070,3 +4070,104 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
 - 建议下一步：GPT 依据 §2.7 用真实 result sha256 与对应 commit sha 建档
   （可声明 `reviewed_from` 作为历史覆盖下限），此后门禁才可能转绿；建档属 GPT 职责，
   Cline / DeepSeek 永远只读。
+
+## 第八十九轮（2026-09-23）：GOLD-026 — PHASE3_3_DATA 证据缺口只读 Readiness Diagnostic
+
+### 1. 背景
+
+- `PHASE3_3_DATA` 的真实缺口此前分散在 readiness（GOLD-006）/ handoff（GOLD-008）/
+  inbox 预检（GOLD-011）/ `evidence-intake-v1` 契约与多个 CLI 里：GPT 与人工每轮都要手工重建
+  "**还缺什么、必须由谁完成**"，且"代码已经就绪"与"真实证据仍缺"很容易被混读；
+- 本轮只做**只读诊断**：不采集、不写库、不联网、不伪造、不放宽任何资格门槛；
+  `PHASE3_3_DATA` **保持 BLOCKED**，L3 / L4 只能人工推进。
+
+### 2. 交付内容
+
+- `src/monitoring/evidence_gap_diagnostic.py`（新增，**只读**）：
+  - **四态分类** `ReadinessClass`：`CODE_READY`（代码 / 契约已就绪）/ `EVIDENCE_MISSING`
+    （真实证据缺失、未 ingest 或未达标）/ `HUMAN_VERIFICATION_REQUIRED`（证据已在，
+    法律效力 / 出处 / 时间语义只能人工核验）/ `GATE_BLOCKED`（`PHASE3_3_DATA` 与 L3 / L4 人工 Gate）；
+  - `DiagnosticItem`：`key` / `category` / `scope` / `readiness` / `machine_fact` /
+    `human_next_step` / `current` / `required` / `missing_fields` / `missing_count` /
+    `references` / 证据时间窗，`mock_or_template_qualifies` **恒 false**；
+  - `ManifestFact` / `ManifestDiagnostic`：复用 **GOLD-011** `scan_inbox` 的只读预检，
+    给出**字段级**事实（声明 / 缺失字段、时间语义与 availability 声明、合成标记、原因码、行计数），
+    `qualifies` 恒 false（候选 ≠ 授权已核验 ≠ 资格通过）；对 inbox 新增必填项做**契约漂移**
+    fail-closed（`ValueError`，绝不静默忽略）；
+  - `HumanStep` + `MANDATORY_HUMAN_STEPS`：固定的 6 步人工清单（提供授权证据 / 核验授权法律效力 /
+    提供并核验独立可用证据 / 达到既有量化门槛 / 排除 Mock 与模板 / L3 人工 Gate），
+    每步带 `verification`（`MACHINE_CONFIRMED` / `MACHINE_UNSATISFIED` / `HUMAN_ONLY`，未登记步骤
+    一律按最保守的 `HUMAN_ONLY` 处理）且 `blocking` 恒 true；阈值文本由 `src.alpha.evidence_gate`
+    常量格式化（**不另造数字**）；
+  - `EvidenceGapDiagnostic`：顶层 `readiness` **恒 `GATE_BLOCKED`**，
+    `blocker_active` / `human_gate_required` 恒 true，
+    `data_qualification_passed` / `phase_transition_allowed` / `advance_allowed` /
+    `l3_l4_auto_advance_allowed` 恒 false（**硬编码**，不被上游或被篡改输入透传）；
+    25 个诊断项（4 契约 + 3 门禁 + Author 8 + News 10）+ 分类计数 + 不计资格证据 + manifest 段；
+  - `build_gap_diagnostic`（纯函数、确定性排序）/ `build_manifest_diagnostic`（纯映射）/
+    `load_gap_diagnostic`（只读台账 + 可选**本地** `--inbox-dir` 预检；缺目录 fail-closed）/
+    `render_gap_diagnostic_markdown`；
+  - **复用而不复制**：readiness（GOLD-006）+ handoff（GOLD-008）+ inbox（GOLD-011）+
+    `evidence-intake-v1` 字段与原因码 + `src.alpha.evidence_gate` 阈值；
+    **未新增、未降低**任何资格阈值，也未改动既有 evidence 模块与 `src/alpha/**`；
+- `scripts/evidence_gap_diagnostic.py`（新增）：`--inbox-dir` / `--as-of` / `--json` /
+  `--out`（**唯一**写开关，复用 `atomic_write_text` 原子写）；**没有**任何 intake / 写库 /
+  `qualify` / `approve` / `advance` 参数；退出码 `0` 无实质证据缺口（gate 仍 BLOCKED）/
+  `2` 参数或输入错误 / `4` `--out` 不可写 / `5` 仍有实质证据缺口（**预期** BLOCKED）；
+- `src/monitoring/__init__.py`：新增 `evidence_gap_diagnostic` 惰性导出（21 个新公开名 +
+  模块说明），`__all__` 与惰性表保持同源（既有门禁用例覆盖）。
+
+### 3. 测试结果
+
+- `pytest tests/unit/test_evidence_gap_diagnostic.py -q` → **25 passed**：
+  空库 / 部分达标 / 门槛全达标三态分类；顶层恒 `GATE_BLOCKED` 与安全布尔全 false；
+  25 项 key 的**确定性顺序**与分类合法性；"除 `as_of` 外无任何时间戳"正则断言；
+  `NOT_OOS_ELIGIBLE` → `EVIDENCE_MISSING`；契约引用与阈值同源（`field_by_name` /
+  `evidence_gate` 常量 / `MANIFEST_REQUIRED_FIELDS`）；重复构造 byte-stable；
+  人工步骤 `blocking` 恒 true 与 `verification` 语义；不计资格证据恒 false；
+  manifest 字段级事实 / 缺声明只报事实 / 合成候选永不 qualify / **mtime 绝不作为证据时间**；
+  缺 `--inbox-dir` 与 naive `as_of` fail-closed；源码级守卫（只 import 既有模块、
+  无 `open` / `os.stat` / `getmtime` / `utime` / 网络 / `intake_evidence` / `commit`）；
+  Markdown 保留 blocker 且不回显证据正文；
+- `pytest tests/integration/test_evidence_gap_diagnostic_integration.py -q` → **8 passed**：
+  空库 → 退出 `5`、`advance_allowed=false`、**数据库零变化**；CLI 无
+  `qualify` / `approve` / `advance` / `--no-dry-run` 参数（未知参数退出 `2`）；
+  `--out` 是唯一写开关（默认零写入）；`--inbox-dir` 只读预检（`qualifies=false`、零 ingest）；
+  缺目录 fail-closed（退出 `2`、stdout 为空）；`--out` 不可写 → 退出 `4`；
+  **真实 intake 写入达标证据后仍 `GATE_BLOCKED`**（实质缺口归零、退出 `0`，但
+  `data_qualification_passed` / `advance_allowed` 仍 false、仍需 L3 人工决策）；
+- `pytest tests/unit/test_lazy_package_exports.py -q` → **15 passed**（包边界未漂移）；
+- `ruff check .` → **All checks passed!**；`mypy config database src scripts` →
+  **Success: no issues found in 174 source files**（GOLD-025 为 172，新增本模块 + 本 CLI）；
+- 全量 `pytest tests -q` → **2948 passed / 1 skipped in 321.82s**（1 skipped 仍为
+  `test_text_similarity.py` 的"已安装 jieba"分支）；新 CLI 已登记进
+  `tests/integration/test_evidence_cli_smoke.py`，因此 `scripts/evidence_gap_diagnostic` 的
+  fresh-subprocess import / `--help` / 空 cwd **零写入**门禁也包含在内；
+- 真实端到端复核（临时 SQLite + 空 cwd，真实子进程）：`python -m scripts.evidence_gap_diagnostic
+  --json --as-of 2026-09-23T00:00:00+00:00` → 退出码 `5`、cwd **零文件写入**、
+  `advance_allowed=false` / `blocker_active=true`、
+  `class_counts = {CODE_READY: 4, EVIDENCE_MISSING: 18, HUMAN_VERIFICATION_REQUIRED: 0,
+  GATE_BLOCKED: 3}`、25 个诊断项 / 6 个人工步骤、报告的**唯一**时间戳就是 `as_of`。
+
+
+### 4. 范围守规
+
+- 只读：零网络（不抓取、不绕过 robots / 证书）、零数据库写入、零模型训练、零交易；
+  默认只打印 stdout，唯一写开关是显式 `--out`（原子写）；
+- 未新增 / 未升级任何依赖，未新增 migration / schema，未安装或修改任何 OS 计划任务；
+- 未改 Phase 3.3 blocker / 数据资格阈值 / L3-L4 Gate / `LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；未触碰 `.ai/tasks/**`、`.ai/results/**`、
+  `.ai/PROJECT_STATE.json`、`src/alpha/**`、`src/execution/**`；
+- 写入测试全部发生在 `tmp_path`（临时 SQLite / 临时 manifest），对真实仓库零写入；
+- Cline 未执行任何 Git 写操作（提交由 Orchestrator 负责）。
+
+### 5. 遗留 / 下一步
+
+- 诊断**不是**资格判定器：它只回答"还缺什么、必须由谁完成"；`PHASE3_3_DATA` 仍由**真实授权
+  证据 + 人工 Gate** 决定，本工具不采集、不签发、不推进；
+- manifest 事实只来自**显式** `--inbox-dir` 的本地目录（缺省不扫描）：未提供时合成标记与
+  时间语义声明不可见（诊断会显式标注"未提供候选目录"）；
+- 建议下一步：GPT / 人工按诊断输出的 `human_steps`（含每步 `verification` 状态）与
+  `EVIDENCE_MISSING` 项清单补齐真实授权证据；补齐后重跑
+  `scripts.evidence_gap_diagnostic --json` 复核，再走 `evidence_handoff` / 决策包与 **L3 人工 Gate**。
+

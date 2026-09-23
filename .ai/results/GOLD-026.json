@@ -1,0 +1,80 @@
+{
+  "task_id": "GOLD-026",
+  "title": "建立 PHASE3_3_DATA 人工证据缺口的只读 Readiness Diagnostic",
+  "status": "completed",
+  "finished_at": "2026-09-23T15:07:53+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/monitoring/__init__.py",
+    " M tests/integration/test_evidence_cli_smoke.py",
+    "?? scripts/evidence_gap_diagnostic.py",
+    "?? src/monitoring/evidence_gap_diagnostic.py",
+    "?? tests/integration/test_evidence_gap_diagnostic_integration.py",
+    "?? tests/unit/test_evidence_gap_diagnostic.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md                              | 101 +++++++++++++++++++++++++++\n README.md                                    |  42 ++++++++++-\n TECH_DEBT.md                                 |  46 ++++++++++++\n src/monitoring/__init__.py                   |  34 +++++++++\n tests/integration/test_evidence_cli_smoke.py |   1 +\n 5 files changed, 223 insertions(+), 1 deletion(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T14:44:59+08:00",
+      "finished_at": "2026-09-23T15:07:53+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 141,
+      "duration_ms": 1044658,
+      "usage": {
+        "inputTokens": 36074986,
+        "outputTokens": 164070,
+        "cacheReadTokens": 35855104,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.23898961199999996
+      },
+      "cline_final_text": "Submission recorded (verified): ## 完成内容（GOLD-026：PHASE3_3_DATA 人工证据缺口的只读 Readiness Diagnostic）\n\n**新增库模块** `src/monitoring/evidence_gap_diagnostic.py`（只读、纯函数为主）：\n- **四态分类** `ReadinessClass`：`CODE_READY` / `EVIDENCE_MISSING` / `HUMAN_VERIFICATION_REQUIRED` / `GATE_BLOCKED`；\n- `DiagnosticItem`（key / category / scope / readiness / machine_fact / human_next_step / current / required / **missing_fields** / missing_count / references / 证据时间窗，`mock_or_template_qualifies` 恒 false），共 **25 项**，按 Author/News、授权/来源、published_at/collected_at/effective_at/availability-OOS、独立时间语义、样本量/覆盖、契约、门禁分类，确定性排序；\n- **复用而不复制**：readiness(GOLD-006) + handoff(GOLD-008) + inbox manifest 只读预检(GOLD-011 `scan_inbox`) + `evidence-intake-v1` 字段与原因码 + `src.alpha.evidence_gate` 阈值；**未新增/未降低任何阈值**，未改 `src/alpha/**` 或既有 evidence 模块；\n- `ManifestFact`/`ManifestDiagnostic`（字段级 manifest 事实，`qualifies` 恒 false）、`HumanStep`+`MANDATORY_HUMAN_STEPS`（6 步人工清单，含 `MACHINE_CONFIRMED`/`MACHINE_UNSATISFIED`/`HUMAN_ONLY`，`blocking` 恒 true）、`NonQualifyingEvidenceItem`（模板/Mock/示例恒 `counts_toward_eligibility=false`）；\n- 顶层 `readiness` **恒 `GATE_BLOCKED`**，`blocker_active`/`human_gate_required` 恒 true，`data_qualification_passed`/`phase_transition_allowed`/`advance_allowed`/`l3_l4_auto_advance_allowed` 恒 false（硬编码）；\n- `build_gap_diagnostic`（纯函数）/`build_manifest_diagnostic`/`load_gap_diagnostic`（只读台账 + 可选本地 `--inbox-dir`，缺目录 fail-closed）/`render_gap_diagnostic_markdown`。\n\n**新增 CLI** `scripts/evidence_gap_diagnostic.py`：`--inbox-dir` / `--as-of` / `--json` / `--out`（唯一写开关，`atomic_write_text` 原子写）；**无任何** intake/写库/`qualify`/`approve`/`advance` 参数；退出码 `0`（无实质缺口，gate 仍 BLOCKED）/`2`/`4`/`5`（预期 BLOCKED）。\n另更新 `src/monitoring/__init__.py` 惰性导出（21 个新名字 + 模块说明），README（§7 新小节 + CLI 计数 12→13）、PROGRESS_LOG（第八十九轮）、TECH_DEBT（TD-61 表行 + 详情 + 变更日志行），并登记新 CLI 进 `tests/integration/test_evidence_cli_smoke.py`。\n\n## 修改/新增文件（git status 仅这 9 个路径）\n- 新增：`src/monitoring/evidence_gap_diagnostic.py`、`scripts/evidence_gap_diagnostic.py`、`tests/unit/test_evidence_gap_diagnostic.py`、`tests/integration/test_evidence_gap_diagnostic_integration.py`\n- 修改：`src/monitoring/__init__.py`、`tests/integration/test_evidence_cli_smoke.py`、`README.md`、`PROGRESS_LOG.md`、`TECH_DEBT.md`\n- **未触碰** `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`src/alpha/**`、`src/execution/**`（不存在）、`database/**`；未做任何 Git 写操作。\n\n## 测试结果（实测）\n- `pytest tests/unit/test_evidence_gap_diagnostic.py -q` → **25 passed**（含\"除 as_of 外无任何时间戳\"正则断言、mtime 恒不作为证据时间、合成候选永不 qualify、源码级无网络/无写库/无 `open`/`os.stat`/`getmtime`/`utime` 守卫、契约与阈值同源校验）\n- `pytest tests/integration/test_evidence_gap_diagnostic_integration.py -q` → **8 passed**（空库退出 5 + 数据库零变化；无 qualify/advance 参数；`--out` 为唯一写开关；`--inbox-dir` 只读不 ingest；缺目录 fail-closed；**真实 intake 写入达标证据后仍 GATE_BLOCKED**）\n- `pytest tests/unit/test_lazy_package_exports.py -q` → **15 passed**；`pytest tests/integration/test_evidence_cli_smoke.py -q` → **31 passed**\n- 全量 `.venv\\Scripts\\python.exe -m pytest tests -q` → **2948 passed / 1 skipped in 321.82s**（1 skipped 仍为既有 jieba 分支）\n- `ruff check .` → **All checks passed!**；`mypy config database src scripts` → **Success: no issues found in 174 source files**\n- **真实子进程端到端**（临时 SQLite + 空 cwd）：`python -m scripts.evidence_gap_diagnostic --json --as-of 2026-09-23T00:00:00+00:00` → 退出码 `5`、cwd **零写入**、`advance_allowed=false`、`blocker_active=true`、`class_counts={CODE_READY:4, EVIDENCE_MISSING:18, HUMAN_VERIFICATION_REQUIRED:0, GATE_BLOCKED:3}`、25 项 / 6 步、报告**唯一**时间戳就是 `as_of`；`--help` 仅暴露 4 个只读参数。\n\n## 是否满足 acceptance\n- ✅ 单一诊断即可看到剩余真实证据缺口与\"必须人工完成\"的步骤（`EVIDENCE_MISSING` 项 + `human_steps` 含每步核验状态与证据入口）；\n- ✅ 任何缺失 / Mock / 时间语义不可信场景均 fail-closed：顶层恒 `GATE_BLOCKED`、`advance_allowed`/`l3_l4_auto_advance_allowed` 恒 false、合成证据恒不计资格、不用当前时间/mtime/抓取时间填补缺失字段；\n- ✅ 全量 pytest/ruff/mypy 通过；Phase 3.4、Alpha、交易与 L3/L4 均未启动（未改 Phase/阈值/Gate/交易开关）。\n\n## 遗留问题\n- `PHASE3_3_DATA` 仍 BLOCKED：库内仍无足量真实授权证据，本工具不采集、不签发、不推进（由业务方提供并人工核验后重跑诊断）；\n- manifest 事实仅来自**显式** `--inbox-dir`（缺省不扫描），未提供时合成标记与时间语义声明不可见（诊断会显式标注）；\n- 若数据库不可用，CLI 会抛 SQLAlchemy 异常（与既有 `scripts/evidence_*.py` 同风格，属任务外事项，未擅自扩大改动）。\n",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/monitoring/__init__.py",
+        " M tests/integration/test_evidence_cli_smoke.py",
+        "?? scripts/evidence_gap_diagnostic.py",
+        "?? src/monitoring/evidence_gap_diagnostic.py",
+        "?? tests/integration/test_evidence_gap_diagnostic_integration.py",
+        "?? tests/unit/test_evidence_gap_diagnostic.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md                              | 101 +++++++++++++++++++++++++++\n README.md                                    |  42 ++++++++++-\n TECH_DEBT.md                                 |  46 ++++++++++++\n src/monitoring/__init__.py                   |  34 +++++++++\n tests/integration/test_evidence_cli_smoke.py |   1 +\n 5 files changed, 223 insertions(+), 1 deletion(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 17%]\n........................................................................ [ 19%]\n........................................................................ [ 21%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 29%]\n........................................................................ [ 31%]\n........................................................................ [ 34%]\n........................................................................ [ 36%]\n........................................................................ [ 39%]\n........................................................................ [ 41%]\n........................................................................ [ 43%]\n........................................................................ [ 46%]\n........................................................................ [ 48%]\n........................................................................ [ 51%]\n........................................................................ [ 53%]\n........................................................................ [ 56%]\n........................................................................ [ 58%]\n........................................................................ [ 61%]\n........................................................................ [ 63%]\n........................................................................ [ 65%]\n........................................................................ [ 68%]\n........................................................................ [ 70%]\n........................................................................ [ 73%]\n........................................................................ [ 75%]\n........................................................................ [ 78%]\n........................................................................ [ 80%]\n........................................................................ [ 83%]\n........................................................................ [ 85%]\n........................................................................ [ 87%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 95%]\n........................................................................ [ 97%]\n........................s............................................    [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2948 passed, 1 skipped in 322.54s (0:05:22)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 174 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
