@@ -4,8 +4,8 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-032",
-  "last_completed_task": "GOLD-031",
+  "current_task": "GOLD-033",
+  "last_completed_task": "GOLD-032",
   "last_reviewed_task": "GOLD-027",
   "blockers": [
     {
@@ -15,16 +15,37 @@
     }
   ],
   "resolved_blockers": [
-    {"code": "VALIDATION_PYTHON_ENV", "resolved_by": "project .venv validation confirmed: pytest runs successfully"},
-    {"code": "CLINE_MODEL_QUOTA_OR_CONFIG", "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"},
-    {"code": "CLINE_CLI_INSTALLATION", "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"},
-    {"code": "CLINE_PROVIDER_BILLING_ROUTE", "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; launcher hard-pins AI_CLINE_PROVIDER=deepseek and provider fatal errors fail fast."},
-    {"code": "GPT_REVIEW_LEDGER_BOOTSTRAP", "resolved_by": "2026-09-23: GPT created .ai/GPT_REVIEW_LEDGER.json with cryptographically bound PASS reviews for GOLD-025 through GOLD-027 and advanced last_reviewed_task to GOLD-027."}
+    {
+      "code": "VALIDATION_PYTHON_ENV",
+      "resolved_by": "project .venv validation confirmed: pytest runs successfully"
+    },
+    {
+      "code": "CLINE_MODEL_QUOTA_OR_CONFIG",
+      "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"
+    },
+    {
+      "code": "CLINE_CLI_INSTALLATION",
+      "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
+    },
+    {
+      "code": "CLINE_PROVIDER_BILLING_ROUTE",
+      "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; launcher hard-pins AI_CLINE_PROVIDER=deepseek and provider fatal errors fail fast."
+    },
+    {
+      "code": "GPT_REVIEW_LEDGER_BOOTSTRAP",
+      "resolved_by": "2026-09-23: GPT created .ai/GPT_REVIEW_LEDGER.json with cryptographically bound PASS reviews for GOLD-025 through GOLD-027 and advanced last_reviewed_task to GOLD-027."
+    }
   ],
-  "next_action": "Execute GPT-approved GOLD-032 then GOLD-033. GOLD-032 validates Review Ledger integrity/continuity without granting Executor review authority; GOLD-033 builds a read-only human evidence submission readiness bundle. After GOLD-033, stop for real authorized evidence/human action unless GPT identifies a concrete non-duplicative blocker-facing task. Keep PHASE3_3_DATA BLOCKED; do not enter Phase 3.4 or cross L3/L4 gates.",
+  "next_action": "Execute GPT-approved GOLD-033 then GOLD-034/035/036. GPT rolling-queue autopilot must maintain three approved follow-on tasks beyond the current/running task whenever legitimate blocker-facing or control-plane work exists. Cline/DeepSeek remain Executor-only and must never generate/refill tasks or advance Phase. PHASE3_3_DATA stays BLOCKED; do not enter Phase 3.4 or cross L3/L4. If a true human-only hard gate leaves no legitimate parallel work, stop at an explicit gated tail instead of inventing filler tasks.",
   "human_gates": [
-    {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."},
-    {"code": "PHASE3_3_L3_DECISION", "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."}
+    {
+      "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
+      "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."
+    },
+    {
+      "code": "PHASE3_3_L3_DECISION",
+      "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."
+    }
   ],
   "invariants": [
     "LIVE_TRADING=false",
@@ -36,6 +57,12 @@
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ],
   "queue_target_size": 3,
-  "task_queue": ["GOLD-032", "GOLD-033"],
-  "queue_status": "ACTIVE"
+  "task_queue": [
+    "GOLD-033",
+    "GOLD-034",
+    "GOLD-035",
+    "GOLD-036"
+  ],
+  "queue_status": "ACTIVE",
+  "planner_lookahead_size": 3
 }

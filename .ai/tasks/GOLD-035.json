@@ -1,0 +1,54 @@
+{
+  "task_id": "GOLD-035",
+  "type": "CONTROL_PLANE_QUEUE_LOW_WATERMARK",
+  "title": "让 Orchestrator 在队列低水位主动请求 GPT Planner",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-034"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把 GOLD-034 的只读 refill facts 接入 Orchestrator 生命周期：任务完成并 push 后或 idle 时，只要当前任务之后不足 3 个已批准任务，就明确产生 GPT_PLANNER_REFILL_REQUIRED 提示，而不是静默等到队列耗尽。",
+  "requirements": [
+    "在 successful commit+push 后立即计算 Planner refill facts，并在 deficit>0 时输出结构化日志：follow_on_count/target/deficit/head/reason_codes。",
+    "idle/no-runnable 路径同样能报告低水位，但必须去重/节流，避免每 20 秒刷屏；状态变化时可立即重新提示。",
+    "允许把只读请求镜像写入 .ai/runtime/** 供人工诊断，但不得写 .ai/tasks、PROJECT_STATE、GPT_REVIEW_LEDGER 或 result。",
+    "已有已批准任务必须继续按依赖顺序执行；低水位提示不得阻塞当前合法任务，也不得绕过 blocked/human-gated queue head。",
+    "加入回归测试证明 Executor 仍拒绝 generate_follow_on_task/refill_rolling_queue/modify_project_state。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/ai_orchestrator.py",
+      "orchestrator/planner_refill_request.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**"
+    ]
+  },
+  "constraints": [
+    "只请求 GPT Planner，不调用任何 LLM/provider API，不把 DeepSeek 提升为 Planner。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "队列在耗尽前即可明确看到 GPT_PLANNER_REFILL_REQUIRED，而非仅在 No runnable task 后才发现断粮。",
+    "Orchestrator 只报告/请求，不生成任务、不改项目状态、不跨 Gate。",
+    "全量 pytest/ruff/mypy 通过，既有恢复/Git sync/rolling queue 行为无回归。"
+  ]
+}

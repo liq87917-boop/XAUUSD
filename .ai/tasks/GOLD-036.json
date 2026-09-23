@@ -1,0 +1,54 @@
+{
+  "task_id": "GOLD-036",
+  "type": "CONTROL_PLANE_GPT_AUTOPILOT_CONTRACT",
+  "title": "固化 GPT 三任务前瞻自动补队列契约与端到端门禁",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-035"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把“GPT 唯一 Planner + 当前任务之外保留 3 个 follow-on tasks”的策略固化成机器可测试契约，防止后续改动再次出现只剩最后一个任务才发现队列断档。",
+  "requirements": [
+    "在只读 planner/refill facts 中明确 lookahead_target=3、follow_on_count、deficit、refill_required、hard_gate_tail_allowed、executor_can_refill=false。",
+    "增加端到端回归矩阵：running+3 follow-ons=>无需补；running+2=>缺1；running+0=>缺3；可运行任务必须位于 human-gated tail 前；完全 human-only 时允许停线但不得制造 filler。",
+    "契约必须证明 PHASE3_3_DATA blocker 存在时自动规划只能生成 blocker-facing/control-plane/证据准备任务，绝不允许 Phase 3.4 功能任务被标记可执行。",
+    "更新 DEVELOPMENT_PROTOCOL/README 或运维说明，写清 GPT 云端条件检查与本地三任务缓冲的职责边界以及异常恢复方法。",
+    "不得引入 OpenAI/DeepSeek API key 到仓库，不得让本地 Executor 直接调用 GPT 生成 task。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**"
+    ]
+  },
+  "constraints": [
+    "GPT 规划权、Review 权、Architect 权不可下放。",
+    "真正无合法工作时允许 human-gated stop；不得为满足数量指标创造无价值任务。",
+    "PHASE3_3_DATA、L3/L4、LIVE_TRADING=false、ALLOW_EXTERNAL_ORDER_SUBMISSION=false 全部保持不变。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "机器测试能阻止任何把 Executor 变成 Planner、把 follow-on target 降为 0、或允许绕过 hard gate 的回归。",
+    "正常开发时当前任务之外始终以 3 个 GPT-approved follow-ons 为目标；真正 hard gate 是唯一允许不足目标的例外。",
+    "全量 pytest/ruff/mypy 通过；所有安全与数据资格红线保持不变。"
+  ]
+}

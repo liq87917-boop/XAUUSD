@@ -431,3 +431,31 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   把 tracked 修改还原回工作区，**不**重建原来的 staged 状态；恢复不覆盖历史 result，
   也不改写历史 attempt 语义。
 
+## 2.10 GPT Rolling Queue Autopilot / 三任务前瞻策略
+
+- **目标语义**：除当前正在执行或即将执行的 queue head 之外，GPT Planner 默认维持
+  **3 个已批准 follow-on tasks**（`planner_lookahead_size=3`）。因此当
+  `GOLD-033` 正在运行时，正常可见队列应至少包含
+  `GOLD-034 / GOLD-035 / GOLD-036` 三个后续任务。
+- **唯一规划权不变**：只有 GPT 可以创建 / 拆分 / 追加 task、补 rolling queue、
+  更新 `.ai/PROJECT_STATE.json` 或签发 review verdict。Cline / DeepSeek 仍只有
+  Executor 权限；任何 `generate_follow_on_task` / `refill_rolling_queue` 尝试必须
+  fail-closed。
+- **自动补给触发**：每个 task 在 validation、commit、push 全部完成并在远端可见后，
+  GPT Planner 应重新读取只读 planner facts；若当前任务之后的已批准 follow-on 数量
+  小于 3，则补足缺口。云端 Planner 条件检查受平台调度频率限制时，依靠三任务缓冲覆盖
+  检查间隔，而不是把规划权下放给 Executor。
+- **Hard Gate 处理**：若存在真实 human-only / external-evidence gate，先把仍然合法、
+  不跨 Gate 的 blocker-facing / control-plane 工作排在前面；最终可以放置
+  `auto_start=false` / `requires_human_approval=true` 的 gated tail。
+  若已经完全不存在合法并行工作，允许队列停在线上等待人工，不得为了凑满数量制造无意义任务。
+- **排序要求**：可运行任务必须排在 gated/deferred tail 之前。Orchestrator 不得跳过
+  queue head，因此禁止把 human-gated task 放在仍可执行任务之前。
+- **安全边界**：本策略绝不解除 `PHASE3_3_DATA` blocker，不得进入 Phase 3.4，
+  不得伪造 Author/News 授权、published_at / collected_at / effective_at /
+  availability / OOS 证据；`LIVE_TRADING=false` 与
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 保持不变。
+- **仓库侧职责**：Orchestrator 只负责产生确定性的“队列低水位 / Planner refill required”
+  事实与运行时提示；真正的 follow-on task 内容仍必须由 GPT 根据 task/result/commit/diff/tests
+  做 Review 后规划。
+

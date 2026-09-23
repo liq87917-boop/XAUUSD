@@ -1,0 +1,53 @@
+{
+  "task_id": "GOLD-034",
+  "type": "CONTROL_PLANE_PLANNER_HANDOFF",
+  "title": "建立 GPT Planner 队列补给请求事实包",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-033"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把 rolling queue 的低水位、缺口数量、最新完成/未评审事实、blocker 与 Human Gate 汇总为确定性的只读 Planner refill request，供 GPT 主控自动补足后续任务；Executor 绝不生成任务。",
+  "requirements": [
+    "新增只读 builder/CLI（建议 orchestrator/planner_refill_request.py），复用 planner_snapshot 的事实，不复制一套漂移的状态判断。",
+    "输出至少包含 schema/schema_version、queue_head、follow_on_count、lookahead_target=3、deficit、refill_required、latest_completed、completed_but_unreviewed、blockers、human_gates、safety_invariants 与稳定 reason_codes。",
+    "refill_required 只表达“需要 GPT 规划”，不得返回具体下一任务内容、不得决定 Phase、不得修改 task/state/ledger/result。",
+    "支持 stdout 纯 JSON；如支持 --output，仅允许写 .ai/runtime/** 或系统临时目录，禁止写 tracked planner/task/state 文件。",
+    "为 queue 足量、低水位、空队列、存在 L3/L4、仅剩 human-only hard gate、state/result 漂移等场景增加单元与集成回归。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**"
+    ]
+  },
+  "constraints": [
+    "GPT 仍是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 不得生成 follow-on task。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 能从单个确定性 JSON 判断是否缺后续任务及缺几个，但 Executor 无任何规划/写任务能力。",
+    "相同仓库事实产生相同核心 facts/digest；wall-clock 不参与资格判断。",
+    "全量 pytest/ruff/mypy 通过；Phase/Human Gate/交易安全边界不变。"
+  ]
+}
