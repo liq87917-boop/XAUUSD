@@ -38,6 +38,17 @@ Orchestrator 使用 **3-task rolling queue** 降低任务供给断档：
 - Task 可增加 `auto_start: false` 或 `requires_human_approval: true` 强制等待人工动作。
 - Task 可增加 `human_gate: "L1"|"L2"|"L3"|"L4"`；**L3/L4 永不自动跨越**，队列在该任务处停线。
 - 队列严格按任务文件顺序处理：第一个非终态任务若依赖未满足 / 被 BLOCKED / 等待 Human Gate，**不得跳过它执行后续任务**。
+- **元数据严格校验（fail-closed）**：Task 元数据违反任一条即停线，绝不静默跳过、绝不继续扫描后续任务：
+  - `depends_on` 只能是非空 task_id 字符串，或由非空 task_id 字符串组成的数组（缺字段 / `null` 视为无依赖）；
+  - `auto_start` / `requires_human_approval` 必须是真正的 bool（`true` / `false`）；字符串 `"true"`、数字 `1`、`null` 一律非法；
+  - `human_gate` 只接受 `L1` / `L2` / `L3` / `L4`（大小写不敏感），未知档位一律非法；
+  - result 状态只认 `pending` / `running` / `completed` / `blocked`，其它状态一律视为 unknown 并停线。
+- **依赖图 fail-closed 校验**：第一个非终态任务会连同其依赖闭包一起校验 self dependency、
+  直接 / 间接依赖环（含多节点环）、缺失依赖、依赖 task 损坏（JSON 损坏 / task_id 与文件名不一致）、
+  依赖元数据非法；命中任一项即停线，并给出稳定可读原因，例如
+  `dependency cycle: GOLD-018 -> GOLD-019 -> GOLD-020 -> GOLD-018`。
+- `blocked` 依赖会阻断所有（含间接）依赖它的任务；上述停线判断只读，**绝不重写历史 result**。
+- 队列诊断输出（`queue_diagnostic`）包含 pending count/target、首个停线 task 与停线原因，并仍受 1800s idle throttle 保护。
 - 一个任务只有在 validation 全通过、commit 完成且 push 成功后，Orchestrator 才会立即检查下一项；push pending 时先恢复 Git 同步，不得继续后续任务。
 - 任一依赖任务为 `blocked` 时，依赖它的后续任务保持等待；不得因为队列中还有其他任务就绕过失败。
 - Git 轮询仍默认每 **20 秒**一次；`No runnable task` 日志默认每 **1800 秒**最多打印一次，降日志噪声但不降低检测频率。

@@ -10,6 +10,7 @@ import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
 
 # ============================================================
 # 基础目录
@@ -64,6 +65,36 @@ BLOCKING_HUMAN_GATES = {
     "L3",
     "L4"
 }
+
+# Task 元数据允许出现的 human_gate 词表。
+# 词表以外的任何值（含拼写错误 / 未知档位）一律 fail-closed 停线，
+# 绝不静默降级为「无 Gate」。
+SUPPORTED_HUMAN_GATES = {
+    "L1",
+    "L2",
+    "L3",
+    "L4"
+}
+
+# result 终态：可以安全跳过，且绝不重写历史 result。
+TERMINAL_RESULT_STATUSES = {
+    "completed",
+    "blocked"
+}
+
+# 非终态 result：任务尚未收口，依赖它的任务必须继续等待。
+UNRESOLVED_RESULT_STATUSES = {
+    "pending",
+    "running"
+}
+
+# 已知 result 状态全集。
+# 集合以外的状态（例如损坏 result / 手写错误状态）视为 unknown，
+# 一律 fail-closed 停线。
+KNOWN_RESULT_STATUSES = (
+    TERMINAL_RESULT_STATUSES
+    | UNRESOLVED_RESULT_STATUSES
+)
 
 DEFAULT_MAX_ATTEMPTS = int(
     os.getenv(
@@ -724,19 +755,69 @@ def get_task_max_attempts(
 # Rolling Queue
 # ============================================================
 
-def get_task_dependencies(
-    task
+class TaskMetadataError(
+    ValueError
 ):
+    """Task 元数据非法。
+
+    属于安全语义错误：调用方必须 fail-closed 停线，
+    禁止静默跳过、禁止继续扫描后续任务。
+    """
+
+
+def qualify_reason(
+    task_id: str,
+    reason: str
+) -> str:
+    """确保停线原因始终以当前 task_id 开头，且不重复前缀。"""
+
+    prefix = f"{task_id}: "
+
+    if reason.startswith(prefix):
+        return reason
+
+    return f"{prefix}{reason}"
+
+
+def get_task_bool_flag(
+    task: dict[str, Any],
+    key: str,
+    default: bool
+) -> bool:
+    """严格读取布尔型 task 元数据。
+
+    只接受真正的 bool（`true` / `false`）。
+    字符串 `"true"`、数字 `1`、`null` 等一律 fail-closed。
+    """
+
+    value = task.get(key, default)
+
+    if not isinstance(value, bool):
+
+        raise TaskMetadataError(
+            f"{key} 必须是 bool 类型"
+        )
+
+    return value
+
+
+def get_task_dependencies(
+    task: dict[str, Any]
+) -> list[str]:
+    """严格读取并校验 depends_on。
+
+    只接受非空 task_id 字符串，或由非空 task_id 字符串组成的数组；
+    重复项去重且保持顺序。
+    类型错误 / 空 ID / 依赖自身一律 fail-closed 抛 TaskMetadataError。
+    """
 
     value = task.get(
         "depends_on",
         []
     )
 
-    if value in (
-        None,
-        ""
-    ):
+    # 未声明依赖（缺字段 / null）等价于无依赖。
+    if value is None:
         return []
 
     if isinstance(
@@ -751,7 +832,8 @@ def get_task_dependencies(
         value,
         list
     ):
-        raise ValueError(
+
+        raise TaskMetadataError(
             "depends_on 必须是字符串或字符串数组"
         )
 
@@ -762,22 +844,31 @@ def get_task_dependencies(
         )
     ).strip()
 
-    dependencies = []
-    seen = set()
+    dependencies: list[str] = []
+    seen: set[str] = set()
 
     for item in value:
 
-        dependency = str(
-            item
-        ).strip()
+        if not isinstance(
+            item,
+            str
+        ):
+
+            raise TaskMetadataError(
+                "depends_on 必须是字符串或字符串数组"
+            )
+
+        dependency = item.strip()
 
         if not dependency:
-            raise ValueError(
+
+            raise TaskMetadataError(
                 f"{task_id}: depends_on 包含空任务 ID"
             )
 
         if dependency == task_id:
-            raise ValueError(
+
+            raise TaskMetadataError(
                 f"{task_id}: depends_on 不允许依赖自身"
             )
 
@@ -796,8 +887,13 @@ def get_task_dependencies(
 
 
 def get_task_human_gate(
-    task
-):
+    task: dict[str, Any]
+) -> str | None:
+    """严格读取并校验 human_gate。
+
+    仅接受 `SUPPORTED_HUMAN_GATES` 词表内的档位（大小写不敏感）；
+    未知档位 / 非法类型一律 fail-closed 抛 TaskMetadataError。
+    """
 
     gate = task.get(
         "human_gate"
@@ -807,19 +903,40 @@ def get_task_human_gate(
         gate,
         dict
     ):
-        gate = gate.get(
-            "level"
-        )
 
-    if gate in (
-        None,
-        ""
-    ):
+        if "level" not in gate:
+
+            raise TaskMetadataError(
+                "human_gate 对象必须包含 level"
+            )
+
+        gate = gate["level"]
+
+    # 未声明 Gate（缺字段 / null / 空字符串）等价于无 Gate。
+    if gate is None:
         return None
 
-    return str(
-        gate
-    ).strip().upper()
+    if not isinstance(
+        gate,
+        str
+    ):
+
+        raise TaskMetadataError(
+            "human_gate 必须是字符串"
+        )
+
+    normalized = gate.strip().upper()
+
+    if not normalized:
+        return None
+
+    if normalized not in SUPPORTED_HUMAN_GATES:
+
+        raise TaskMetadataError(
+            f"human_gate 未知档位: {normalized}"
+        )
+
+    return normalized
 
 
 def task_result_status(
@@ -850,9 +967,381 @@ def task_result_status(
     )
 
 
+def build_dependency_graph(
+    task: dict[str, Any] | None = None
+) -> tuple[dict[str, list[str]], list[str]]:
+    """构建待处理任务的依赖图。
+
+    - `task=None`：覆盖队列里全部非终态任务（整体校验 / 诊断）。
+    - `task=<任务>`：只覆盖该任务及其依赖闭包（单任务 readiness 校验）。
+
+    返回 `(graph, errors)`：
+
+    - `graph`：`{task_id: [仍未完成的依赖 task_id, ...]}`。
+      已 completed / blocked 的依赖属于终态，不进入图，也不参与环检测。
+    - `errors`：稳定可读的结构性错误
+      （task 文件损坏 / 元数据非法 / 缺失依赖），带 owner task_id 前缀。
+    """
+
+    graph: dict[str, list[str]] = {}
+    errors: list[str] = []
+    pending: list[tuple[str, dict[str, Any] | None]] = []
+    queued: set[str] = set()
+
+    def enqueue(
+        task_id: str,
+        payload: dict[str, Any] | None
+    ) -> None:
+
+        if task_id in queued or task_id in graph:
+            return
+
+        queued.add(
+            task_id
+        )
+
+        pending.append(
+            (task_id, payload)
+        )
+
+    if task is None:
+
+        for task_file in sorted(
+            TASK_DIR.glob(
+                "*.json"
+            )
+        ):
+
+            task_id = task_file.stem
+
+            if task_result_status(
+                task_id
+            ) in TERMINAL_RESULT_STATUSES:
+                continue
+
+            enqueue(
+                task_id,
+                None
+            )
+
+    else:
+
+        enqueue(
+            str(
+                task.get(
+                    "task_id",
+                    ""
+                )
+            ).strip(),
+            task
+        )
+
+    while pending:
+
+        task_id, payload = pending.pop(0)
+
+        if payload is None:
+
+            try:
+
+                payload = load_task(
+                    TASK_DIR / f"{task_id}.json"
+                )
+
+            except Exception as exc:
+
+                errors.append(
+                    f"{task_id}: task file invalid: {exc}"
+                )
+
+                continue
+
+        try:
+
+            # 依赖 task 自身的元数据也必须合法，
+            # 否则它永远无法收口，依赖它的任务只能停线。
+            get_task_bool_flag(
+                payload,
+                "auto_start",
+                True
+            )
+
+            get_task_bool_flag(
+                payload,
+                "requires_human_approval",
+                False
+            )
+
+            get_task_human_gate(
+                payload
+            )
+
+            dependencies = get_task_dependencies(
+                payload
+            )
+
+        except TaskMetadataError as exc:
+
+            errors.append(
+                f"{task_id}: metadata invalid: {exc}"
+            )
+
+            continue
+
+        unresolved: list[str] = []
+
+        for dependency in dependencies:
+
+            dependency_file = (
+                TASK_DIR
+                /
+                f"{dependency}.json"
+            )
+
+            if not dependency_file.exists():
+
+                errors.append(
+                    f"{task_id}: dependency missing: {dependency}"
+                )
+
+                continue
+
+            if task_result_status(
+                dependency
+            ) in TERMINAL_RESULT_STATUSES:
+                continue
+
+            unresolved.append(
+                dependency
+            )
+
+            enqueue(
+                dependency,
+                None
+            )
+
+        graph[task_id] = unresolved
+
+    return graph, errors
+
+
+def detect_dependency_cycles(
+    graph: dict[str, list[str]]
+) -> list[str]:
+    """DFS 三色标记检测直接 / 间接依赖环。
+
+    返回形如 `dependency cycle: GOLD-A -> GOLD-B -> GOLD-A`
+    的稳定可读原因；无环时返回空列表。
+    """
+
+    cycles: list[str] = []
+    seen: set[tuple[str, ...]] = set()
+    state: dict[str, str] = {}
+    stack: list[str] = []
+
+    def visit(
+        node: str
+    ) -> None:
+
+        state[node] = "visiting"
+        stack.append(
+            node
+        )
+
+        for dependency in graph.get(
+            node,
+            []
+        ):
+
+            if dependency not in graph:
+                continue
+
+            dependency_state = state.get(
+                dependency
+            )
+
+            if dependency_state is None:
+
+                visit(
+                    dependency
+                )
+
+            elif dependency_state == "visiting":
+
+                cycle = (
+                    stack[stack.index(dependency):]
+                    +
+                    [dependency]
+                )
+
+                key = tuple(
+                    cycle
+                )
+
+                if key in seen:
+                    continue
+
+                seen.add(
+                    key
+                )
+
+                cycles.append(
+                    "dependency cycle: "
+                    + " -> ".join(
+                        cycle
+                    )
+                )
+
+        stack.pop()
+        state[node] = "done"
+
+    for node in sorted(
+        graph
+    ):
+
+        if node not in state:
+            visit(
+                node
+            )
+
+    return cycles
+
+
+def dependency_graph_errors(
+    task: dict[str, Any] | None = None
+) -> list[str]:
+    """返回依赖图错误（损坏 task / 元数据非法 / 缺失依赖 / 直接与间接环）。
+
+    结果非空即代表必须 fail-closed 停线。
+    """
+
+    graph, errors = build_dependency_graph(
+        task
+    )
+
+    return errors + detect_dependency_cycles(
+        graph
+    )
+
+
+def validate_dependency_graph() -> list[str]:
+    """校验队列中全部非终态任务的依赖图（整体诊断 / 测试）。"""
+
+    return dependency_graph_errors(
+        None
+    )
+
+
+def evaluate_dependency(
+    task_id: str,
+    seen: set[str]
+) -> tuple[bool, str, str]:
+    """递归判定单个依赖（含其自身依赖）是否已经满足。
+
+    返回 `(ok, state, reason)`：
+
+    - `ok=True`：依赖已 completed。
+    - `state="pending"`：依赖只是还没跑完，reason 指向最靠前的未完成依赖。
+    - `state="blocked"` / `"missing"` / `"unknown"`：
+      属于必须停线的阻塞原因，reason 指向最具体的阻塞点。
+
+    依赖环由 `dependency_graph_errors` 单独报告，
+    这里用 `seen` 截断递归，避免无限循环。
+    """
+
+    if task_id in seen:
+        return True, "completed", "ready"
+
+    seen.add(
+        task_id
+    )
+
+    dependency_file = (
+        TASK_DIR
+        /
+        f"{task_id}.json"
+    )
+
+    if not dependency_file.exists():
+
+        return (
+            False,
+            "missing",
+            f"dependency missing: {task_id}"
+        )
+
+    status = task_result_status(
+        task_id
+    )
+
+    if status == "completed":
+        return True, "completed", "ready"
+
+    if status == "blocked":
+
+        return (
+            False,
+            "blocked",
+            f"dependency blocked: {task_id}"
+        )
+
+    if status not in UNRESOLVED_RESULT_STATUSES:
+
+        return (
+            False,
+            "unknown",
+            f"dependency status unknown: {task_id}={status}"
+        )
+
+    # 依赖本身尚未完成：继续向下看它自己的依赖，
+    # 以便报告更具体的 blocked / missing / unknown 阻塞点。
+    try:
+
+        nested = get_task_dependencies(
+            load_task(
+                dependency_file
+            )
+        )
+
+    except Exception:
+
+        return (
+            False,
+            "pending",
+            f"dependency not completed: {task_id}={status}"
+        )
+
+    for nested_task_id in nested:
+
+        ok, nested_state, nested_reason = evaluate_dependency(
+            nested_task_id,
+            seen
+        )
+
+        if not ok and nested_state != "pending":
+            return False, nested_state, nested_reason
+
+    return (
+        False,
+        "pending",
+        f"dependency not completed: {task_id}={status}"
+    )
+
+
 def evaluate_task_readiness(
-    task
-):
+    task: dict[str, Any]
+) -> tuple[bool, str]:
+    """判定任务能否被 rolling queue 自动执行。
+
+    以下情况一律 fail-closed，返回 `(False, reason)`，
+    由调用方停线，绝不跳过当前任务：
+
+    - task 元数据非法（depends_on / auto_start / requires_human_approval / human_gate）
+    - 自身 result 状态未知
+    - 依赖图异常（缺失依赖 / 依赖环 / 依赖 task 损坏）
+    - 等待 Human Gate（auto_start=false / requires_human_approval=true / L3、L4）
+    - 依赖尚未完成、blocked 或状态未知
+    """
 
     task_id = str(
         task.get(
@@ -861,31 +1350,59 @@ def evaluate_task_readiness(
         )
     ).strip()
 
-    auto_start = task.get(
-        "auto_start",
-        True
+    try:
+
+        auto_start = get_task_bool_flag(
+            task,
+            "auto_start",
+            True
+        )
+
+        requires_human_approval = get_task_bool_flag(
+            task,
+            "requires_human_approval",
+            False
+        )
+
+        gate = get_task_human_gate(
+            task
+        )
+
+        dependencies = get_task_dependencies(
+            task
+        )
+
+    except TaskMetadataError as exc:
+
+        return (
+            False,
+            f"{task_id}: metadata invalid: {exc}"
+        )
+
+    own_status = task_result_status(
+        task_id
     )
 
-    if auto_start is not True:
+    if own_status not in KNOWN_RESULT_STATUSES:
+
+        return (
+            False,
+            f"{task_id}: result status unknown: {own_status}"
+        )
+
+    if not auto_start:
 
         return (
             False,
             f"{task_id}: auto_start=false"
         )
 
-    if task.get(
-        "requires_human_approval",
-        False
-    ) is True:
+    if requires_human_approval:
 
         return (
             False,
             f"{task_id}: requires_human_approval=true"
         )
-
-    gate = get_task_human_gate(
-        task
-    )
 
     if (
         gate
@@ -898,54 +1415,36 @@ def evaluate_task_readiness(
             f"{task_id}: human_gate={gate}"
         )
 
-    for dependency in get_task_dependencies(
+    graph_errors = dependency_graph_errors(
         task
-    ):
+    )
 
-        dependency_task = (
-            TASK_DIR
-            /
-            f"{dependency}.json"
-        )
-
-        if not dependency_task.exists():
-
-            return (
-                False,
-                f"{task_id}: dependency missing: {dependency}"
-            )
-
-        dependency_status = (
-            task_result_status(
-                dependency
-            )
-        )
-
-        if (
-            dependency_status
-            ==
-            "completed"
-        ):
-            continue
-
-        if (
-            dependency_status
-            ==
-            "blocked"
-        ):
-
-            return (
-                False,
-                f"{task_id}: dependency blocked: {dependency}"
-            )
+    if graph_errors:
 
         return (
             False,
-            (
-                f"{task_id}: dependency not completed: "
-                f"{dependency}={dependency_status}"
+            qualify_reason(
+                task_id,
+                graph_errors[0]
             )
         )
+
+    for dependency in dependencies:
+
+        ok, _, reason = evaluate_dependency(
+            dependency,
+            set()
+        )
+
+        if not ok:
+
+            return (
+                False,
+                qualify_reason(
+                    task_id,
+                    reason
+                )
+            )
 
     return (
         True,
@@ -953,9 +1452,15 @@ def evaluate_task_readiness(
     )
 
 
-def queue_snapshot():
+def queue_snapshot() -> dict[str, Any]:
+    """统计队列里仍未收口的任务。
 
-    pending = []
+    终态（completed / blocked）任务一律排除，因此不会重跑历史任务。
+    文件名即 task_id：即使 task JSON 损坏，也仍然计入 pending，
+    保证停线原因与队列诊断不会掩盖损坏的任务。
+    """
+
+    pending: list[str] = []
 
     for task_file in sorted(
         TASK_DIR.glob(
@@ -963,31 +1468,13 @@ def queue_snapshot():
         )
     ):
 
-        try:
-
-            task = load_task(
-                task_file
-            )
-
-        except Exception:
-            continue
-
-        task_id = task[
-            "task_id"
-        ]
-
-        status = task_result_status(
-            task_id
-        )
-
-        if status in {
-            "completed",
-            "blocked"
-        }:
+        if task_result_status(
+            task_file.stem
+        ) in TERMINAL_RESULT_STATUSES:
             continue
 
         pending.append(
-            task_id
+            task_file.stem
         )
 
     return {
@@ -1002,6 +1489,45 @@ def queue_snapshot():
         "target":
             QUEUE_TARGET_SIZE
     }
+
+
+def queue_diagnostic(
+    wait_reason: str
+) -> str:
+    """构建 rolling queue 停线诊断文本。
+
+    包含 pending count/target、首个停线 task 与停线原因。
+    由 main loop 在 idle throttle 保护下打印，
+    避免每 20 秒刷同一条日志，但不降低检测频率。
+    """
+
+    snapshot = queue_snapshot()
+
+    pending_tasks: list[str] = snapshot["pending"]
+    target: int = snapshot["target"]
+
+    first_stop = (
+        pending_tasks[0]
+        if pending_tasks
+        else
+        "-"
+    )
+
+    preview = (
+        ", ".join(
+            pending_tasks[:target]
+        )
+        or
+        "-"
+    )
+
+    return (
+        f"No runnable task. "
+        f"pending={snapshot['count']}/{target} "
+        f"[{preview}] | "
+        f"first_stop={first_stop} | "
+        f"reason={wait_reason}"
+    )
 
 
 def should_log_idle(
@@ -1088,15 +1614,30 @@ def load_task(
 # 查找下一个任务
 # ============================================================
 
-def find_next_task_with_reason():
+def find_next_task_with_reason() -> tuple[Path | None, str]:
+    """查找队列中第一个可执行的 task。
 
-    tasks = sorted(
+    fail-closed 语义：
+
+    - 终态（completed / blocked）任务仍可跳过，且绝不重写历史 result；
+    - 第一个非终态任务一旦 JSON 损坏 / 元数据非法 / 依赖异常
+      （缺失依赖、依赖环、依赖 task 损坏）/ 等待 Human Gate /
+      依赖 blocked、unknown、pending，立即停线并返回稳定可读原因；
+    - 绝不 `continue` 到后续 task。
+    """
+
+    for task_file in sorted(
         TASK_DIR.glob(
             "*.json"
         )
-    )
+    ):
 
-    for task_file in tasks:
+        task_id = task_file.stem
+
+        if task_result_status(
+            task_id
+        ) in TERMINAL_RESULT_STATUSES:
+            continue
 
         try:
 
@@ -1107,32 +1648,18 @@ def find_next_task_with_reason():
         except Exception as exc:
 
             _logger.error(
-                "跳过无效任务 %s: %s",
+                "任务 %s 损坏，rolling queue 停线: %s",
                 task_file.name,
                 exc
             )
 
-            continue
-
-        task_id = (
-            task["task_id"]
-        )
-
-        status = task_result_status(
-            task_id
-        )
-
-        if status in {
-            "completed",
-            "blocked"
-        }:
-
-            continue
-
-        ready, reason = (
-            evaluate_task_readiness(
-                task
+            return (
+                None,
+                f"{task_id}: task file invalid: {exc}"
             )
+
+        ready, reason = evaluate_task_readiness(
+            task
         )
 
         if not ready:
@@ -3717,33 +4244,10 @@ def main():
                         current_time=now
                     ):
 
-                        snapshot = (
-                            queue_snapshot()
-                        )
-
-                        pending_preview = (
-                            ", ".join(
-                                snapshot[
-                                    "pending"
-                                ][:
-                                    QUEUE_TARGET_SIZE
-                                ]
-                            )
-                            or
-                            "-"
-                        )
-
                         _logger.info(
-                            "No runnable task. "
-                            "pending=%s/%s [%s] | %s",
-                            snapshot[
-                                "count"
-                            ],
-                            snapshot[
-                                "target"
-                            ],
-                            pending_preview,
-                            wait_reason
+                            queue_diagnostic(
+                                wait_reason
+                            )
                         )
 
                         last_idle_log_at = now

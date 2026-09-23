@@ -1,0 +1,75 @@
+{
+  "task_id": "GOLD-019",
+  "title": "加固 Rolling Queue 依赖图与 Fail-Closed 停线语义",
+  "status": "completed",
+  "finished_at": "2026-09-23T11:46:14+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M orchestrator/ai_orchestrator.py",
+    " M tests/unit/test_ai_orchestrator_queue.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md              |  11 +\n orchestrator/ai_orchestrator.py          | 806 +++++++++++++++++++++++++------\n tests/unit/test_ai_orchestrator_queue.py | 467 ++++++++++++++++++\n 3 files changed, 1133 insertions(+), 151 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T11:28:58+08:00",
+      "finished_at": "2026-09-23T11:46:14+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 82,
+      "duration_ms": 705821,
+      "usage": {
+        "inputTokens": 9144170,
+        "outputTokens": 86690,
+        "cacheReadTokens": 9057792,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.09214407599999998
+      },
+      "cline_final_text": "Submission recorded (verified): # GOLD-019 完成报告：加固 Rolling Queue 依赖图与 Fail-Closed 停线语义\n\n## 1. 完成内容（对 requirements 逐条）\n1. **元数据严格校验（fail-closed）**：新增 `TaskMetadataError`；`get_task_dependencies` 只接受非空 task_id 字符串或字符串数组（去重、保序；数字/字典/空串/空 ID/自依赖一律抛错）；新增 `get_task_bool_flag` 要求 `auto_start`/`requires_human_approval` 必须是真正 bool（`\"true\"`/`1`/`null` 非法）；`get_task_human_gate` 仅接受 `SUPPORTED_HUMAN_GATES={L1..L4}`（大小写不敏感，dict 需含 `level`），未知档位（如 `L9`）fail-closed。\n2. **依赖图校验**：新增 `build_dependency_graph`（可按 root 任务只覆盖其依赖闭包）、`detect_dependency_cycles`（DFS 三色标记，检测直接/间接/多节点环）、`dependency_graph_errors`、`validate_dependency_graph`。检测 self dependency、多节点环、缺失依赖、依赖 task 损坏（JSON 坏 / task_id 与文件名不一致）、依赖元数据非法；原因稳定可读，如 `dependency cycle: GOLD-018 -> GOLD-019 -> GOLD-020 -> GOLD-018`。\n3. **find_next_task_with_reason 重写**：第一个非终态任务若 JSON 损坏 / 元数据非法 / 依赖图异常 / Human Gate 等待 / 依赖 blocked|unknown|pending，一律 `(None, reason)` 停线，**删除原来的 `continue` 跳过逻辑**；原因始终以停线 task_id 开头（`qualify_reason` 避免重复前缀）。终态判定改为按文件名 stem，因此「JSON 损坏但已有终态 result」的历史任务仍可跳过。\n4. **终态与历史不变**：completed/blocked 仍可跳过；`evaluate_dependency` 递归穿透依赖链，`blocked`/`missing`/`unknown` 会阻断所有（含间接）依赖它的任务；停线路径全程只读，绝不重写 `.ai/results/*`（测试断言历史 result 未被改动）。\n5. **队列诊断**：新增 `queue_diagnostic(wait_reason)`，输出 `pending=count/target [预览] | first_stop=<首个停线 task> | reason=<原因>`；main loop 改用它，仍受 1800s `should_log_idle` throttle 保护（不每 20s 刷屏）。`queue_snapshot` 改为基于文件名，损坏的非终态 task 也计入 pending。\n6. **单元测试**：新增 30 个用例覆盖 malformed first task no-skip、task_id 文件名不一致、unknown gate、non-bool flag、非法 depends_on、self/多节点/间接依赖环、缺失依赖（含传递）、blocked 依赖（含传递）、unknown dependency/own result status、合法 3-task 链顺序、诊断内容、gate 词表与 20s/1800s/queue target=3 默认值。\n7. **保留既有行为**：20s polling、push 成功后 immediate next-task、`POLL_SECONDS/QUEUE_TARGET_SIZE/IDLE_LOG_SECONDS` 及 L3/L4 永不自动跨越均未改动。\n8. **文档**：更新 `.ai/DEVELOPMENT_PROTOCOL.md` §2.1（元数据严格校验、依赖图 fail-closed、blocked 传递阻断、诊断内容）；未改动业务 Phase / PROJECT_STATE。\n\n## 2. 修改的文件\n- `orchestrator/ai_orchestrator.py`（+655/-151）\n- `tests/unit/test_ai_orchestrator_queue.py`（+467，从 9 个用例扩展到 51 个）\n- `.ai/DEVELOPMENT_PROTOCOL.md`（+11）\n\n## 3. 新增文件\n无（未创建任何新文件；一次性对照脚本已在验证后删除，`git status` 仅 3 个文件被修改，`.ai/tasks`、`.ai/results`、`.ai/PROJECT_STATE.json` 未触碰）。\n\n## 4. 执行的测试（task validation_commands）\n1. `.venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q`\n2. `.venv\\Scripts\\python.exe -m pytest tests -q`\n3. `.venv\\Scripts\\python.exe -m ruff check .`\n4. `.venv\\Scripts\\python.exe -m mypy config database src scripts`\n另做：本机只读跑真实队列 `find_next_task_with_reason()/validate_dependency_graph()/queue_snapshot()`；并用 HEAD 版 orchestrator 做修复前后对照实验。\n\n## 5. 测试结果\n- 队列单测：`51 passed in 0.33s`（exit 0）。\n- 全量：`2685 passed, 1 skipped in 315.30s (0:05:15)`（唯一 skip 为既有 jieba 分支）。\n- `ruff check .`：`All checks passed!`（exit 0）。\n- `mypy config database src scripts`：`Success: no issues found in 172 source files`（exit 0）。\n- 真实队列（只读）：`next=(.ai/tasks/GOLD-019.json, 'ready')`、`graph=[]`、`snapshot={'pending':['GOLD-019','GOLD-020'],'count':2,'target':3}`，说明合法 3-task 链仍可正常推进。\n- 修复前后对照（旧 HEAD 代码 vs 新代码，临时目录）：损坏首任务 → 旧 `GOLD-019.json | ready`（**真的跳过了坏任务**）vs 新 `None | GOLD-018: task file invalid: ...`；未知 gate `L9` → 旧 `GOLD-018.json | ready`（**静默忽略未知 Gate**）vs 新 `None | GOLD-018: metadata invalid: human_gate 未知档位: L9`；多节点环 → 旧含糊的 `dependency not completed` vs 新 `dependency cycle: GOLD-018 -> GOLD-019 -> GOLD-020 -> GOLD-018`。\n\n## 6. 未解决的问题\n- 无阻塞项。已注意到但**未改**（不在本任务范围）：`.ai/PROJECT_STATE.json` 仍标记 `status=BLOCKED`、`current_task=GOLD-018`，属 Orchestrator/人工的职责；本次改动需 Orchestrator 下次重启才加载（约束明确允许，本任务完成不依赖热重载）。\n\n## 7. 是否满足 acceptance\n全部满足：\n1. 非法/损坏的第一个非终态 task fail-closed 停线且绝不执行后续 task —— 有回归测试 + 修复前后对照证据。\n2. 依赖环（self/直接/间接/多节点）、缺失依赖（含传递）、blocked/unknown dependency 均有回归测试并停线。\n3. 合法 GOLD-A→GOLD-B→GOLD-C 链按顺序执行；20s polling、immediate continuation 保持（既有常量与 main loop 分支未变，并有默认值测试）。\n4. 全量 pytest / ruff / mypy 通过；业务 Phase 与安全 Gate 无变化（`BLOCKING_HUMAN_GATES={L3,L4}` 保留且新增「未知 gate 也停线」，PROJECT_STATE 未改）。\n\n## 8. 建议下一步\n1. 由 Orchestrator 提交本任务改动，并**重启 start_agent.bat**，使加固后的 queue 语义生效后再放行 GOLD-020（GOLD-020 的 push 冲突恢复语义仍是原 20s/1800s 路径，不依赖本改动）。\n2. GOLD-020 落地时可在 `queue_diagnostic` 基础上把 push/rebase 恢复状态一并纳入诊断，保持日志语义一致（属其自身 requirements）。\n3. 长期建议（非本任务）：把 `orchestrator/**` 纳入 mypy 覆盖并补齐类型注解，本轮新代码已带注解，但历史函数仍无类型。\n",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M orchestrator/ai_orchestrator.py",
+        " M tests/unit/test_ai_orchestrator_queue.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md              |  11 +\n orchestrator/ai_orchestrator.py          | 806 +++++++++++++++++++++++++------\n tests/unit/test_ai_orchestrator_queue.py | 467 ++++++++++++++++++\n 3 files changed, 1133 insertions(+), 151 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "...................................................                      [100%]\n51 passed in 0.30s\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  5%]\n........................................................................ [  8%]\n........................................................................ [ 10%]\n........................................................................ [ 13%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 21%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 29%]\n........................................................................ [ 32%]\n........................................................................ [ 34%]\n........................................................................ [ 37%]\n........................................................................ [ 40%]\n........................................................................ [ 42%]\n........................................................................ [ 45%]\n........................................................................ [ 48%]\n........................................................................ [ 50%]\n........................................................................ [ 53%]\n........................................................................ [ 56%]\n........................................................................ [ 58%]\n........................................................................ [ 61%]\n........................................................................ [ 64%]\n........................................................................ [ 67%]\n........................................................................ [ 69%]\n........................................................................ [ 72%]\n........................................................................ [ 75%]\n........................................................................ [ 77%]\n........................................................................ [ 80%]\n........................................................................ [ 83%]\n........................................................................ [ 85%]\n........................................................................ [ 88%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 96%]\n.................................................s...................... [ 99%]\n......................                                                   [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2685 passed, 1 skipped in 321.32s (0:05:21)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 172 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
