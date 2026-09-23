@@ -4688,3 +4688,89 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   若出现同一 task 多个终态 commit（`COMPLETION_COMMIT_AMBIGUOUS`），必须人工裁决，
   工具不会替任何一方选一个 commit。
 
+---
+
+## GOLD-032：GPT Review Ledger 完整性 / 连续性只读门禁
+
+### 1. 背景 / 问题
+
+- `.ai/DEVELOPMENT_PROTOCOL.md` §2.7 已把 GPT Review 变成机器可审计台账，§2.8（GOLD-031）已
+  提供可复算的 result SHA-256 / reviewed commit identity；但**台账本身**仍可能被静默删改：
+  - 删掉 / 漏掉一条 review 条目，或调换条目顺序，没有任何东西会发现；
+  - 只改一个 `reviewed_result.result_sha256` 或 `reviewed_commit.sha`，台账就与客观事实脱节；
+  - 若让 Executor 去"对账并修正"，等于把 Review 证据的解释权交给了执行方。
+
+### 2. 变更（最小范围）
+
+- `orchestrator/review_ledger_integrity.py`（新增，纯只读）：
+  - CLI `python -m orchestrator.review_ledger_integrity`（stdout 纯 ASCII JSON、stderr 只有
+    人类摘要）；契约 `schema=gold-ai/review-ledger-integrity/v1` + `schema_version=1`，
+    `facts_digest` 只覆盖确定性事实（排除 `generated_at` / `facts_digest` / `determinism`）；
+  - 复用 `orchestrator.review_ledger.validate_review_ledger` 做 schema / 条目校验，并把其
+    issue code 翻译为本模块稳定 code；
+  - 顺序连续性：按**台账文件原始顺序**判定升序（`LEDGER_ORDER_REGRESSION`）与 `reviewed_at`
+    单调性（`LEDGER_REVIEW_TIME_REGRESSION`）；
+  - 覆盖窗口连续性：`reviewed_from` / 最新 PASS review 到最新条目之间，若存在 completed
+    result 却没有台账条目 ⇒ `LEDGER_CHAIN_GAP`（删项 / 漏项）；
+  - 客观绑定：对每条有效条目调用 GOLD-031 `orchestrator.review_binding` 复算 manifest，逐项
+    比对 `result_sha256` / `status` / `finished_at` / `commit.sha` / `commit.branch`，不一致分别
+    报 `LEDGER_RESULT_HASH_MISMATCH` / `LEDGER_RESULT_STATUS_MISMATCH` /
+    `LEDGER_RESULT_FINISHED_AT_MISMATCH` / `LEDGER_COMMIT_SHA_MISMATCH` /
+    `LEDGER_COMMIT_BRANCH_MISMATCH`；manifest `facts_complete=false` 报
+    `LEDGER_MANIFEST_FACTS_INCOMPLETE`；
+  - 重复条目报 `LEDGER_DUPLICATE_TASK`；台账缺失 / 损坏 / schema 不认识 / entries 非法报
+    `LEDGER_MISSING` / `LEDGER_UNREADABLE` / `LEDGER_SCHEMA_UNSUPPORTED` /
+    `LEDGER_ENTRIES_INVALID`（退出码 `3`）；其它漂移退出码 `2`；全部一致退出码 `0`；
+  - **绝不自动修复**（不重排、不补条目、不改哈希），**绝无任何写入路径**：不写台账 /
+    `PROJECT_STATE` / tasks / results；模块自身不启动任何外部进程，零网络 / 零数据库 / 零
+    业务证据 / 零模型调用；`authority` 段硬编码 `tool_can_sign_review=false` /
+    `tool_can_repair_ledger=false` / `tool_can_advance_state=false` / `writes_*=false` /
+    `review_authority=gpt_only`；
+  - 只**原样回显**台账已有 `verdict` / `reviewed_at`（作为待验证的客观事实），**绝不**创建或
+    修改 verdict / `acceptance_summary` / `reviewed_at`。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.9 记录契约、验证内容、fail-closed 码、GPT-only
+  边界与只读保证（§2.7 / §2.8 语义不变）。
+- 未新增依赖、未改 `pyproject.toml`、未改 `.ai/tasks` / `.ai/results` /
+  `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`。
+
+### 3. 验证
+
+- 新增单元回归 `tests/unit/test_ai_orchestrator_review_ledger_integrity.py`（**29 项**）：
+  正常链（3 条条目全部 bound、零 issue、退出码 0）、删项（`LEDGER_CHAIN_GAP`）、改 hash /
+  改 commit sha / 改 branch / 改 status / 改 finished_at、重复 task、乱序、review 时间回退、
+  manifest 漂移、未知 verdict、未知 schema / entries 非法 / 台账缺失 / 台账损坏 / metadata
+  非法、确定性（两次构建字节相同、`facts_digest` 排除 wall-clock 且可独立复算）、源码守卫
+  （无写入路径 / 无网络 import / 无 planning API）、authority 边界、CLI 选项契约与 ASCII /
+  退出码契约；
+- 新增真实仓库集成回归 `tests/integration/test_review_ledger_integrity_regression.py`
+  （**11 项**）：真实台账 `integrity_ok=true` 且 3 条条目全部与 GOLD-031 manifest 一致；
+  `GOLD-027` 的 `result_sha256`（`git cat-file blob HEAD:.ai/results/GOLD-027.json`）与
+  reviewed commit 可由测试自己独立复算；对**台账副本**做改 hash / 改 commit / 删条目 / 乱序 /
+  重复 task 全部 fail-closed；命令零副作用（`git status --porcelain`、`.ai/tasks` /
+  `.ai/results` 树摘要、`PROJECT_STATE.json`、`GPT_REVIEW_LEDGER.json` 前后字节完全一致）；
+  CLI fresh subprocess 确定性 + ASCII；Phase / blocker / 交易安全不变量未变；
+- 全量回归：`pytest tests`（unit + integration）**3269 passed / 1 skipped**（363s）；
+  `ruff check .` → **All checks passed!**；
+  `mypy config database src scripts` → **Success: no issues found in 181 source files**。
+
+### 4. 范围守规
+
+- 只读、零网络、零数据库、零真实凭据；未进入 Phase 3.4、未跨 L3/L4；`PHASE3_3_DATA` 保持
+  BLOCKED；`LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`、
+  `src/alpha/**`、`src/execution/**`、`database/**`、`.env`、`config/rss_sources.json`；
+- 测试写入全部发生在 `tmp_path`；Cline 未执行任何 Git 写操作。
+
+### 5. 遗留 / 下一步
+
+- 本层只验证**客观绑定与连续性**：`integrity_ok=true` 只表示"台账与事实一致且顺序连续"，
+  **不是** Review 结论，也不会推进任何指针；verdict / `acceptance_summary` / `reviewed_at`
+  仍必须由 GPT 自己签发；
+- 覆盖窗口缺口判定只覆盖 `[reviewed_from, 最新条目]` 区间；`reviewed_from` 之前的历史不追溯，
+  也不应把尚未 review 的新 completed 任务误报成"删项"（那属于 §2.7 的
+  `COMPLETED_BUT_UNREVIEWED`）；
+- 建议下一步（由 GPT 决定）：用 `python -m orchestrator.review_binding --task <task_id>` 取得
+  事实、写 ledger 后跑一次 `python -m orchestrator.review_ledger_integrity` 作为台账自检，再按
+  §2 状态机推进指针。
+
+

@@ -301,6 +301,42 @@ Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任�
 - **边界不变**：§2.8 不改变 planner snapshot、ledger schema、rolling queue、L1~L4 档位、
   Phase 3.3 data blocker 与 `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
 
+## 2.9 GPT Review Ledger 完整性 / 连续性只读门禁（GOLD-032）
+
+- **为什么**：§2.7 让 review 变成机器可审计的台账，§2.8 让 GPT 能拿到客观内容身份；但台账
+  本身仍可能被**静默删改**（删条目 / 换顺序 / 改一个 `result_sha256` 或 `commit.sha`）而与
+  客观事实脱节。§2.9 把「台账是否仍与 GOLD-031 manifest 的事实绑定、顺序是否连续」变成
+  纯只读、确定性、fail-closed 的验证。
+- **命令**：`python -m orchestrator.review_ledger_integrity`（只读；stdout 纯 ASCII JSON，
+  stderr 只有人类摘要）。契约 `schema=gold-ai/review-ledger-integrity/v1` + `schema_version=1`。
+- **验证内容（全部是客观事实）**：
+  - ledger schema 与 entries 结构（复用 `orchestrator.review_ledger.validate_review_ledger`）；
+  - `task_id` 唯一（重复 ⇒ `LEDGER_DUPLICATE_TASK`，冲突条目整体作废）；
+  - review 顺序（按 `planner.task_id_sort_key` 升序；回退 ⇒ `LEDGER_ORDER_REGRESSION`）
+    与 `reviewed_at` 单调性（回退 ⇒ `LEDGER_REVIEW_TIME_REGRESSION`）；
+  - 覆盖窗口连续性（`reviewed_from` / 最新 PASS review 到最新条目之间，若有 completed
+    result 却没有对应 ledger 条目 ⇒ `LEDGER_CHAIN_GAP`：删项 / 漏项）；
+  - 每条有效条目的 `reviewed_result` 与 `reviewed_commit` 必须与
+    `orchestrator.review_binding` 复算的 manifest 事实逐项一致：`result_sha256`
+    （`LEDGER_RESULT_HASH_MISMATCH`）、`status`（`LEDGER_RESULT_STATUS_MISMATCH`）、
+    `finished_at`（`LEDGER_RESULT_FINISHED_AT_MISMATCH`）、`commit.sha`
+    （`LEDGER_COMMIT_SHA_MISMATCH`）、`commit.branch`（`LEDGER_COMMIT_BRANCH_MISMATCH`）；
+    manifest `facts_complete=false` ⇒ `LEDGER_MANIFEST_FACTS_INCOMPLETE`。
+- **fail-closed**：缺失 / 损坏 / schema 不认识 / entries 非法 ⇒ `LEDGER_MISSING` /
+  `LEDGER_UNREADABLE` / `LEDGER_SCHEMA_UNSUPPORTED` / `LEDGER_ENTRIES_INVALID`
+  （退出码 `3`）；其它完整性漂移退出码 `2`；全部一致退出码 `0`。**绝不自动修复**
+  （不重排、不补条目、不改哈希）。
+- **职责边界（不可协商）**：本工具**只验证客观事实**，只**原样回显**台账已有 `verdict` /
+  `reviewed_at`，**绝不**创建 / 修改 verdict、`acceptance_summary`、`reviewed_at`，绝不写
+  `.ai/GPT_REVIEW_LEDGER.json` / `PROJECT_STATE` / tasks / results。机器可读契约见 `authority`
+  段（`tool_can_sign_review=false` / `tool_can_repair_ledger=false` /
+  `tool_can_advance_state=false` / `writes_*=false`）。
+- **只读保证**：唯一外部进程调用经 `orchestrator.review_binding` 的只读 Git 白名单；本模块
+  自身不启动任何外部进程，零网络、零数据库、零业务证据、零模型调用；模块内不存在写入路径
+  （源码守卫测试锁定）。
+- **边界不变**：§2.9 不改变 planner snapshot、ledger schema、rolling queue、L1~L4 档位、
+  Phase 3.3 data blocker 与 `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
+
 ## 3. 恢复任务命名
 
 原任务失败或阻塞后不得修改既有审计历史。
