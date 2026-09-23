@@ -10,6 +10,14 @@
    （Executor 无 follow-on planning 权限，未知能力 fail-closed）；
 5) CLI（`python -m orchestrator.planner_snapshot`）的 stdout 机器通道与退出码。
 
+GOLD-024 追加覆盖：
+
+6) 版本化契约（`schema` + 整数 `schema_version`）与 Git branch/head / PROJECT_STATE 摘要；
+7) 确定性：`facts_digest` 与 wall-clock 解耦、对状态变化敏感、可机器复算；
+8) GOLD-021/022/023 全部 completed 但 PROJECT_STATE 仍落后时的 fail-closed 报告；
+9) 受控 `--output`（runtime / 临时路径写入、禁止路径 fail-closed 拒绝、默认零写入）；
+10) Executor 不具备任何 follow-on planning / 状态写入 API。
+
 所有测试只在 ``tmp_path`` 内构造文件，绝不对真实仓库做任何写操作。
 """
 
@@ -27,12 +35,35 @@ import pytest
 
 from orchestrator import ai_orchestrator as orch
 from orchestrator import planner_snapshot as planner
+from orchestrator import planner_snapshot_output as snapshot_output
 
 AUDIT_TIME = "2026-09-23T00:00:00+08:00"
+
+AUDIT_TIME_LATER = "2026-09-24T00:00:00+08:00"
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 MODULE_SOURCE = Path(planner.__file__).read_text(encoding="utf-8")
+
+OUTPUT_MODULE_SOURCE = Path(snapshot_output.__file__).read_text(encoding="utf-8")
+
+FAKE_BRANCH = "cline-agent"
+
+FAKE_HEAD = "3f1a9c8e7b6d5f4a3b2c1d0e9f8a7b6c5d4e3f21"
+
+
+def seed_fake_git(root: Path, branch: str = FAKE_BRANCH, head: str = FAKE_HEAD) -> None:
+    """构造只读 Git 事实（``.git/HEAD`` + loose ref），让快照不依赖机器上的真实仓库。"""
+
+    git_dir = root / ".git"
+
+    refs = git_dir / "refs" / "heads"
+
+    refs.mkdir(parents=True, exist_ok=True)
+
+    (git_dir / "HEAD").write_text(f"ref: refs/heads/{branch}\n", encoding="utf-8")
+
+    (refs / branch).write_text(f"{head}\n", encoding="utf-8")
 
 
 @dataclass(frozen=True)
@@ -57,6 +88,8 @@ def planner_fs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> PlannerFS:
     monkeypatch.setattr(orch, "RESULT_DIR", results)
     monkeypatch.setattr(planner, "PROJECT_STATE_PATH", state_path)
     monkeypatch.setattr(planner, "ROOT", tmp_path)
+
+    seed_fake_git(tmp_path)
 
     return PlannerFS(root=tmp_path, tasks=tasks, results=results, state_path=state_path)
 
@@ -1052,13 +1085,16 @@ def test_snapshot_embeds_role_contract_without_executor_authority(
 
 @pytest.fixture()
 def cli_root(tmp_path: Path) -> Path:
-    """构造 <root>/.ai/{tasks,results,PROJECT_STATE.json} 的 CLI 目录布局。"""
+    """构造 <root>/.ai/{tasks,results,runtime,PROJECT_STATE.json} 的 CLI 目录布局。"""
 
     ai_dir = tmp_path / ".ai"
     tasks = ai_dir / "tasks"
     results = ai_dir / "results"
     tasks.mkdir(parents=True)
     results.mkdir(parents=True)
+    (ai_dir / "runtime").mkdir(parents=True)
+
+    seed_fake_git(tmp_path)
 
     for task_id in ("GOLD-021", "GOLD-022"):
         write_task(tasks, task_id)
@@ -1190,3 +1226,543 @@ def test_cli_defaults_to_repo_root_without_writing_anything() -> None:
     assert (ai_dir / "PROJECT_STATE.json").read_bytes() == state_before
     for name in ("tasks", "results"):
         assert tree_digest(ai_dir / name) == before[name]
+
+
+# ============================================================
+# 9. GOLD-024：版本化契约 / 确定性 / 受控 --output / 职责边界
+# ============================================================
+
+# Executor 绝不允许出现的规划 / 状态写入 API（follow-on planning 权限全部否定）。
+FORBIDDEN_PLANNING_API = (
+    "generate_follow_on_task",
+    "create_task",
+    "write_task",
+    "append_task",
+    "refill_rolling_queue",
+    "plan_next_task",
+    "next_task",
+    "write_result",
+    "update_project_state",
+    "modify_project_state",
+    "decide_phase",
+    "loosen_acceptance",
+    "review_task_result",
+)
+
+
+@pytest.fixture()
+def fake_temp_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """把「系统临时目录」替换为 tmp_path 下的专用目录（不依赖 pytest basetemp 位置）。"""
+
+    temp_root = tmp_path / "fake-temp"
+    temp_root.mkdir()
+
+    monkeypatch.setattr(snapshot_output, "temp_directory", lambda: temp_root)
+
+    return temp_root
+
+
+def test_snapshot_exposes_versioned_contract_with_git_and_state_facts(
+    planner_fs: PlannerFS,
+) -> None:
+    seed_clean_queue(planner_fs)
+
+    snapshot = build_snapshot(planner_fs)
+
+    assert snapshot["schema"] == planner.PLANNER_SNAPSHOT_SCHEMA
+    assert snapshot["schema"] == "gold-ai/planner-snapshot/v2"
+    assert snapshot["schema_version"] == planner.PLANNER_SNAPSHOT_SCHEMA_VERSION == 2
+    assert snapshot["read_only"] is True
+
+    assert snapshot["git"] == {
+        "branch": FAKE_BRANCH,
+        "head": FAKE_HEAD,
+        "head_short": FAKE_HEAD[:8],
+        "detached": False,
+        "available": True,
+    }
+
+    state = snapshot["state"]
+
+    assert state["schema_version"] == 1
+    assert state["project"] == "XAUUSD"
+    assert state["phase"] == "Phase 3"
+    assert state["status"] == "BLOCKED"
+    assert state["current_task"] == "GOLD-022"
+    assert state["last_completed_task"] == "GOLD-021"
+    assert state["last_reviewed_task"] == "GOLD-021"
+    assert state["declared_queue"] == ["GOLD-022"]
+    assert state["queue_target_size"] == 3
+    assert state["blocker_codes"] == ["PHASE3_3_DATA"]
+    assert state["human_gate_codes"] == ["PHASE3_3_L3_DECISION"]
+    assert state["invariants"] == [
+        "LIVE_TRADING=false",
+        "ALLOW_EXTERNAL_ORDER_SUBMISSION=false",
+    ]
+
+    # 原样回显仍在 project_state；摘要不替代审计原文
+    assert snapshot["project_state"]["project"] == "XAUUSD"
+    assert snapshot["paths"]["root"] == str(planner_fs.root)
+    assert snapshot["issues"] == []
+
+
+def test_snapshot_reports_missing_git_facts_fail_closed(planner_fs: PlannerFS) -> None:
+    seed_clean_queue(planner_fs)
+
+    (planner_fs.root / ".git" / "HEAD").unlink()
+
+    snapshot = build_snapshot(planner_fs)
+
+    assert planner.ISSUE_GIT_INFO_UNAVAILABLE in issue_codes(snapshot)
+    assert snapshot["git"]["available"] is False
+    assert snapshot["git"]["branch"] is None
+    assert snapshot["git"]["head"] is None
+    assert snapshot["summary"]["exit_code"] == planner.EXIT_DRIFT
+
+
+def test_facts_digest_is_wall_clock_independent_and_recomputable(
+    planner_fs: PlannerFS,
+) -> None:
+    seed_clean_queue(planner_fs)
+
+    first = build_snapshot(planner_fs)
+
+    second = planner.build_planner_snapshot(
+        state_path=planner_fs.state_path,
+        tasks_dir=planner_fs.tasks,
+        results_dir=planner_fs.results,
+        generated_at=AUDIT_TIME_LATER,
+    )
+
+    assert first["generated_at"] == AUDIT_TIME
+    assert second["generated_at"] == AUDIT_TIME_LATER
+
+    # wall-clock 只出现在审计字段，绝不参与 facts
+    assert first["facts_digest"] == second["facts_digest"]
+    assert len(first["facts_digest"]) == 64
+    assert "generated_at" not in planner.snapshot_facts(first)
+
+    # digest 可被 GPT 独立复算（幂等）
+    assert planner.snapshot_facts_digest(first) == first["facts_digest"]
+    assert planner.snapshot_facts_digest(second) == second["facts_digest"]
+
+    determinism = first["determinism"]
+
+    assert determinism["digest_field"] == "facts_digest"
+    assert determinism["wall_clock_in_facts"] is False
+    assert determinism["excluded_from_facts"] == [
+        "generated_at",
+        "facts_digest",
+        "determinism",
+    ]
+    assert determinism["ordering"]["issues"] == "sorted by (code, detail)"
+    assert determinism["ordering"]["tasks"] == "sorted by task_id_sort_key"
+
+
+def test_facts_digest_reacts_to_state_changes(planner_fs: PlannerFS) -> None:
+    seed_clean_queue(planner_fs)
+
+    baseline = build_snapshot(planner_fs)
+
+    write_state(
+        planner_fs.state_path,
+        baseline_state(
+            current_task="GOLD-022",
+            last_completed_task="GOLD-021",
+            last_reviewed_task="GOLD-021",
+            task_queue=["GOLD-022"],
+            queue_status="PAUSED",
+        ),
+    )
+
+    changed = build_snapshot(planner_fs)
+
+    assert changed["issues"] == []
+    assert changed["state"]["queue_status"] == "PAUSED"
+    assert changed["facts_digest"] != baseline["facts_digest"]
+
+
+def test_state_behind_reported_when_gold_021_022_023_all_completed(
+    planner_fs: PlannerFS,
+) -> None:
+    """GOLD-021/022/023 已全部 completed，而 PROJECT_STATE 仍停在 GOLD-021。"""
+
+    for task_id in ("GOLD-021", "GOLD-022", "GOLD-023"):
+        write_task(planner_fs.tasks, task_id)
+        write_result(planner_fs.results, task_id, "completed")
+
+    write_state(
+        planner_fs.state_path,
+        baseline_state(
+            current_task="GOLD-021",
+            last_completed_task="GOLD-021",
+            last_reviewed_task="GOLD-021",
+            task_queue=["GOLD-021"],
+            queue_status="ACTIVE",
+        ),
+    )
+
+    before = tree_digest(planner_fs.root)
+    state_before = planner_fs.state_path.read_text(encoding="utf-8")
+
+    snapshot = build_snapshot(planner_fs)
+
+    codes = issue_codes(snapshot)
+
+    assert planner.ISSUE_POINTER_BEHIND_RESULTS in codes
+    assert planner.ISSUE_QUEUE_DECLARATION_MISMATCH in codes
+    assert snapshot["pointer"]["latest_terminal_result"] == "GOLD-023"
+    assert snapshot["pointer"]["terminal_results"] == ["GOLD-021", "GOLD-022", "GOLD-023"]
+    assert snapshot["results"]["terminal"] == {
+        "GOLD-021": "completed",
+        "GOLD-022": "completed",
+        "GOLD-023": "completed",
+    }
+    assert snapshot["queue"]["pending"] == []
+    assert snapshot["queue"]["declared_but_terminal"] == ["GOLD-021"]
+    assert snapshot["tasks"] == []
+    assert snapshot["summary"]["exit_code"] == planner.EXIT_DRIFT
+
+    details = issue_details(snapshot, planner.ISSUE_POINTER_BEHIND_RESULTS)
+
+    assert "last_completed_task=GOLD-021" in details
+    assert "last_reviewed_task=GOLD-021" in details
+    assert "current_task=GOLD-021" in details
+    assert "latest_terminal=GOLD-023" in details
+
+    queue_details = issue_details(snapshot, planner.ISSUE_QUEUE_DECLARATION_MISMATCH)
+
+    assert "declared_but_terminal=['GOLD-021']" in queue_details
+    assert "queue_status_ACTIVE_without_pending_tasks" in queue_details
+
+    # 只报告，绝不自动修复
+    assert planner_fs.state_path.read_text(encoding="utf-8") == state_before
+    assert tree_digest(planner_fs.root) == before
+
+
+def test_broken_inputs_are_fail_closed_without_silent_repair(planner_fs: PlannerFS) -> None:
+    """损坏 task / 未知 result status / queue 漂移 / 指针超出 必须同时报告且零修复。"""
+
+    write_task(planner_fs.tasks, "GOLD-021")
+    write_raw_task(planner_fs.tasks, "GOLD-023", "{ not json")
+    write_raw_result(
+        planner_fs.results,
+        "GOLD-021",
+        {"task_id": "GOLD-021", "status": "frobnicated"},
+    )
+    write_result(planner_fs.results, "GOLD-022", "completed")
+
+    write_state(
+        planner_fs.state_path,
+        baseline_state(
+            current_task="GOLD-021",
+            last_completed_task="GOLD-022",
+            last_reviewed_task="GOLD-021",
+            task_queue=["GOLD-022", "GOLD-023"],
+            queue_status="ACTIVE",
+        ),
+    )
+
+    before = tree_digest(planner_fs.root)
+    state_before = planner_fs.state_path.read_text(encoding="utf-8")
+
+    snapshot = build_snapshot(planner_fs)
+
+    codes = set(issue_codes(snapshot))
+
+    assert {
+        planner.ISSUE_TASK_FILE_INVALID,
+        planner.ISSUE_UNKNOWN_RESULT_STATUS,
+        planner.ISSUE_POINTER_AHEAD_OF_RESULTS,
+        planner.ISSUE_QUEUE_DECLARATION_MISMATCH,
+    } <= codes
+
+    assert snapshot["results"]["unknown"] == ["GOLD-021"]
+    assert snapshot["queue"]["pending"] == ["GOLD-021", "GOLD-023"]
+    assert snapshot["tasks"][0]["task_id"] == "GOLD-021"
+    assert snapshot["tasks"][1]["task_id"] == "GOLD-023"
+    assert snapshot["tasks"][1]["load_error"]
+    assert snapshot["summary"]["exit_code"] == planner.EXIT_DRIFT
+
+    # fail-closed：绝不静默修复 task / result / state
+    assert planner_fs.state_path.read_text(encoding="utf-8") == state_before
+    assert (planner_fs.tasks / "GOLD-023.json").read_text(encoding="utf-8") == "{ not json"
+    assert not (planner_fs.results / "GOLD-023.json").exists()
+    assert tree_digest(planner_fs.root) == before
+
+
+def test_snapshot_and_output_modules_expose_no_planning_authority() -> None:
+    """Executor 侧不存在 follow-on planning / 状态写入 API，未知能力只能 fail-closed。"""
+
+    for module in (planner, snapshot_output):
+        public = {name for name in dir(module) if not name.startswith("_")}
+
+        assert public.isdisjoint(FORBIDDEN_PLANNING_API), module.__name__
+
+    assert "build_planner_snapshot" in dir(planner)
+    assert "role_contract" in dir(planner)
+    assert "write_snapshot_output" in dir(snapshot_output)
+
+    # 快照模块仍然完全只读（GOLD-023 源码守卫保持有效）
+    for forbidden in (
+        "write_text",
+        "write_bytes",
+        "open(",
+        "mkdir",
+        "rmtree",
+        "shutil",
+        "subprocess",
+        "tempfile",
+        "requests",
+        "httpx",
+        "aiohttp",
+    ):
+        assert forbidden not in MODULE_SOURCE, forbidden
+
+    # 受控输出模块：唯一写操作是 write_snapshot_output，无进程 / 网络 / 目录创建
+    for forbidden in (
+        "import os",
+        "import subprocess",
+        "import shutil",
+        "socket",
+        "requests",
+        "httpx",
+        "aiohttp",
+        "os.replace",
+        "os.remove",
+        "rmtree",
+        "mkdir",
+    ):
+        assert forbidden not in OUTPUT_MODULE_SOURCE, forbidden
+
+    assert OUTPUT_MODULE_SOURCE.count("write_text") == 1
+    assert "def write_snapshot_output" in OUTPUT_MODULE_SOURCE
+
+    guard = snapshot_output.guard_summary()
+
+    assert guard["read_only_by_default"] is True
+    assert guard["creates_directories"] is False
+    assert guard["runtime_subpath"] == ".ai/runtime"
+    assert guard["rejection_code"] == snapshot_output.ISSUE_OUTPUT_PATH_REJECTED
+    assert guard["rejection_exit_code"] == snapshot_output.EXIT_OUTPUT_REJECTED
+    assert ".ai/tasks" in guard["forbidden_subpaths"]
+    assert ".ai/results" in guard["forbidden_subpaths"]
+    assert ".ai/PROJECT_STATE.json" in guard["forbidden_subpaths"]
+
+
+def test_cli_option_contract_excludes_planning_flags() -> None:
+    parser = planner.build_parser()
+
+    option_strings = {option for action in parser._actions for option in action.option_strings}
+
+    assert option_strings == {
+        "-h",
+        "--help",
+        "--root",
+        "--state",
+        "--tasks-dir",
+        "--results-dir",
+        "--generated-at",
+        "--output",
+    }
+
+    for forbidden in ("--plan", "--next-task", "--create-task", "--write-result", "--update-state"):
+        assert forbidden not in option_strings
+
+
+def test_output_guard_rejects_forbidden_project_paths(
+    cli_root: Path,
+    fake_temp_root: Path,
+) -> None:
+    before = tree_digest(cli_root)
+
+    forbidden_relatives = (
+        ".ai/tasks/GOLD-099.json",
+        ".ai/results/GOLD-099.json",
+        ".ai/PROJECT_STATE.json",
+        ".ai/logs/orchestrator.log",
+        ".git/HEAD",
+        "src/planner_snapshot.json",
+        "database/snapshot.json",
+        "config/snapshot.json",
+        "data/snapshot.json",
+        "docs/snapshot.json",
+        "PROGRESS_LOG.md",
+        "pyproject.toml",
+        ".clinerules",
+    )
+
+    for relative in forbidden_relatives:
+        target, reason = snapshot_output.resolve_output_target(cli_root, cli_root / relative)
+
+        assert target is None, relative
+        assert reason is not None
+        assert "禁止写入" in reason, relative
+
+    # `..` 逃逸先解析再判定，无法绕过守卫
+    sneaky = cli_root / ".ai" / "runtime" / ".." / "tasks" / "GOLD-099.json"
+
+    target, reason = snapshot_output.resolve_output_target(cli_root, sneaky)
+
+    assert target is None
+    assert reason is not None
+    assert "禁止写入" in reason
+
+    assert tree_digest(cli_root) == before
+    assert not (cli_root / ".ai" / "tasks" / "GOLD-099.json").exists()
+
+
+def test_output_guard_accepts_runtime_and_temp_paths_only(
+    cli_root: Path,
+    fake_temp_root: Path,
+) -> None:
+    runtime_target, runtime_reason = snapshot_output.resolve_output_target(
+        cli_root, cli_root / ".ai" / "runtime" / "snapshot.json"
+    )
+
+    assert runtime_reason is None
+    assert runtime_target == (cli_root / ".ai" / "runtime" / "snapshot.json").resolve()
+
+    temp_target, temp_reason = snapshot_output.resolve_output_target(
+        cli_root, fake_temp_root / "snapshot.json"
+    )
+
+    assert temp_reason is None
+    assert temp_target == (fake_temp_root / "snapshot.json").resolve()
+
+    outside_target, outside_reason = snapshot_output.resolve_output_target(
+        cli_root, cli_root / "snapshot.json"
+    )
+
+    assert outside_target is None
+    assert outside_reason is not None
+    assert "只允许写入 runtime / 临时路径" in outside_reason
+
+    missing_target, missing_reason = snapshot_output.resolve_output_target(
+        cli_root, cli_root / ".ai" / "runtime" / "nested" / "snapshot.json"
+    )
+
+    assert missing_target is None
+    assert missing_reason is not None
+    assert "父目录不存在" in missing_reason
+    assert not (cli_root / ".ai" / "runtime" / "nested").exists()
+
+
+def test_cli_output_writes_to_runtime_path_and_keeps_stdout_empty(
+    cli_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target = cli_root / ".ai" / "runtime" / "planner-snapshot.json"
+    state_before = (cli_root / ".ai" / "PROJECT_STATE.json").read_bytes()
+    protected = {
+        name: tree_digest(cli_root / name)
+        for name in (".git", ".ai/tasks", ".ai/results")
+    }
+
+    exit_code = planner.main(
+        ["--root", str(cli_root), "--output", str(target), "--generated-at", AUDIT_TIME]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == planner.EXIT_OK
+    assert captured.out == ""
+    assert "[error]" not in captured.err
+    assert "已写入受控路径" in captured.err
+    assert target.is_file()
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+
+    assert payload["schema"] == planner.PLANNER_SNAPSHOT_SCHEMA
+    assert payload["schema_version"] == planner.PLANNER_SNAPSHOT_SCHEMA_VERSION
+    assert payload["generated_at"] == AUDIT_TIME
+    assert payload["facts_digest"] == planner.snapshot_facts_digest(payload)
+
+    # 默认 stdout 通道与受控文件通道对同一输入必须逐字节一致
+    stdout_exit = planner.main(["--root", str(cli_root), "--generated-at", AUDIT_TIME])
+
+    assert stdout_exit == planner.EXIT_OK
+    assert capsys.readouterr().out == target.read_text(encoding="utf-8")
+
+    # 除显式目标外零写入：state / tasks / results / .git 全部不变
+    assert (cli_root / ".ai" / "PROJECT_STATE.json").read_bytes() == state_before
+    for name, digest in protected.items():
+        assert tree_digest(cli_root / name) == digest
+
+
+def test_cli_output_rejects_forbidden_target_with_exit_code_4(
+    cli_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    before = tree_digest(cli_root)
+
+    forbidden = cli_root / ".ai" / "results" / "GOLD-099.json"
+
+    exit_code = planner.main(
+        ["--root", str(cli_root), "--output", str(forbidden), "--generated-at", AUDIT_TIME]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == snapshot_output.EXIT_OUTPUT_REJECTED
+    assert exit_code not in {planner.EXIT_OK, planner.EXIT_DRIFT, planner.EXIT_STATE_UNREADABLE}
+    assert captured.out == ""
+    assert snapshot_output.ISSUE_OUTPUT_PATH_REJECTED in captured.err
+    assert not forbidden.exists()
+    assert tree_digest(cli_root) == before
+
+
+def test_cli_default_output_writes_nothing_under_root(
+    cli_root: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    before = tree_digest(cli_root)
+
+    exit_code = planner.main(["--root", str(cli_root), "--generated-at", AUDIT_TIME])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == planner.EXIT_OK
+    assert captured.err == ""
+    assert json.loads(captured.out)["summary"]["exit_code"] == planner.EXIT_OK
+    assert tree_digest(cli_root) == before
+
+
+def test_cli_subprocess_output_file_is_stable_and_stdout_free(cli_root: Path) -> None:
+    target = cli_root / ".ai" / "runtime" / "subprocess-snapshot.json"
+
+    command = [
+        sys.executable,
+        "-m",
+        "orchestrator.planner_snapshot",
+        "--root",
+        str(cli_root),
+        "--output",
+        str(target),
+        "--generated-at",
+        AUDIT_TIME,
+    ]
+
+    first = subprocess.run(command, capture_output=True, cwd=str(REPO_ROOT), check=False)
+
+    assert first.returncode == planner.EXIT_OK
+    assert first.stdout == b""
+    assert "[error]" not in first.stderr.decode("utf-8", errors="replace")
+    assert target.is_file()
+
+    content = target.read_text(encoding="utf-8")
+
+    second = subprocess.run(command, capture_output=True, cwd=str(REPO_ROOT), check=False)
+
+    assert second.returncode == planner.EXIT_OK
+    assert second.stdout == b""
+    assert target.read_text(encoding="utf-8") == content
+
+    payload = json.loads(content)
+
+    assert payload["schema"] == planner.PLANNER_SNAPSHOT_SCHEMA
+    assert payload["schema_version"] == planner.PLANNER_SNAPSHOT_SCHEMA_VERSION
+    assert payload["generated_at"] == AUDIT_TIME
+    assert payload["git"]["branch"] == FAKE_BRANCH
+    assert payload["git"]["head"] == FAKE_HEAD
+    assert payload["facts_digest"] == planner.snapshot_facts_digest(payload)

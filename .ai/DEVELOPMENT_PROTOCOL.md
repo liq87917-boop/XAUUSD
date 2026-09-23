@@ -150,7 +150,7 @@ Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任�
   python -m orchestrator.planner_snapshot            # 快照写 stdout（纯 ASCII JSON）
   ```
 
-  读取 `schema=gold-ai/planner-snapshot/v1` 快照：`PROJECT_STATE`（原样回显）+
+  读取 `schema=gold-ai/planner-snapshot/v2` 快照：`PROJECT_STATE`（原样回显）+
   非终态 task（依赖 / `human_gate` / readiness 与原因）+ result 终态
   （`terminal` / `unresolved` / `unknown` / `missing_results`）+
   最近 reviewed/completed 指针 vs `latest_terminal_result` + 安全 Gate
@@ -162,13 +162,45 @@ Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任�
   非终态任务不一致 / 含已终态 / 顺序不符）、`QUEUE_TASK_MISSING`、`UNKNOWN_RESULT_STATUS`、
   `TASK_FILE_INVALID`、`TASK_METADATA_INVALID`、`DEPENDENCY_GRAPH_INVALID`、
   `GATE_INCONSISTENT`、`QUEUE_GATE_STALLED`（ACTIVE 队列却在 L3/L4 处停线，warning）、
-  `BLOCKER_STATE_INCONSISTENT`、`SAFETY_INVARIANT_MISSING`、`PROJECT_STATE_UNREADABLE`。
+  `BLOCKER_STATE_INCONSISTENT`、`SAFETY_INVARIANT_MISSING`、`PROJECT_STATE_UNREADABLE`、
+  `GIT_INFO_UNAVAILABLE`（无法把规划绑定到确切代码版本）。
   退出码：`0` 无漂移 / `2` 检出漂移 / `3` `PROJECT_STATE` 不可读。
 - **只读保证**：快照**绝不写** `.ai/PROJECT_STATE.json`、`.ai/tasks/**`、`.ai/results/**`
   （模块内不存在任何写入路径，并有源码守卫测试锁定）；发现漂移时**只报告**，
   由 GPT 决定如何修正状态指针、补队列或进入下一 Phase。
 - **边界不变**：§2.5 不改变 Phase 3.3 blocker、数据资格 Gate、Human Gate 档位、
   `LIVE_TRADING` 或外部订单开关；快照只读，不与 §2.1 rolling queue、§2.4 恢复状态机冲突。
+
+## 2.6 稳定 Planner Snapshot CLI / JSON 契约（GOLD-024）
+
+- **单一入口**：`python -m orchestrator.planner_snapshot` 是 GPT 规划前**唯一**的只读事实入口；
+  CLI 选项固定为 `--root` / `--state` / `--tasks-dir` / `--results-dir` / `--generated-at` /
+  `--output`，不含任何 `--plan` / `--next-task` / `--create-task` / `--write-result` /
+  `--update-state` 之类规划或写状态开关（契约测试锁定）。
+- **版本化**：输出 `schema=gold-ai/planner-snapshot/v2` + 整数 `schema_version=2`；
+  新增事实段不改变既有字段语义（`paths` / `pointer` / `queue` / `gates` / `results` / `tasks` /
+  `artifacts` / `role_contract` / `issues` / `summary` 全部保留）。
+- **规划所需事实一次给全**：`git`（`branch` / `head` / `head_short` / `detached` / `available`，
+  只读读取 `<root>/.git` 的 HEAD 与 ref，不执行任何 Git 写操作）、`state`（PROJECT_STATE 摘要：
+  phase / status / 三个指针 / declared queue / blocker 与 human gate code / invariants /
+  next_action）、非终态 task（依赖 / `human_gate` / readiness 与原因）、result 终态汇总、
+  queue 漂移、指针漂移、Gate 与诊断 `issues`。
+- **确定性**：所有列表按固定规则排序（见 `determinism.ordering`）；wall-clock **只**出现在
+  `generated_at` 审计字段并被明确排除在 facts 之外；`facts_digest` 是状态事实的 sha256，
+  相同 Git 树 + 相同输入必然相同，GPT 可独立复算（`snapshot_facts_digest`）。
+- **fail-closed 诊断（只报告，绝不自动修复）**：损坏 task / result JSON、未知 task / result
+  status、依赖缺失 / 环、PROJECT_STATE 指针落后或超前、queue 声明漂移、Gate / blocker /
+  安全不变量不一致一律进入 `issues` 并退出码 `2`；绝不静默修复、绝不补队列、绝不回写历史 result。
+- **受控输出 `--output`**：默认只写 stdout（纯 ASCII JSON，`stderr` 只有人类摘要）；
+  `--output` 只允许写 `<root>/.ai/runtime/**` 或系统临时目录，写 `.ai/tasks`、`.ai/results`、
+  `.ai/PROJECT_STATE.json`、`.git`、`src`、`database`、`config`、`data`、`docs` 等一律 fail-closed
+  拒绝（退出码 `4`，且**不写任何文件**）；`..` 逃逸先解析再判定，父目录不存在时**不创建目录**。
+  唯一写操作集中在 `orchestrator/planner_snapshot_output.py`（快照模块仍然零写入路径）。
+- **退出码**：`0` 无漂移 / `2` 检出漂移 issue / `3` `PROJECT_STATE` 不可读 /
+  `4` `--output` 目标被拒。
+- **边界不变**：本契约不新增模型 / 供应商 API 或网络依赖，不改变 Phase 3.3 blocker、L3/L4 Gate、
+  `LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；Executor 依然不具备
+  follow-on planning / 改状态 / 决定 Phase 权限（`role_contract` + 契约测试锁定）。
 
 ## 3. 恢复任务命名
 

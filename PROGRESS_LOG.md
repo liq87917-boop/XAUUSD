@@ -3948,3 +3948,62 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
   的确定性排序避免其干扰 `latest_terminal_result` 判断；
 - 建议下一步：GPT 按快照输出决定队列补充与状态指针更新，并继续推进真实语料 Evidence 路径。
 
+
+## 第八十七轮（2026-09-23）：GOLD-024 —— Planner Snapshot 固化为稳定 CLI 与机器可读交接产物
+
+### 1. 背景
+
+- GOLD-023 已交付只读 planner snapshot，但 GPT 每轮仍要从分散文件重建状态：
+  没有 Git branch/head 绑定、没有版本化 JSON 契约、`generated_at` 与状态事实混在一起
+  导致「确定性」不可机器判定，CLI 也没有任何受控落盘通道。
+- 本轮只把 GOLD-023 的只读快照**固化为稳定、版本化、确定性的 CLI / JSON 契约**，
+  同时保持 Executor 无规划权限；不进入 Phase 3，不新增模型 / 供应商 API 或网络依赖。
+
+### 2. 交付内容
+
+- `orchestrator/planner_snapshot.py`（改造，仍然**纯只读**）：
+  - 版本化：`schema=gold-ai/planner-snapshot/v2` + 整数 `schema_version=2`；
+  - 新增 `git`（`branch` / `head` / `head_short` / `detached` / `available`）：只读解析
+    `<root>/.git/HEAD` 与 loose ref / `packed-refs`（兼容 `.git` 为 gitdir 指针的 worktree），
+    不执行任何 Git 命令或写操作；解析不了时 fail-closed 报告 `GIT_INFO_UNAVAILABLE`；
+  - 新增 `state`（PROJECT_STATE 摘要：phase / status / 三个指针 / declared queue /
+    blocker 与 human gate code / invariants / next_action），原样回显 `project_state` 保留；
+  - 新增确定性契约：`facts_digest`（状态事实 sha256，wall-clock 与自引用字段
+    `generated_at` / `facts_digest` / `determinism` 全部排除）+ `determinism`
+    （`ordering` 排序规则 / `excluded_from_facts` / `wall_clock_in_facts=false`）；
+  - `build_planner_snapshot(root=...)` 让 Git 事实与 `paths.root` 一起绑定被检查的仓库根；
+  - CLI 新增受控 `--output`：默认仍只写 stdout；给 `--output` 时 JSON 只写受控文件、
+    stdout 保持为空；目标被拒时退出码 `4` 且**不写任何文件**。
+- `orchestrator/planner_snapshot_output.py`（新增，唯一写路径单点隔离）：
+  `resolve_output_target()` / `write_snapshot_output()` / `guard_summary()`；只允许
+  `<root>/.ai/runtime/**` 与系统临时目录；`.ai/tasks`、`.ai/results`、`.ai/PROJECT_STATE.json`、
+  `.git`、`src`、`database`、`config`、`data`、`docs` 等一律拒绝；`..` 逃逸先解析再判定；
+  父目录不存在时**不创建目录**；不做 Git / 网络 / 子进程操作。
+- `tests/unit/test_ai_orchestrator_planner_snapshot.py`（**新增 14 项，共 71 项**）：
+  版本化契约 + Git / state 事实；缺失 Git 事实 fail-closed；`facts_digest` 与 wall-clock 解耦、
+  可复算、对状态变化敏感；GOLD-021/022/023 全部 completed 而 state 落后；
+  损坏 task + 未知 result status + queue 漂移下的零修复断言；CLI 选项契约无规划开关；
+  快照 / 输出模块无 follow-on planning 与状态写入 API（含源码守卫）；受控 `--output` 的
+  允许 / 禁止路径、`..` 逃逸、父目录缺失、退出码 `4`、默认零写入、子进程字节稳定。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.6「稳定 Planner Snapshot CLI / JSON 契约（GOLD-024）」，
+  并把 §2.5 的 schema 引用更新为 v2、补 `GIT_INFO_UNAVAILABLE`。
+
+### 3. 测试结果
+
+- `pytest tests/unit/test_ai_orchestrator_planner_snapshot.py -q` → `71 passed`；
+- `pytest tests -q` → 全量通过；
+- `ruff check .` → All checks passed；`mypy config database src scripts` → Success。
+
+### 4. 范围守规
+
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`src/**`、`database/**`；
+- 未改 Phase 3.3 blocker、L3/L4 Gate、`LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+- 未新增依赖 / 模型 / 供应商 API / 网络调用；Cline 未执行任何 Git 写操作；
+- 写入测试全部发生在 `tmp_path`（并显式构造 fake `.git`），对真实仓库零写入。
+
+### 5. 遗留 / 下一步
+
+- `PROJECT_STATE` 指针仍落后于 results：按设计只报告、不自动修复，由 GPT 决定；
+- 「临时路径」允许根取自 `tempfile.gettempdir()`：测试用 monkeypatch 固定，避免依赖 basetemp 位置；
+- 建议下一步：GPT 消费 v2 快照（`facts_digest` 可直接比对）决定队列补充与状态指针更新。
+

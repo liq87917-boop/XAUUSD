@@ -1,4 +1,4 @@
-"""GPT Planner 只读项目快照与职责边界契约（GOLD-023）。
+"""GPT Planner 只读项目快照与职责边界契约（GOLD-023 / GOLD-024）。
 
 为什么需要它
 ------------
@@ -10,12 +10,18 @@ GPT 在做规划决策前必须先拿到**确定性、可审计、只读**的项
 
 本模块提供
 ----------
-1. :func:`build_planner_snapshot`：把 ``PROJECT_STATE`` + 非终态 task + 依赖 + result 终态
-   + 最近 reviewed/completed 指针 + 安全 Gate 汇总成一个 JSON 快照；
+1. :func:`build_planner_snapshot`：把 Git branch/head + ``PROJECT_STATE`` 摘要 + 非终态 task
+   + 依赖 + result 终态 + 最近 reviewed/completed 指针 + 安全 Gate 汇总成**版本化** JSON
+   快照（``schema`` + ``schema_version``）；
 2. 一致性诊断（``issues``）：PROJECT_STATE 指针落后于 results、queue 声明与实际非终态不一致、
-   未知 task / result status、Gate / blocker / 安全不变量不一致 —— **只报告，绝不自动修复**；
-3. :func:`role_contract` / :func:`executor_allowed`：GPT 与 Executor 职责边界的**机器可测试契约**
-   （Executor 只有白名单能力；未登记能力一律 fail-closed 拒绝）。
+   未知 task / result status、损坏 task / result、依赖缺失 / 环、Gate / blocker / 安全不变量不一致
+   —— **只报告，绝不自动修复、绝不静默兜底**；
+3. 确定性契约：``facts_digest`` 只覆盖状态事实，wall-clock 只保留在 ``generated_at`` 审计字段
+   且被明确排除在 facts 之外；相同 Git 树 + 相同输入必然得到相同 digest（见 ``determinism``）；
+4. :func:`role_contract` / :func:`executor_allowed`：GPT 与 Executor 职责边界的**机器可测试契约**
+   （Executor 只有白名单能力；未登记能力一律 fail-closed 拒绝）；
+5. 受控输出：``--output`` 单点实现在 :mod:`orchestrator.planner_snapshot_output`，
+   **只允许**写到 ``<root>/.ai/runtime/**`` 或系统临时目录，其余位置一律 fail-closed 拒绝。
 
 安全红线（与 ``.clinerules`` / ``.ai/DEVELOPMENT_PROTOCOL.md`` 一致）
 --------------------------------------------------------------------
@@ -28,19 +34,23 @@ GPT 在做规划决策前必须先拿到**确定性、可审计、只读**的项
 ----
 .. code-block:: text
 
-    python -m orchestrator.planner_snapshot            # 只读快照写 stdout（JSON）
-    python -m orchestrator.planner_snapshot --root .   # 指定仓库根
+    python -m orchestrator.planner_snapshot                 # 只读快照写 stdout（JSON）
+    python -m orchestrator.planner_snapshot --root .        # 指定仓库根
+    python -m orchestrator.planner_snapshot --output <受控 runtime/临时路径>
 
 ``stdout`` 是**纯 ASCII JSON**（机器通道，任意代码页都可安全读取）；
 ``stderr`` 只放人类可读的 issue 摘要（受控台编码影响，绝不参与机器解析）。
+给出 ``--output`` 时 JSON 只写受控文件、``stdout`` 保持为空（机器通道二选一，不会歧义）。
 
-退出码：``0`` 无漂移 / ``2`` 检出漂移 issue / ``3`` PROJECT_STATE 不可读。
+退出码：``0`` 无漂移 / ``2`` 检出漂移 issue / ``3`` PROJECT_STATE 不可读 /
+``4`` ``--output`` 目标被 fail-closed 拒绝（此时绝不写任何文件）。
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import re
 import sys
@@ -49,15 +59,33 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator import ai_orchestrator as orch
+from orchestrator import planner_snapshot_output as snapshot_output
 
 ROOT = Path(__file__).resolve().parent.parent
 
 # GPT Planner 每次规划前的只读事实来源。
 PROJECT_STATE_PATH = ROOT / ".ai" / "PROJECT_STATE.json"
 
-PLANNER_SNAPSHOT_SCHEMA = "gold-ai/planner-snapshot/v1"
+# 版本化 CLI / JSON 契约：shape 变化必须同时 bump 字符串 schema 与整数 schema_version。
+PLANNER_SNAPSHOT_SCHEMA = "gold-ai/planner-snapshot/v2"
+
+PLANNER_SNAPSHOT_SCHEMA_VERSION = 2
 
 ROLE_CONTRACT_SCHEMA = "gold-ai/role-contract/v1"
+
+# 只读事实里**不允许**参与 digest 的字段：
+# - ``generated_at`` 是 wall-clock 审计元数据，绝不参与资格（readiness）或状态事实；
+# - ``facts_digest`` / ``determinism`` 由 facts 自身派生，必须排除以避免自引用。
+FACTS_EXCLUDED_KEYS = ("generated_at", "facts_digest", "determinism")
+
+# 确定性排序契约（机器可读，供 GPT 与测试断言；只描述规则，不含事实）。
+SNAPSHOT_ORDERING = {
+    "issues": "sorted by (code, detail)",
+    "tasks": "sorted by task_id_sort_key",
+    "terminal_results": "sorted by task_rank (project prefix first, then task_id_sort_key)",
+    "artifacts": "sorted by task_id_sort_key",
+    "declared_queue": "PROJECT_STATE declaration order (drift reported separately)",
+}
 
 # ============================================================
 # 职责边界契约（GPT = Planner / Reviewer / Architect；其余 = Executor）
@@ -123,6 +151,7 @@ PLANNER_DECISION_GUARDS = {
 # ============================================================
 
 ISSUE_PROJECT_STATE_UNREADABLE = "PROJECT_STATE_UNREADABLE"
+ISSUE_GIT_INFO_UNAVAILABLE = "GIT_INFO_UNAVAILABLE"
 ISSUE_POINTER_BEHIND_RESULTS = "PROJECT_STATE_POINTER_BEHIND_RESULTS"
 ISSUE_POINTER_AHEAD_OF_RESULTS = "PROJECT_STATE_POINTER_AHEAD_OF_RESULTS"
 ISSUE_POINTER_MISSING = "PROJECT_STATE_POINTER_MISSING"
@@ -878,8 +907,182 @@ def results_section(
     return section, issues
 
 
+# ============================================================
+# Git 事实（只读）：规划必须绑定到确切的代码版本
+# ============================================================
+
+GIT_HEAD_REF_PREFIX = "ref: "
+
+GIT_REFS_HEADS_PREFIX = "refs/heads/"
+
+
+def read_text_if_possible(path: Path) -> str | None:
+    """只读文本（不存在 / 不可读 → ``None``）；绝不创建或修改文件。"""
+
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    except OSError:
+        return None
+
+
+def resolve_git_dir(root: Path) -> Path | None:
+    """``<root>/.git`` 目录；``.git`` 是 gitdir 指针文件（worktree）时按指针解析。"""
+
+    candidate = Path(root) / ".git"
+
+    if candidate.is_dir():
+        return candidate
+
+    if candidate.is_file():
+        pointer = (read_text_if_possible(candidate) or "").strip()
+
+        if pointer.startswith("gitdir:"):
+            resolved = (candidate.parent / pointer[len("gitdir:") :].strip()).resolve()
+
+            if resolved.is_dir():
+                return resolved
+
+    return None
+
+
+def read_ref_sha(directory: Path, ref: str) -> str | None:
+    """解析 ref 的 commit SHA（先 loose ref，再 ``packed-refs``）；解析不了返回 ``None``。"""
+
+    loose = read_text_if_possible(directory.joinpath(*ref.split("/")))
+
+    if loose is not None and loose.strip():
+        return loose.strip()
+
+    packed = read_text_if_possible(directory / "packed-refs")
+
+    if packed is not None:
+        for line in packed.splitlines():
+            entry = line.strip()
+
+            if not entry or entry.startswith("#") or entry.startswith("^"):
+                continue
+
+            parts = entry.split(maxsplit=1)
+
+            if len(parts) == 2 and parts[1].strip() == ref:
+                return parts[0].strip()
+
+    return None
+
+
+def git_section(root: Path) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    """只读 Git 事实（branch / head / head_short）。
+
+    只读取 ``<root>/.git/HEAD`` 与 ref 文件（或 worktree 的 gitdir 指针 + ``packed-refs``），
+    不执行任何 Git 写操作、不切分支、不写索引，对本机仓库零影响；
+    解析不了时 fail-closed 报告 ``GIT_INFO_UNAVAILABLE``（绝不猜测版本）。
+    """
+
+    directory = resolve_git_dir(root)
+
+    branch: str | None = None
+    head: str | None = None
+
+    if directory is not None:
+        head_text = (read_text_if_possible(directory / "HEAD") or "").strip()
+
+        if head_text.startswith(GIT_HEAD_REF_PREFIX):
+            ref = head_text[len(GIT_HEAD_REF_PREFIX) :].strip()
+
+            if ref.startswith(GIT_REFS_HEADS_PREFIX):
+                branch = ref[len(GIT_REFS_HEADS_PREFIX) :].strip() or None
+
+            head = read_ref_sha(directory, ref) if ref else None
+
+        elif head_text:
+            # detached HEAD：HEAD 文件里直接就是 commit SHA。
+            head = head_text
+
+    section: dict[str, Any] = {
+        "branch": branch,
+        "head": head,
+        "head_short": head[:8] if head else None,
+        "detached": bool(head) and branch is None,
+        "available": bool(branch) and bool(head),
+    }
+
+    issues: list[dict[str, str]] = []
+
+    if not section["available"]:
+        issues.append(
+            make_issue(
+                ISSUE_GIT_INFO_UNAVAILABLE,
+                SEVERITY_ERROR,
+                f"无法从 {root} 读取 Git branch/head 事实："
+                "规划必须绑定确切代码版本（snapshot 不猜测、不跳过）",
+            )
+        )
+
+    return section, issues
+
+
+def state_summary(state: dict[str, Any]) -> dict[str, Any]:
+    """``PROJECT_STATE`` 的只读摘要（原样回显仍在 ``project_state``，两者都只报告）。"""
+
+    declared, declared_error = declared_queue(state)
+
+    return {
+        "schema_version": state.get("schema_version"),
+        "project": state.get("project"),
+        "branch": state.get("branch"),
+        "phase": state.get("phase"),
+        "status": state.get("status"),
+        "current_task": pointer_value(state, "current_task"),
+        "last_completed_task": pointer_value(state, "last_completed_task"),
+        "last_reviewed_task": pointer_value(state, "last_reviewed_task"),
+        "queue_status": state.get("queue_status"),
+        "queue_target_size": state.get("queue_target_size"),
+        "declared_queue": declared,
+        "declared_queue_error": declared_error,
+        "blocker_codes": gate_codes(state.get("blockers")),
+        "human_gate_codes": gate_codes(state.get("human_gates")),
+        "invariants": invariant_list(state),
+        "next_action": state.get("next_action"),
+    }
+
+
+def snapshot_facts(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """剔除 wall-clock / 自引用字段后的**确定性事实**视图。"""
+
+    return {key: value for key, value in snapshot.items() if key not in FACTS_EXCLUDED_KEYS}
+
+
+def snapshot_facts_digest(snapshot: dict[str, Any]) -> str:
+    """确定性事实的 sha256：相同 Git 树 + 相同输入 ⇒ 相同 digest，且幂等。"""
+
+    canonical = json.dumps(
+        snapshot_facts(snapshot),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    return hashlib.sha256(canonical.encode("ascii")).hexdigest()
+
+
+def determinism_section() -> dict[str, Any]:
+    """确定性契约的机器可读声明（只有规则，不含任何状态事实）。"""
+
+    return {
+        "digest_field": "facts_digest",
+        "excluded_from_facts": list(FACTS_EXCLUDED_KEYS),
+        "wall_clock_in_facts": False,
+        "ordering": dict(SNAPSHOT_ORDERING),
+    }
+
+
 def exit_code_for_issues(issues: list[dict[str, str]]) -> int:
-    """退出码：``0`` 无漂移 / ``2`` 有漂移 / ``3`` PROJECT_STATE 不可读。"""
+    """退出码：``0`` 无漂移 / ``2`` 有漂移 / ``3`` PROJECT_STATE 不可读。
+
+    ``4``（``--output`` 目标被拒）由 :mod:`orchestrator.planner_snapshot_output` 定义，
+    只在写路径守卫里出现，不影响这里的漂移语义。
+    """
 
     codes = {issue["code"] for issue in issues}
 
@@ -900,12 +1103,15 @@ def planner_snapshot_exit_code(snapshot: dict[str, Any]) -> int:
 
 def build_planner_snapshot(
     *,
+    root: Path | None = None,
     state_path: Path | None = None,
     tasks_dir: Path | None = None,
     results_dir: Path | None = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
-    """构建只读 planner 快照（含一致性诊断）。**绝不修改任何项目状态**。"""
+    """构建只读 planner 快照（版本化 + 一致性诊断）。**绝不修改任何项目状态**。"""
+
+    resolved_root = Path(root) if root is not None else ROOT
 
     resolved_state = Path(state_path) if state_path is not None else PROJECT_STATE_PATH
 
@@ -928,6 +1134,8 @@ def build_planner_snapshot(
             )
 
         state = state or {}
+
+        git_view, git_issues = git_section(resolved_root)
 
         statuses = result_statuses(resolved_results)
 
@@ -967,6 +1175,7 @@ def build_planner_snapshot(
             project_task_prefix(state),
         )
 
+    issues.extend(git_issues)
     issues.extend(pointer_issues)
     issues.extend(queue_issues)
     issues.extend(gate_issues)
@@ -980,16 +1189,19 @@ def build_planner_snapshot(
 
     error_count = sum(1 for issue in ordered if issue["severity"] == SEVERITY_ERROR)
 
-    return {
+    snapshot: dict[str, Any] = {
         "schema": PLANNER_SNAPSHOT_SCHEMA,
+        "schema_version": PLANNER_SNAPSHOT_SCHEMA_VERSION,
         "generated_at": generated_at if generated_at is not None else orch.now_iso(),
         "read_only": True,
+        "git": git_view,
         "paths": {
-            "root": str(ROOT),
+            "root": str(resolved_root),
             "project_state": str(resolved_state),
             "tasks_dir": str(resolved_tasks),
             "results_dir": str(resolved_results),
         },
+        "state": state_summary(state),
         "project_state": state or None,
         "pointer": pointer,
         "queue": queue,
@@ -1011,6 +1223,12 @@ def build_planner_snapshot(
         },
     }
 
+    # digest / determinism 由 facts 派生，且自身被排除在 facts 之外（幂等、无自引用）。
+    snapshot["facts_digest"] = snapshot_facts_digest(snapshot)
+    snapshot["determinism"] = determinism_section()
+
+    return snapshot
+
 
 def render_planner_snapshot(snapshot: dict[str, Any], *, ensure_ascii: bool = True) -> str:
     """确定性 JSON 渲染（固定缩进 + sort_keys）。
@@ -1025,7 +1243,10 @@ def render_planner_snapshot(snapshot: dict[str, Any], *, ensure_ascii: bool = Tr
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m orchestrator.planner_snapshot",
-        description="GPT Planner 只读项目快照 + 一致性诊断（GOLD-023）：绝不修改任何项目状态。",
+        description=(
+            "GPT Planner 只读项目快照 + 一致性诊断（GOLD-023 / GOLD-024 版本化契约）："
+            "绝不修改任何项目状态。"
+        ),
     )
 
     parser.add_argument(
@@ -1062,11 +1283,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="固定 generated_at（便于审计与字节级复现；默认取当前时间）",
     )
 
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help=(
+            "可选：把快照 JSON 写到用户显式指定的受控路径"
+            "（只允许 <root>/.ai/runtime/** 或系统临时目录；写其它位置一律拒绝）"
+        ),
+    )
+
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """只读 CLI 入口：快照写 stdout，issue 摘要写 stderr。"""
+    """只读 CLI 入口：默认快照写 stdout，``--output`` 时写受控文件；摘要写 stderr。"""
 
     args = build_parser().parse_args(argv)
 
@@ -1083,14 +1314,32 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     snapshot = build_planner_snapshot(
+        root=root,
         state_path=state_path,
         tasks_dir=tasks_dir,
         results_dir=results_dir,
         generated_at=args.generated_at,
     )
 
-    sys.stdout.write(render_planner_snapshot(snapshot))
-    sys.stdout.flush()
+    rendered = render_planner_snapshot(snapshot)
+
+    if args.output is None:
+        sys.stdout.write(rendered)
+        sys.stdout.flush()
+    else:
+        target, reason = snapshot_output.resolve_output_target(root, args.output)
+
+        if target is None:
+            print(
+                f"[error] {snapshot_output.ISSUE_OUTPUT_PATH_REJECTED}: {reason}",
+                file=sys.stderr,
+            )
+
+            return snapshot_output.EXIT_OUTPUT_REJECTED
+
+        snapshot_output.write_snapshot_output(target, rendered)
+
+        print(f"[info] snapshot 已写入受控路径: {target}", file=sys.stderr)
 
     for issue in snapshot["issues"]:
         print(f"[{issue['severity']}] {issue['code']}: {issue['detail']}", file=sys.stderr)

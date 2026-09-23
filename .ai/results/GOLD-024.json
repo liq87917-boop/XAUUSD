@@ -1,0 +1,79 @@
+{
+  "task_id": "GOLD-024",
+  "title": "将 Planner Snapshot 固化为稳定 CLI 与机器可读交接产物",
+  "status": "completed",
+  "finished_at": "2026-09-23T14:22:31+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    " M orchestrator/planner_snapshot.py",
+    " M tests/unit/test_ai_orchestrator_planner_snapshot.py",
+    "?? orchestrator/planner_snapshot_output.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md                        |  36 +-\n PROGRESS_LOG.md                                    |  59 +++\n orchestrator/planner_snapshot.py                   | 285 +++++++++-\n .../unit/test_ai_orchestrator_planner_snapshot.py  | 578 ++++++++++++++++++++-\n 4 files changed, 937 insertions(+), 21 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T14:05:02+08:00",
+      "finished_at": "2026-09-23T14:22:31+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 77,
+      "duration_ms": 714694,
+      "usage": {
+        "inputTokens": 8397208,
+        "outputTokens": 91636,
+        "cacheReadTokens": 8292992,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.09549297599999998
+      },
+      "cline_final_text": "Submission recorded (verified): GOLD-024 完成：把 GOLD-023 的只读 planner snapshot 固化为稳定、版本化、确定性的 CLI/JSON 契约。\n\n修改/新增文件\n- 改 `orchestrator/planner_snapshot.py`：schema bump 为 `gold-ai/planner-snapshot/v2` + 整数 `schema_version=2`；新增 `git`（branch/head/head_short/detached/available，纯文件读取 `<root>/.git/HEAD` + loose ref/`packed-refs`，兼容 gitdir worktree，零 Git 写操作，解析失败 fail-closed 报 `GIT_INFO_UNAVAILABLE`）；新增 `state`（PROJECT_STATE 摘要，原样回显 `project_state` 保留）；新增确定性契约 `facts_digest`（状态事实 sha256，排除 `generated_at/facts_digest/determinism`，幂等可复算）与 `determinism`（ordering/excluded_from_facts/wall_clock_in_facts=false）；`build_planner_snapshot(root=...)` 绑定 Git 事实与 `paths.root`；CLI 新增受控 `--output`（默认仍只写 stdout；被拒时退出码 4 且零写入）。\n- 新增 `orchestrator/planner_snapshot_output.py`：唯一写路径单点隔离，只允许 `<root>/.ai/runtime/**` 与系统临时目录；`.ai/tasks`、`.ai/results`、`.ai/PROJECT_STATE.json`、`.git`、`src`、`database`、`config`、`data`、`docs` 等 fail-closed 拒绝；`..` 逃逸先解析再判定；父目录不存在不创建目录；无 Git/网络/子进程操作。\n- 改 `tests/unit/test_ai_orchestrator_planner_snapshot.py`：+14 项（57→71），覆盖正常链、GOLD-021/022/023 全 completed 但 state 落后、损坏 task + 未知 result status + queue 漂移且零修复、Git 事实缺失 fail-closed、`facts_digest` 与 wall-clock 解耦/可复算/对状态敏感、受控 `--output` 允许/禁止路径与退出码 4 与默认零写入、子进程字节稳定、CLI 选项契约与“Executor 无 follow-on planning / 状态写入 API”（含源码守卫）；并给 fixture 注入 fake `.git`，使 Git 事实确定且不依赖机器状态/basetemp。\n- 改 `.ai/DEVELOPMENT_PROTOCOL.md`（新增 §2.6，§2.5 引用更新为 v2）与 `PROGRESS_LOG.md`（第八十七轮）。\n\n验收证据（本会话实测）\n- `pytest tests/unit/test_ai_orchestrator_planner_snapshot.py -q` → 71 passed；`pytest tests -q` → 2867 passed, 1 skipped（既有 jieba 未安装 skip，与改动无关）；`pytest tests/unit/test_ai_orchestrator_queue.py -q` → 67 passed。\n- `ruff check .` → All checks passed；`mypy config database src scripts` → Success: no issues found in 172 source files。\n- 真实仓库端到端：默认 CLI exit=2 且输出 v2/schema_version=2/git=cline-agent+ae64e0f5/64-hex digest/纯 ASCII；`--output .ai/tasks/GOLD-024.json` exit=4、stdout 空、该文件哈希不变；`--output .ai/runtime/*.json` 成功且与默认 stdout 逐字节一致，tasks/results/PROJECT_STATE 哈希均未变（临时文件已清理）。\n- `git status --porcelain` 仅显示 4 改 + 1 新，未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`src/**`、`database/**`；Phase 3.3 blocker、L3/L4 Gate、LIVE_TRADING=false、ALLOW_EXTERNAL_ORDER_SUBMISSION=false 未变；未新增依赖/模型 API/网络。\n\n遗留/边界：PROJECT_STATE 指针仍落后于 results —— 按设计只报告、不自动修复（属 GPT 权限且任务禁止改该文件）；`--output` 指向已存在目录时由 Python 抛错（非零退出、非静默成功），未额外收敛为退出码 4 以免超出 scope；历史 v1 记录保留在 PROGRESS_LOG 第八十六轮。\n\nacceptance 全部满足。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        " M orchestrator/planner_snapshot.py",
+        " M tests/unit/test_ai_orchestrator_planner_snapshot.py",
+        "?? orchestrator/planner_snapshot_output.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md                        |  36 +-\n PROGRESS_LOG.md                                    |  59 +++\n orchestrator/planner_snapshot.py                   | 285 +++++++++-\n .../unit/test_ai_orchestrator_planner_snapshot.py  | 578 ++++++++++++++++++++-\n 4 files changed, 937 insertions(+), 21 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_planner_snapshot.py -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": ".......................................................................  [100%]\n71 passed in 3.11s\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  5%]\n........................................................................ [  7%]\n........................................................................ [ 10%]\n........................................................................ [ 12%]\n........................................................................ [ 15%]\n........................................................................ [ 17%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 25%]\n........................................................................ [ 27%]\n........................................................................ [ 30%]\n........................................................................ [ 32%]\n........................................................................ [ 35%]\n........................................................................ [ 37%]\n........................................................................ [ 40%]\n........................................................................ [ 42%]\n........................................................................ [ 45%]\n........................................................................ [ 47%]\n........................................................................ [ 50%]\n........................................................................ [ 52%]\n........................................................................ [ 55%]\n........................................................................ [ 57%]\n........................................................................ [ 60%]\n........................................................................ [ 62%]\n........................................................................ [ 65%]\n........................................................................ [ 67%]\n........................................................................ [ 70%]\n........................................................................ [ 72%]\n........................................................................ [ 75%]\n........................................................................ [ 77%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 85%]\n........................................................................ [ 87%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 95%]\n........................................................................ [ 97%]\n...............s............................................             [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2867 passed, 1 skipped in 324.90s (0:05:24)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 172 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
