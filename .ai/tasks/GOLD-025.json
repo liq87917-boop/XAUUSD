@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-025",
+  "type": "AUTOMATION_INFRA",
+  "title": "建立 GPT Review Ledger 与状态推进一致性门禁",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-024"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "建立机器可审计的 GPT review 记录契约，使 completed、reviewed、PROJECT_STATE 指针和 rolling queue 的推进有明确一致性门禁；Executor 只能读取 review 结论，不能自行签发。",
+  "requirements": [
+    "定义轻量、版本化的 review ledger schema/validator，记录 task_id、review verdict、reviewed commit/result identity、acceptance summary 和 reviewer_role=GPT；实现只读验证与诊断，不允许 Cline/DeepSeek 生成 PASS review。",
+    "增加状态推进一致性检查：last_reviewed_task 不得超前于 completed result；review 必须绑定存在的 terminal result 与对应 Git identity；queue 首任务依赖必须已 completed 且若协议要求 review 则已 GPT-reviewed。",
+    "对 stale/missing/mismatched review、result 被替换、PROJECT_STATE 指针倒退/超前等情况 fail-closed 报告；不得自动伪造 review 或跨过 human gate。",
+    "提供 GPT 可写、Executor 只读的职责边界文档/校验函数；本任务不得让本地模型拥有 reviewer 身份。",
+    "新增单元测试覆盖 completed-but-unreviewed、review identity mismatch、state drift、合法 reviewed chain、L3/L4 停线和历史 result 不被改写。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", "src/**", "database/**"]
+  },
+  "constraints": [
+    "实现只能定义/验证 review 契约；不得由 Cline/DeepSeek 自动签发 GPT PASS。",
+    "不得改变业务 Phase、数据资格阈值或 L3/L4 Gate。",
+    "不得新增外部模型 API、交易能力或真实数据资格声明。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT review 与 Executor completion 被明确分离并可机器验证，Executor 无法凭 completed 自称 reviewed。",
+    "状态/queue/review identity 漂移会 fail-closed 暴露，历史 result 不被改写。",
+    "全量 pytest/ruff/mypy 通过；安全不变量保持。"
+  ]
+}
