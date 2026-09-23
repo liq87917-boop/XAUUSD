@@ -29,6 +29,16 @@ RECOVERY_DIR = RUNTIME_DIR / "recovery"
 LOCK_FILE = RUNTIME_DIR / "orchestrator.lock"
 LOG_FILE = LOG_DIR / "orchestrator.log"
 
+# ============================================================
+# 启动前 bootstrap sync（GOLD-021）
+# ============================================================
+#
+# launcher（start_agent.bat）必须在启动本进程之前先运行
+# `python -m orchestrator.bootstrap_sync`，并把结果写到该文件。
+# Orchestrator 启动时读取它，把「启动前同步结果 + 本进程看到的 HEAD」
+# 一起打进日志，用于确认当前进程实际加载的版本。
+BOOTSTRAP_STATE_FILE = RUNTIME_DIR / "bootstrap_state.json"
+
 
 # ============================================================
 # 配置
@@ -712,6 +722,157 @@ def sync_repository():
         )
 
     return True
+
+
+# ============================================================
+# 版本可见性（GOLD-021）
+# ============================================================
+#
+# 解决「磁盘代码已更新，但运行中的进程仍是旧代码」这类无法确认版本的问题：
+#   - 启动时打印本进程实际看到的 HEAD 短 SHA；
+#   - 打印 launcher 的 bootstrap sync 结果（branch / HEAD / provider / model）；
+#   - 运行中若磁盘 HEAD 变化，明确告警「当前进程仍是启动时加载的代码」。
+
+def head_short_sha():
+
+    result = git(
+        "rev-parse --short HEAD"
+    )
+
+    if (
+        result["returncode"]
+        != 0
+    ):
+
+        return None
+
+    value = (
+        result["stdout"]
+        .strip()
+    )
+
+    return value or None
+
+
+def abbrev_sha(value):
+
+    if not isinstance(value, str):
+
+        return "<unknown>"
+
+    text = value.strip()
+
+    return text[:8] or "<unknown>"
+
+
+def commit_prefix_matches(
+    expected,
+    observed
+):
+    """比较完整 SHA 与短 SHA（任一为空 / 非字符串时返回 False）。"""
+
+    if (
+        not isinstance(expected, str)
+        or
+        not isinstance(observed, str)
+    ):
+
+        return False
+
+    left = expected.strip().lower()
+
+    right = observed.strip().lower()
+
+    if not left or not right:
+
+        return False
+
+    length = min(
+        len(left),
+        len(right)
+    )
+
+    return (
+        left[:length]
+        ==
+        right[:length]
+    )
+
+
+def read_bootstrap_sync_state():
+    """读取 launcher 在启动本进程之前落盘的 bootstrap sync 结果。"""
+
+    state = read_json(
+        BOOTSTRAP_STATE_FILE
+    )
+
+    if isinstance(state, dict):
+
+        return state
+
+    return None
+
+
+def describe_bootstrap_sync(state):
+    """把 bootstrap sync 结果压缩成一行可审计日志（绝不含任何凭据）。"""
+
+    if not isinstance(state, dict):
+
+        return (
+            "not recorded：launcher 未执行 / 未落盘 bootstrap sync，"
+            "无法确认本进程启动前是否已同步"
+        )
+
+    status = (
+        "OK"
+        if state.get("ok") is True
+        else "FAILED"
+    )
+
+    return (
+        f"{status}"
+        f" result={state.get('result') or 'unknown'}"
+        f" branch={state.get('branch') or '<unknown>'}"
+        f" head_before={abbrev_sha(state.get('head_before'))}"
+        f" head_after={abbrev_sha(state.get('head_after'))}"
+        f" provider={state.get('provider') or '<unknown>'}"
+        f" model={state.get('model') or '<provider default>'}"
+        f" checked_at={state.get('checked_at') or '<unknown>'}"
+    )
+
+
+def bootstrap_head_mismatch(
+    state,
+    head_sha
+):
+    """同步之后磁盘 HEAD 又变了 → 返回告警文本；一致 / 无数据返回 None。"""
+
+    if not isinstance(state, dict) or not head_sha:
+
+        return None
+
+    synced = state.get("head_after")
+
+    if (
+        not isinstance(synced, str)
+        or
+        not synced.strip()
+    ):
+
+        return None
+
+    if commit_prefix_matches(synced, head_sha):
+
+        return None
+
+    return (
+        "bootstrap sync 记录的 HEAD（"
+        + abbrev_sha(synced)
+        + "）与本进程看到的 HEAD（"
+        + abbrev_sha(head_sha)
+        + "）不一致：磁盘代码在启动前同步之后又被改动，"
+        "请确认当前进程加载的版本，必要时重启 start_agent.bat。"
+    )
 
 
 # ============================================================
@@ -4537,6 +4698,18 @@ def main():
         return 2
 
     # ========================================================
+    # 版本可见性（GOLD-021）
+    # ========================================================
+    #
+    # 启动顺序由 launcher 保证：bootstrap sync → Python/Orchestrator load。
+    # 这里把「本进程实际看到的 HEAD」与「启动前 bootstrap sync 结果」
+    # 都打印出来，便于确认运行中的进程到底加载的是哪个版本。
+
+    startup_head = head_short_sha()
+
+    bootstrap_state = read_bootstrap_sync_state()
+
+    # ========================================================
     # 启动信息
     # ========================================================
 
@@ -4557,6 +4730,34 @@ def main():
         "Branch : %s",
         branch
     )
+
+    _logger.info(
+        "HEAD   : %s",
+        (
+            startup_head
+            or
+            "<unknown>"
+        )
+    )
+
+    _logger.info(
+        "Bootstrap sync: %s",
+        describe_bootstrap_sync(
+            bootstrap_state
+        )
+    )
+
+    consistency_warning = bootstrap_head_mismatch(
+        bootstrap_state,
+        startup_head
+    )
+
+    if consistency_warning:
+
+        _logger.warning(
+            "%s",
+            consistency_warning
+        )
 
     _logger.info(
         "Poll   : %ss",
@@ -4620,6 +4821,48 @@ def main():
                 last_idle_log_at = step[
                     "last_idle_log_at"
                 ]
+
+                # ============================================
+                # 版本漂移可见性（GOLD-021）
+                # ============================================
+                #
+                # 本轮可能刚刚 pull 了新 commit：磁盘代码已变，
+                # 但本进程仍运行启动时加载的代码，必须明确告警，
+                # 避免再次出现「磁盘已更新却以为是新代码」的误判。
+
+                observed_head = head_short_sha()
+
+                if (
+                    observed_head
+                    and
+                    observed_head
+                    != startup_head
+                ):
+
+                    _logger.warning(
+
+                        "检测到磁盘代码已更新"
+
+                        "（%s -> %s）："
+
+                        "当前进程仍运行"
+
+                        "启动时加载的代码，"
+
+                        "请重启 start_agent.bat"
+
+                        "以加载新版本。",
+
+                        (
+                            startup_head
+                            or
+                            "<unknown>"
+                        ),
+
+                        observed_head
+                    )
+
+                    startup_head = observed_head
 
                 if step["action"] == ITERATION_CONTINUE:
 

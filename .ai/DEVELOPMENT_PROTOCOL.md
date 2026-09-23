@@ -98,6 +98,30 @@ Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任�
 - 日志分别输出 `completed locally` / `push pending` / `remote synced` / `rolling queue continue`，
   避免把 Git 同步问题误报为任务 validation 失败。
 
+## 2.3 启动前 bootstrap sync 与版本可见性契约（GOLD-021）
+
+- **启动顺序固定为：`bootstrap sync` → `Python/Orchestrator load`。**
+  `start_agent.bat` 必须先以独立进程运行 `py -u orchestrator\bootstrap_sync.py`
+  （等价于 `python -m orchestrator.bootstrap_sync`），只有它以退出码 `0` 成功，
+  才允许启动 `orchestrator/ai_orchestrator.py`。严禁把代码同步只留在 Python 进程内部
+  （那会造成「磁盘代码已更新、运行中的 Orchestrator 仍执行旧代码」的窗口）。
+- 启动前同步只允许**安全同步**：`fetch` → 本地落后时 `merge --ff-only` →
+  真正分叉时 `rebase <remote>/<branch>`（失败必须 `rebase --abort` 回原状）。
+  绝不 `push --force`、绝不 `reset --hard`、绝不 `clean`、绝不自动 `checkout` / `switch`。
+- **fail-closed（退出码非 0 ⇒ launcher 不启动 Orchestrator）**：
+  dirty worktree（`3`）、当前分支不符（`2`）、git 不可用（`5`）、
+  fetch / 远端 ref / HEAD 校验失败（`4`）。任何情况下本地修改与本地 commit 一律保留。
+- 同步结果落盘 `.ai/runtime/bootstrap_state.json`（Git 已忽略）。Orchestrator 启动日志打印
+  `Branch` / `HEAD`（短 SHA）/ `Bootstrap sync: OK|FAILED result=... branch=...
+  head_before=... head_after=... provider=... model=... checked_at=...`，
+  用于确认当前进程实际加载的版本；若磁盘 HEAD 与 bootstrap 记录的 `head_after`
+  不一致，会额外告警，提示确认版本或重启 launcher。
+- 运行中 `pull` 若让磁盘代码前进，Orchestrator 会告警
+  「当前进程仍运行启动时加载的代码，请重启 start_agent.bat」——
+  运行中的进程**不会**热加载新代码，必须重启 launcher 才生效。
+- 启动日志只含 branch / HEAD / provider / model，**绝不打印 API Key 或任何凭据**；
+  DeepSeek provider hard-pin 与 provider fail-fast 语义保持不变。
+
 ## 3. 恢复任务命名
 
 原任务失败或阻塞后不得修改既有审计历史。

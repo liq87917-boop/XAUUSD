@@ -3738,3 +3738,67 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
 - 建议下一步：真实语料继续按 Evidence 九步路径推进（授权 → inbox → review → plan → 显式落库 →
   receipt → 决策包 → L3 Gate），Phase 切换仍需人工 L3。
 
+---
+
+## 第八十四轮（2026-09-23）：GOLD-021 —— start_agent 启动前 bootstrap sync 与版本可见性加固
+
+### 1. 背景（本轮实际暴露的问题）
+
+- 旧 `start_agent.bat` 直接启动 `orchestrator/ai_orchestrator.py`，Git 代码同步只发生在
+  Python 进程**内部**（`sync_repository()` 的 `pull --rebase`）：磁盘上的代码已经更新，
+  但已加载的 Orchestrator 仍执行旧代码内存，且启动日志里看不到「本进程到底加载了哪个版本」。
+
+### 2. 交付内容
+
+- 新增 `orchestrator/bootstrap_sync.py`（启动前同步模块，可 `python -m` 直接运行）：
+  - 只读探测 `branch --show-current` / `rev-parse HEAD` → dirty 检查 → `fetch --prune`
+    → 本地落后 `merge --ff-only`；真正分叉才 `rebase <remote>/<branch>`；
+    同步后必须核对 `HEAD == remote_sha`，否则 fail-closed；
+  - **fail-closed 词表**：`skipped_dirty`（退出码 `3`）/ `wrong_branch`（`2`）/
+    `fetch_failed` / `remote_ref_missing` / `rebase_conflict` / `failed`（`4`）/ git 不可用（`5`）；
+    dirty 时连 `fetch` 都不执行；rebase 冲突必须 `rebase --abort` 回原状，本地 commit/修改一律保留；
+  - 启动日志打印 branch / HEAD 短 SHA / provider / model / sync 结果，并原子落盘
+    `.ai/runtime/bootstrap_state.json`（Git 已忽略）；**绝不打印任何凭据**。
+- `start_agent.bat`：启动顺序固定为 `py -u orchestrator\bootstrap_sync.py` →
+  `if errorlevel 1 (… pause & exit /b 1)` → `py -u orchestrator\ai_orchestrator.py`；
+  同步失败绝不启动 Orchestrator；DeepSeek hard-pin 与队列默认值保持不变。
+- `orchestrator/ai_orchestrator.py`：新增 `head_short_sha()` / `abbrev_sha()` /
+  `commit_prefix_matches()` / `read_bootstrap_sync_state()` / `describe_bootstrap_sync()` /
+  `bootstrap_head_mismatch()`；启动日志打印 `HEAD` 与 `Bootstrap sync: …`，
+  磁盘 HEAD 与 bootstrap 记录的 `head_after` 不一致时告警；运行中检测到磁盘代码前进时告警
+  「当前进程仍运行启动时加载的代码，请重启 start_agent.bat」（运行中的进程不会热加载）。
+- `tests/unit/test_start_agent_bootstrap.py`：新增 **33 项**测试（单元 27 + 集成 6）：
+  - fake git（单元 27 项）：稳定命令白名单与顺序、dirty/分支不符/网络失败/远端 ref 缺失/
+    ff 后 HEAD 不一致/rebase 冲突 + abort/本地领先 等 fail-closed 路径，
+    状态落盘与报告**不含任何凭据**，launcher 顺序与 `exit /b 1` 守卫的文本契约，
+    以及 Orchestrator 侧版本可见性函数（`describe_bootstrap_sync` / `bootstrap_head_mismatch`）；
+  - 真实 git 集成（6 项，临时 bare 远端、零真实网络、零真实仓库写操作）：
+    `v1` → 远端发布 `v2` → bootstrap sync fast-forward 后**新起的 Python 进程**读到 `v2`
+    （证明加载的是新版本而不是旧进程内存）、幂等 `up_to_date`、
+    dirty 保留本地修改且连 `fetch` 都不执行、rebase 冲突 `--abort` 后本地 commit 与工作区完好、
+    CLI 退出码与 runtime 状态。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.3「启动前 bootstrap sync 与版本可见性契约」。
+
+### 3. 双方证据（真实执行）
+
+- 真实仓库（工作区 dirty）执行 `py -u orchestrator\bootstrap_sync.py`：
+  `Sync result: skipped_dirty`、退出码 `3`、`git status --short` 前后**逐行一致**（0 处差异）。
+- 干净临时 clone 执行同一 CLI：`Sync result: up_to_date`、退出码 `0`、
+  落盘状态含 `provider=deepseek`、`head_before == head_after`；
+  以该状态文件驱动 Orchestrator 侧可见性函数输出
+  `Bootstrap sync: OK result=up_to_date branch=cline-agent head_before=… head_after=… provider=deepseek`。
+
+### 4. 范围守规
+
+- 未新增第三方依赖；未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、
+  `src/**`、`database/**`；未改业务 Phase、数据资格 Gate、`LIVE_TRADING`；
+- Cline 未执行 `git commit/push/reset/rebase/merge`（校验用的 git 命令仅发生在**临时目录**
+  的自建仓库里，从未对真实仓库做写操作）。
+
+### 5. 遗留 / 下一步
+
+- 运行中的 Orchestrator 仍**不会**热加载新代码：若同一进程运行期间 `pull` 带来新 commit，
+  只会有明确告警，必须重启 `start_agent.bat`（本轮按最小改动不引入自动 re-exec / 自重启）；
+- 建议下一步：真实语料继续按 Evidence 九步路径推进（授权 → inbox → review → plan → 显式落库 →
+  receipt → 决策包 → L3 Gate），Phase 切换仍需人工 L3。
+
