@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-037",
+  "type": "CONTROL_PLANE_REVIEW_BACKLOG",
+  "title": "建立 GPT Review Backlog 批量绑定事实清单",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-036"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把已完成但尚未进入正式 GPT Review Ledger 的任务汇总为确定性的只读 backlog manifest，逐项复用 review_binding 客观事实，让 GPT 能安全、批量地完成实质审查与加密绑定；工具本身绝不签发 verdict 或写 ledger。",
+  "requirements": [
+    "新增只读 builder/CLI，枚举 last_reviewed_task 之后所有 completed results，并逐项复用 orchestrator.review_binding 生成/校验客观 binding facts；不得重新实现另一套 result/commit 身份算法。",
+    "输出至少包含 task_id、result status/finished_at/sha256、completion commit sha/branch、facts_complete、missing_reason_codes、review_status（仅客观 pending/bound/invalid，不得产生 PASS/FAIL verdict）以及 backlog_digest。",
+    "检测 ledger 已绑定项、completed-but-unreviewed、result/commit 不可绑定、顺序缺口和重复项；任何事实不完整必须 fail-closed，禁止猜测 commit 或 hash。",
+    "默认只读；不得修改 GPT_REVIEW_LEDGER、PROJECT_STATE、tasks/results；若支持 --output 只能写显式诊断文件且不能位于受保护 planner/state 路径。",
+    "增加回归测试覆盖 GOLD-028~033 式连续 backlog、部分已绑定、hash 漂移、commit 不可达/歧义、ledger gap，以及 Executor 不能借此自签 review。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Review/Planner/Architect；Cline/DeepSeek 与本工具都不得签发 verdict、写 ledger 或推进 last_reviewed_task。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "不得生成或推断 Author/News 授权、published_at、collected_at、effective_at、availability 或 OOS 证据。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 可从单个确定性 manifest 看清所有 formal review backlog 及每项可绑定事实，且工具无法自行产生 PASS/FAIL。",
+    "任一 result/commit/ledger 身份漂移都 fail-closed；不猜测、不自动修复、不推进状态。",
+    "全量 pytest/ruff/mypy 通过；Phase 3.3 blocker、L3/L4 与交易安全边界不变。"
+  ]
+}
