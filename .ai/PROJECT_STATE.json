@@ -4,31 +4,48 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": null,
+  "current_task": "GOLD-028",
   "last_completed_task": "GOLD-027",
-  "last_reviewed_task": "GOLD-024",
+  "last_reviewed_task": "GOLD-027",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-025 through GOLD-027 completed successfully. GOLD-026 confirms the remaining blocker is real authorized Author/News evidence with trustworthy independent time/availability semantics; GOLD-027 provides a fail-closed human intake handoff/preflight contract. No real evidence qualification has occurred. Human/operator evidence provision and verification is now required before data qualification can progress.",
+      "detail": "GOLD-025 through GOLD-027 completed and are GPT-reviewed. GOLD-026 confirms the remaining business blocker is real authorized Author/News evidence with trustworthy independent time/availability semantics; GOLD-027 provides the fail-closed intake handoff/preflight contract. GOLD-028 through GOLD-030 may continue L1 engineering around human verification/audit-chain hardening, but no real evidence qualification has occurred and Phase 3.4 remains forbidden.",
       "retryable": false
-    },
-    {
-      "code": "GPT_REVIEW_LEDGER_BOOTSTRAP",
-      "detail": "GOLD-025 introduced the canonical GPT review ledger contract. The ledger has not yet been bootstrapped with cryptographically bound GPT PASS entries for GOLD-025 through GOLD-027, so last_reviewed_task intentionally remains GOLD-024 and no follow-on task is queued. This is fail-closed and does not invalidate the successful executor validations.",
-      "retryable": true
     }
   ],
   "resolved_blockers": [
-    {"code": "VALIDATION_PYTHON_ENV", "resolved_by": "project .venv validation confirmed: pytest runs successfully"},
-    {"code": "CLINE_MODEL_QUOTA_OR_CONFIG", "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"},
-    {"code": "CLINE_CLI_INSTALLATION", "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"},
-    {"code": "CLINE_PROVIDER_BILLING_ROUTE", "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; launcher hard-pins AI_CLINE_PROVIDER=deepseek and provider fatal errors fail fast."}
+    {
+      "code": "VALIDATION_PYTHON_ENV",
+      "resolved_by": "project .venv validation confirmed: pytest runs successfully"
+    },
+    {
+      "code": "CLINE_MODEL_QUOTA_OR_CONFIG",
+      "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"
+    },
+    {
+      "code": "CLINE_CLI_INSTALLATION",
+      "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
+    },
+    {
+      "code": "CLINE_PROVIDER_BILLING_ROUTE",
+      "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; launcher hard-pins AI_CLINE_PROVIDER=deepseek and provider fatal errors fail fast."
+    },
+    {
+      "code": "GPT_REVIEW_LEDGER_BOOTSTRAP",
+      "resolved_by": "2026-09-23: GPT created .ai/GPT_REVIEW_LEDGER.json with cryptographically bound PASS reviews for GOLD-025 through GOLD-027 and advanced last_reviewed_task to GOLD-027."
+    }
   ],
-  "next_action": "GPT must bootstrap the canonical review ledger for completed GOLD-025 through GOLD-027 using exact result sha256 and reviewed commit identities. Separately, the business/operator must provide and verify legally authorized Author/News evidence through the GOLD-027 intake handoff. Keep PHASE3_3_DATA BLOCKED; do not queue Phase 3.4, Alpha/model/trading work, or cross L3/L4 gates.",
+  "next_action": "Execute GPT-approved L1 queue GOLD-028 -> GOLD-029 -> GOLD-030. GOLD-028 adds material-level human verification attestation, GOLD-029 requires that attestation for new Evidence APPROVE decisions, and GOLD-030 builds an end-to-end Phase 3.3 evidence-chain drift guard/rehearsal. In parallel, business/operator still must provide legally authorized real Author/News evidence. Keep PHASE3_3_DATA BLOCKED; do not enter Phase 3.4 or cross L3/L4 gates.",
   "human_gates": [
-    {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."},
-    {"code": "PHASE3_3_L3_DECISION", "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."}
+    {
+      "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
+      "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."
+    },
+    {
+      "code": "PHASE3_3_L3_DECISION",
+      "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."
+    }
   ],
   "invariants": [
     "LIVE_TRADING=false",
@@ -40,6 +57,10 @@
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ],
   "queue_target_size": 3,
-  "task_queue": [],
-  "queue_status": "WAITING_HUMAN"
+  "task_queue": [
+    "GOLD-028",
+    "GOLD-029",
+    "GOLD-030"
+  ],
+  "queue_status": "ACTIVE"
 }
