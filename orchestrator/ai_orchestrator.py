@@ -23,6 +23,7 @@ RUNTIME_DIR = ROOT / ".ai" / "runtime"
 LOG_DIR = ROOT / ".ai" / "logs"
 
 TASK_STATE_DIR = RUNTIME_DIR / "tasks"
+RECOVERY_DIR = RUNTIME_DIR / "recovery"
 
 LOCK_FILE = RUNTIME_DIR / "orchestrator.lock"
 LOG_FILE = LOG_DIR / "orchestrator.log"
@@ -76,6 +77,22 @@ CLINE_TIMEOUT_SECONDS = int(
         "AI_CLINE_TIMEOUT",
         "3600"
     )
+)
+
+CLINE_PROVIDER = (
+    os.getenv(
+        "AI_CLINE_PROVIDER",
+        "deepseek"
+    )
+    .strip()
+)
+
+CLINE_MODEL = (
+    os.getenv(
+        "AI_CLINE_MODEL",
+        "deepseek-flash"
+    )
+    .strip()
 )
 
 REQUIRED_BRANCH = os.getenv(
@@ -143,6 +160,11 @@ def ensure_directories():
     )
 
     TASK_STATE_DIR.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    RECOVERY_DIR.mkdir(
         parents=True,
         exist_ok=True
     )
@@ -1186,6 +1208,392 @@ def build_cline_prompt(
 
 
 # ============================================================
+# Cline Failure Classification / Recovery
+# ============================================================
+
+NON_RETRYABLE_EXTERNAL_PATTERNS = {
+    "insufficient balance":
+        "INSUFFICIENT_BALANCE",
+
+    "credits balance is $0.00":
+        "INSUFFICIENT_BALANCE",
+
+    "payment required":
+        "PAYMENT_REQUIRED",
+
+    "quota exceeded":
+        "QUOTA_EXHAUSTED",
+
+    "quota exhausted":
+        "QUOTA_EXHAUSTED",
+
+    "invalid api key":
+        "INVALID_API_KEY",
+
+    "api key is invalid":
+        "INVALID_API_KEY",
+
+    "authentication failed":
+        "AUTHENTICATION_FAILED",
+
+    "unauthorized":
+        "AUTHENTICATION_FAILED",
+
+    "forbidden":
+        "PROVIDER_FORBIDDEN",
+
+    "model not found":
+        "MODEL_UNAVAILABLE",
+
+    "model is not available":
+        "MODEL_UNAVAILABLE"
+}
+
+RETRYABLE_EXTERNAL_PATTERNS = {
+    "rate limit":
+        "RATE_LIMITED",
+
+    "too many requests":
+        "RATE_LIMITED",
+
+    "temporarily unavailable":
+        "PROVIDER_TEMPORARY_UNAVAILABLE",
+
+    "service unavailable":
+        "PROVIDER_TEMPORARY_UNAVAILABLE",
+
+    "bad gateway":
+        "PROVIDER_BAD_GATEWAY",
+
+    "gateway timeout":
+        "PROVIDER_GATEWAY_TIMEOUT",
+
+    "connection reset":
+        "NETWORK_ERROR",
+
+    "connection aborted":
+        "NETWORK_ERROR",
+
+    "connection refused":
+        "NETWORK_ERROR",
+
+    "network error":
+        "NETWORK_ERROR",
+
+    "socket hang up":
+        "NETWORK_ERROR",
+
+    "econnreset":
+        "NETWORK_ERROR",
+
+    "etimedout":
+        "NETWORK_ERROR"
+}
+
+
+def classify_cline_failure(
+    cline_result
+):
+
+    if (
+        cline_result.get(
+            "returncode"
+        )
+        ==
+        0
+    ):
+
+        return (
+            "none",
+            None
+        )
+
+    if cline_result.get(
+        "timed_out",
+        False
+    ):
+
+        return (
+            "retryable_external",
+            "CLINE_TIMEOUT"
+        )
+
+    combined = (
+        (
+            cline_result.get(
+                "stderr",
+                ""
+            )
+            or
+            ""
+        )
+        +
+        "\n"
+        +
+        (
+            cline_result.get(
+                "stdout",
+                ""
+            )
+            or
+            ""
+        )
+    ).lower()
+
+    for pattern, code in (
+        NON_RETRYABLE_EXTERNAL_PATTERNS
+        .items()
+    ):
+
+        if pattern in combined:
+
+            return (
+                "non_retryable_external",
+                code
+            )
+
+    for pattern, code in (
+        RETRYABLE_EXTERNAL_PATTERNS
+        .items()
+    ):
+
+        if pattern in combined:
+
+            return (
+                "retryable_external",
+                code
+            )
+
+    return (
+        "execution_failure",
+        "CLINE_EXECUTION_FAILED"
+    )
+
+
+def build_cline_args(
+    cline_exe,
+    prompt
+):
+
+    args = [
+        cline_exe,
+        "--json",
+        "--yolo",
+        "--provider",
+        CLINE_PROVIDER,
+    ]
+
+    if CLINE_MODEL:
+
+        args.extend([
+            "--model",
+            CLINE_MODEL
+        ])
+
+    args.extend([
+        "--timeout",
+        str(
+            CLINE_TIMEOUT_SECONDS
+        ),
+        prompt
+    ])
+
+    return args
+
+
+def recovery_snapshot_dir(
+    task_id,
+    attempt
+):
+
+    stamp = (
+        datetime
+        .now()
+        .astimezone()
+        .strftime(
+            "%Y%m%dT%H%M%S%z"
+        )
+    )
+
+    return (
+        RECOVERY_DIR
+        /
+        f"{task_id}-attempt-{attempt}-{stamp}"
+    )
+
+
+def save_recovery_snapshot(
+    task_id,
+    attempt,
+    failure_class,
+    failure_code
+):
+
+    snapshot_dir = (
+        recovery_snapshot_dir(
+            task_id,
+            attempt
+        )
+    )
+
+    snapshot_dir.mkdir(
+        parents=True,
+        exist_ok=False
+    )
+
+    patch_result = git(
+        "diff --binary HEAD"
+    )
+
+    patch_text = (
+        patch_result.get(
+            "stdout",
+            ""
+        )
+        if (
+            patch_result.get(
+                "returncode"
+            )
+            ==
+            0
+        )
+        else
+        ""
+    )
+
+    patch_path = (
+        snapshot_dir
+        /
+        "changes.patch"
+    )
+
+    patch_path.write_text(
+        patch_text,
+        encoding="utf-8"
+    )
+
+    untracked_result = git(
+        "ls-files --others --exclude-standard"
+    )
+
+    untracked_files = []
+
+    if (
+        untracked_result.get(
+            "returncode"
+        )
+        ==
+        0
+    ):
+
+        for raw_path in (
+            untracked_result
+            .get(
+                "stdout",
+                ""
+            )
+            .splitlines()
+        ):
+
+            relative = (
+                raw_path
+                .strip()
+            )
+
+            if not relative:
+
+                continue
+
+            source = (
+                ROOT
+                /
+                relative
+            )
+
+            try:
+
+                resolved = source.resolve()
+
+                resolved.relative_to(
+                    ROOT.resolve()
+                )
+
+            except (
+                OSError,
+                ValueError
+            ):
+
+                continue
+
+            if (
+                not source.exists()
+                or
+                not source.is_file()
+                or
+                source.is_symlink()
+            ):
+
+                continue
+
+            destination = (
+                snapshot_dir
+                /
+                "untracked"
+                /
+                relative
+            )
+
+            destination.parent.mkdir(
+                parents=True,
+                exist_ok=True
+            )
+
+            shutil.copy2(
+                source,
+                destination
+            )
+
+            untracked_files.append(
+                relative
+            )
+
+    metadata = {
+        "task_id":
+            task_id,
+
+        "attempt":
+            attempt,
+
+        "created_at":
+            now_iso(),
+
+        "failure_class":
+            failure_class,
+
+        "failure_code":
+            failure_code,
+
+        "changed_files":
+            get_changed_files(),
+
+        "untracked_files":
+            untracked_files,
+
+        "patch_file":
+            "changes.patch"
+    }
+
+    atomic_write_json(
+        snapshot_dir
+        /
+        "recovery.json",
+        metadata
+    )
+
+    return snapshot_dir
+
+
+# ============================================================
 # Cline CLI
 # ============================================================
 
@@ -1448,22 +1856,10 @@ def run_cline(
         task_file
     )
 
-    args = [
-
+    args = build_cline_args(
         cline_exe,
-
-        "--json",
-
-        "--yolo",
-
-        "--timeout",
-
-        str(
-            CLINE_TIMEOUT_SECONDS
-        ),
-
         prompt
-    ]
+    )
 
     _logger.info(
         "Starting Cline..."
@@ -1472,6 +1868,20 @@ def run_cline(
     _logger.info(
         "Cline executable: %s",
         cline_exe
+    )
+
+    _logger.info(
+        "Cline provider: %s",
+        CLINE_PROVIDER
+    )
+
+    _logger.info(
+        "Cline model: %s",
+        (
+            CLINE_MODEL
+            or
+            "<provider default>"
+        )
     )
 
     _logger.info(
@@ -1831,7 +2241,10 @@ def build_attempt_record(
     cline_result,
     validations,
     changed_files,
-    diff_stat
+    diff_stat,
+    failure_class="none",
+    failure_code=None,
+    recovery_path=None
 ):
 
     summary = (
@@ -1863,6 +2276,15 @@ def build_attempt_record(
                 "timed_out",
                 False
             ),
+
+        "failure_class":
+            failure_class,
+
+        "failure_code":
+            failure_code,
+
+        "recovery_path":
+            recovery_path,
 
         "finish_reason":
             summary.get(
@@ -2329,13 +2751,125 @@ def process_task(
             task_file
         )
 
+        (
+            failure_class,
+            failure_code
+        ) = classify_cline_failure(
+            cline_result
+        )
+
+        # ----------------------------------------------------
+        # Provider / Billing / Auth fail-fast
+        # ----------------------------------------------------
+
+        if (
+            failure_class
+            ==
+            "non_retryable_external"
+        ):
+
+            changed_files = (
+                get_changed_files()
+            )
+
+            diff_stat = (
+                get_diff_stat()
+            )
+
+            recovery_path = None
+
+            if git_is_dirty():
+
+                snapshot_dir = (
+                    save_recovery_snapshot(
+                        task_id,
+                        attempt,
+                        failure_class,
+                        failure_code
+                    )
+                )
+
+                recovery_path = str(
+                    snapshot_dir
+                    .relative_to(
+                        ROOT
+                    )
+                )
+
+                _logger.error(
+                    "Cline 外部不可重试错误 %s；"
+                    "已保存恢复现场: %s",
+                    failure_code,
+                    recovery_path
+                )
+
+                reset_task_changes()
+
+            else:
+
+                _logger.error(
+                    "Cline 外部不可重试错误 %s；"
+                    "工作区无任务修改。",
+                    failure_code
+                )
+
+            finished_at = now_iso()
+
+            write_task_state(
+                task_id,
+                "waiting_external",
+                attempt=
+                    attempt,
+                max_attempts=
+                    max_attempts,
+                finished_at=
+                    finished_at,
+                failure_class=
+                    failure_class,
+                failure_code=
+                    failure_code,
+                recovery_path=
+                    recovery_path
+            )
+
+            _logger.error(
+                "Task %s 暂停："
+                "不运行 validation、"
+                "不消耗后续 retry、"
+                "rolling queue 停线。",
+                task_id
+            )
+
+            return "waiting_external"
+
         # ----------------------------------------------------
         # Validation
         # ----------------------------------------------------
 
-        validations = run_validations(
-            task
-        )
+        # Cline 进程本身失败时成功条件已经不可能成立，
+        # 不再浪费数分钟执行全量测试。
+        if (
+            cline_result[
+                "returncode"
+            ]
+            ==
+            0
+        ):
+
+            validations = run_validations(
+                task
+            )
+
+        else:
+
+            validations = []
+
+            _logger.warning(
+                "Cline 执行失败 (%s/%s)，"
+                "跳过 validation。",
+                failure_class,
+                failure_code
+            )
 
         # ----------------------------------------------------
         # Git diff
@@ -2377,7 +2911,13 @@ def process_task(
                     changed_files,
 
                 diff_stat=
-                    diff_stat
+                    diff_stat,
+
+                failure_class=
+                    failure_class,
+
+                failure_code=
+                    failure_code
             )
         )
 
@@ -2541,6 +3081,31 @@ def process_task(
                 )
             )
 
+        recovery_path = None
+
+        if git_is_dirty():
+
+            snapshot_dir = (
+                save_recovery_snapshot(
+                    task_id,
+                    attempt,
+                    failure_class,
+                    failure_code
+                )
+            )
+
+            recovery_path = str(
+                snapshot_dir
+                .relative_to(
+                    ROOT
+                )
+            )
+
+            _logger.info(
+                "失败现场已保存: %s",
+                recovery_path
+            )
+
         write_task_state(
 
             task_id,
@@ -2554,14 +3119,25 @@ def process_task(
                 max_attempts,
 
             finished_at=
-                finished_at
+                finished_at,
+
+            failure_class=
+                failure_class,
+
+            failure_code=
+                failure_code,
+
+            recovery_path=
+                recovery_path
         )
 
         # ----------------------------------------------------
         # 失败 attempt 不能污染下一次 retry
         # ----------------------------------------------------
 
-        reset_task_changes()
+        if git_is_dirty():
+
+            reset_task_changes()
 
         # ====================================================
         # RETRY
@@ -3013,6 +3589,20 @@ def main():
     )
 
     _logger.info(
+        "Cline provider: %s",
+        CLINE_PROVIDER
+    )
+
+    _logger.info(
+        "Cline model: %s",
+        (
+            CLINE_MODEL
+            or
+            "<provider default>"
+        )
+    )
+
+    _logger.info(
         "Queue target: %s task(s)",
         QUEUE_TARGET_SIZE
     )
@@ -3079,6 +3669,21 @@ def main():
                         )
 
                         continue
+
+                    if (
+                        outcome
+                        ==
+                        "waiting_external"
+                    ):
+
+                        _logger.error(
+                            "Orchestrator 因外部 Provider "
+                            "不可重试错误停止。"
+                            "修复余额/认证/配额后重新运行 "
+                            "start_agent.bat 即可从同一 Task 重试。"
+                        )
+
+                        return 3
 
                 else:
 
