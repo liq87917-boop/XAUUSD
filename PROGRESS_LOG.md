@@ -5211,3 +5211,87 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
 - 建议下一步（由 GPT 决定）：按 GOLD-038 建立 GPT 写队列前的远端 HEAD 并发保护事实包，
   并按 GOLD-039 建立 result 顶层状态与 attempt 终态一致性门禁。
 
+## GOLD-038：GPT 写队列前的远端 HEAD 并发保护事实包（只读 control-plane 事实）
+
+### 1. 背景 / 问题
+
+- §2.10（GOLD-034 / 035 / 036）让 GPT 在队列低水位时补队列、§2.11（GOLD-037）让 GPT 一次看清
+  formal review backlog；但 GPT 运行在云端：它**读事实**（snapshot / refill / backlog）与
+  **写队列**（task / state）之间存在时间窗口，而 Executor 会在此期间完成当前任务并 push result +
+  completion commit；没有并发保护时，GPT 会基于**过期快照**写队列，覆盖或错判刚完成的工作；
+- 目标：在**任何** planner-owned 写入之前，用**一个**确定性、只读的事实包证明
+  「observed HEAD == 调用方 expected HEAD，且 `PROJECT_STATE` 声称的执行指针未与 results 事实
+  漂移」；任何不一致都 fail-closed 且禁止 planner mutation，并且**绝不**自动 merge / rebase /
+  force push。
+
+### 2. 变更（最小范围）
+
+- 新增 `orchestrator/planner_mutation_precondition.py`（纯只读 builder + CLI，契约
+  `gold-ai/planner-mutation-precondition/v1`）：
+  - **复用，不复制**：`branch` / `observed_head_sha` 直接取 planner snapshot 的 `git` 段；
+    `queue_head` / `task_queue` / `refill.facts_digest` 复用
+    `planner_refill_request.build_planner_refill_request`；formal review backlog 指针 +
+    `backlog_digest` 复用 `review_backlog.build_review_backlog_manifest`（内部再复用
+    `review_binding`）；**未**新增第二套 readiness / 依赖 / 终态 / 任务资格 / commit 身份算法；
+  - 新增内容事实：`state`（`blob_sha256` + 解析后 digest + 指针 / 队列 / 不变量回显）、
+    `tasks_digest`、`results_digest`（目录内文件字节 sha256 的确定性摘要）与稳定
+    `precondition_digest`（`generated_at` / `determinism` / 自身被排除 ⇒ 幂等、无自引用）；
+  - **fail-closed**：`--expected-head-sha`（别名 `--expect-head`，7~40 位十六进制）与
+    `observed_head_sha` 不一致 ⇒ `STALE_REMOTE_HEAD`；非法形式 ⇒ `EXPECTED_HEAD_SHA_INVALID`；
+    `.git` 不可解析 ⇒ 复用 `GIT_INFO_UNAVAILABLE`；`PROJECT_STATE.branch` 漂移 ⇒
+    `STATE_BRANCH_DRIFT`；`current_task` / `last_completed_task` / `task_queue` 声明与 results 事实
+    漂移 ⇒ 复用 planner snapshot 的 `PROJECT_STATE_POINTER_*` / `QUEUE_DECLARATION_MISMATCH` /
+    `QUEUE_TASK_MISSING` 并叠加聚合标记 `STATE_RESULT_DRIFT`；backlog 来源异常 ⇒
+    `REVIEW_BACKLOG_FACTS_UNAVAILABLE`；
+  - `planner_mutation.allowed == (blocking_reason_codes == [])`；`forbidden` / `requires_reread` 与
+    之恒等；`execution_blocked=false`、`gates_planner_writes_only=true`（只挡 planner 写入，
+    绝不阻塞 Executor）；`auto_merge=auto_rebase=force_push=auto_fetch_or_pull=false`；
+  - `last_reviewed_task` 指针落后**不**参与写队列 gate（属 §2.11 的 review backlog 事实，只在
+    `drift.review_pointer_codes` 报告）；
+  - 默认零写入；`--output` 先拒绝 `<root>/.ai/**`（`runtime` 除外）的**任何**目标、再复用受控
+    输出守卫（只允许 `.ai/runtime/**` 或系统临时目录）—— 覆盖「仓库恰好位于系统临时目录」时共享
+    守卫会放行 `.ai/GPT_REVIEW_LEDGER.json` 的缺口；
+  - 退出码 `0` / `2`（fail-closed）/ `3`（`PROJECT_STATE` 不可读）/ `4`（`--output` 被拒）。
+- 新增 `tests/unit/test_ai_orchestrator_planner_mutation_precondition.py`（**24 项**）：事实包完整性
+  （HEAD / 队列 / state blob+digest / 目录 digest / refill digest / backlog 指针 / precondition
+  digest 均由测试独立用 `hashlib` 复算）、digest 幂等且排除 wall-clock、digest 对 results / tasks /
+  backlog 内容敏感、`STALE_REMOTE_HEAD`、短 SHA 前缀匹配、非法 expected、HEAD 不可解析、
+  `current_task` 已终态 / `last_completed` 落后 / 超前 / branch 漂移、`PROJECT_STATE` 不可读
+  （退出码 3）、backlog 来源不可用、**并发回归**（Executor push 后旧 precondition 失效、忘记传
+  expected 也会被 state 漂移挡住、重读最新 HEAD + 刷新 state 后可重新生成有效事实包）、review 指针
+  落后不阻塞、authority 全 False、源码守卫（无写入 / 子进程 / Git 写路径，唯一写操作经受控守卫）、
+  CLI fail-closed / 受控输出 / 拒绝任何 planner 路径。
+- 新增 `tests/integration/test_planner_mutation_precondition_regression.py`（**5 项**）：真实仓库
+  `observed_head_sha` / `branch` 由测试自己的 `git rev-parse` 复算、目录与 state digest 由测试自己的
+  `hashlib` 复算、漂移 gate 与独立复算一致且每条 blocking code 都由非 review-pointer 事实支撑、
+  stale 只改变 HEAD 相关事实、CLI 幂等 + ASCII + 前后零改写（tasks / results / state / ledger /
+  `git status`）、Phase 3.3 blocker 与两条交易安全不变量不变。
+- 文档：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.12（契约 / 稳定 code / 并发语义 / 退出码 / 职责边界）；
+  `README.md` 新增「GPT 写队列前的远端 HEAD 并发保护事实包（GOLD-038）」小节。
+
+### 3. 验证
+
+- 新增测试：`tests/unit/test_ai_orchestrator_planner_mutation_precondition.py` 24 passed；
+  `tests/integration/test_planner_mutation_precondition_regression.py` 5 passed；
+- 真实仓库只读试跑（`--generated-at` 固定、`--expected-head-sha` 传入当前 HEAD）：
+  `[precondition] head=b0a5d83c expected=b0a5d83c stale=False drift=True allowed=False
+  codes=PROJECT_STATE_POINTER_BEHIND_RESULTS,QUEUE_DECLARATION_MISMATCH,STATE_RESULT_DRIFT`，
+  退出码 `2` —— HEAD 一致，但 `PROJECT_STATE`（`current_task=GOLD-036` /
+  `last_completed_task=GOLD-035` / `task_queue` 仍声明 GOLD-036 / 037）确实已落后于 results
+  （GOLD-036 / GOLD-037 均 completed），所以工具**正确地**禁止 planner mutation 并要求 GPT 基于
+  最新 HEAD 重读事实（不猜、不自动修复）；
+- 全量门禁：`.venv\Scripts\python.exe -m pytest tests -q`、
+  `.venv\Scripts\python.exe -m ruff check .`、
+  `.venv\Scripts\python.exe -m mypy config database src scripts` 全绿；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json`、`src/alpha/**`、`src/execution/**`、`database/**`、`.env`；
+  未新增依赖、未改 `pyproject.toml`；测试写入全部发生在 `tmp_path`；Cline 未执行任何 Git 写操作。
+
+### 4. 遗留 / 下一步
+
+- 本工具只**产事实**：它不会（也**不允许**）写 task / state / ledger，绝不自动 merge / rebase /
+  force push；真正的并发保护动作仍是 GPT 的「重新读取最新 HEAD → 重建事实包 → 再写队列」；
+- 真实仓库当前 `planner_mutation.allowed=false`：GPT 如需继续推进，应先基于最新 HEAD / results 重读
+  事实并修正 `PROJECT_STATE` 指针与 `task_queue` 声明，然后重新取得有效 precondition；
+- 建议下一步（由 GPT 决定）：按 GOLD-039 建立 result 顶层状态与 attempt 终态一致性门禁。
+

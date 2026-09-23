@@ -601,5 +601,60 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
 - **边界不变**：§2.11 不改变 ledger schema、滚动队列、L1~L4 档位、Phase 3.3 data blocker、
   Phase 3.4 边界与 `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
 
+## 2.12 GPT 写队列前的远端 HEAD 并发保护事实包（GOLD-038）
+
+- **为什么**：§2.10 让 GPT 在队列低水位时补任务、§2.11 让 GPT 一次看清 review backlog，
+  但 GPT 运行在云端：**读取事实**与**写队列**之间存在时间窗口，而 Executor 在同一窗口里会
+  完成当前任务并 `push` result + completion commit。没有并发保护时，GPT 会基于**过期快照**写
+  task / state，覆盖或错判刚完成的工作。§2.12 把这段窗口变成**一份**确定性、只读的事实包。
+- **命令**：`python -m orchestrator.planner_mutation_precondition`（只读；stdout 纯 ASCII JSON，
+  stderr 只有人类摘要）。契约 `schema=gold-ai/planner-mutation-precondition/v1` +
+  `schema_version=1`；`--expected-head-sha <sha>`（别名 `--expect-head`）传入「上次读到的远端
+  HEAD」；`--output` 只允许 `<root>/.ai/runtime/**` 或系统临时目录。
+- **事实（复用，不复制）**：`branch` / `observed_head_sha` 直接复用 §2.5 planner snapshot 的
+  只读 Git 段；`queue_head` / `task_queue` / `refill.facts_digest` 复用 §2.10 refill 事实包；
+  `review_backlog.backlog_digest` 与 formal review backlog 指针复用 §2.11 manifest；
+  `state`（blob sha256 + 解析 digest）、`tasks_digest`、`results_digest` 是本模块新增的
+  **内容事实**（文件字节 sha256 的确定性摘要）。**不存在第二套 readiness / 依赖 / 终态 /
+  task 资格 / commit 身份算法**。
+- **稳定 `precondition_digest`**：只覆盖事实（`generated_at` / `precondition_digest` /
+  `determinism` 被排除），相同仓库事实必然相同 digest；HEAD、results、tasks、state 或 backlog
+  指针任一变化都会让 digest 变化 ⇒ **旧 precondition 自动失效**。
+- **fail-closed（稳定 reason code，任一命中即禁止 planner mutation）**：
+  - `expected_head_sha` 与 `observed_head_sha` 不一致 ⇒ `STALE_REMOTE_HEAD`
+    （`planner_mutation.allowed=false` / `forbidden=true` / `requires_reread=true`）；
+  - `expected_head_sha` 形式非法 ⇒ `EXPECTED_HEAD_SHA_INVALID`（绝不猜「大概一致」）；
+  - `.git` HEAD/refs 不可解析 ⇒ 复用 `GIT_INFO_UNAVAILABLE`（绝不猜测版本）；
+  - `PROJECT_STATE.branch` 与 observed HEAD 分支漂移 ⇒ `STATE_BRANCH_DRIFT`；
+  - `state` 声称的 `current_task` / `last_completed_task` / `task_queue` 声明与 results 事实
+    漂移 ⇒ 复用 §2.5 的 `PROJECT_STATE_POINTER_*` / `QUEUE_DECLARATION_MISMATCH` /
+    `QUEUE_TASK_MISSING` 并叠加聚合标记 `STATE_RESULT_DRIFT`；
+  - review backlog 事实来源不可用 ⇒ `REVIEW_BACKLOG_FACTS_UNAVAILABLE`。
+- **不阻塞正常执行**：`last_reviewed_task` 指针落后属于 **review backlog** 事实（§2.11 口径），
+  只报告（`drift.review_pointer_codes`），**不**作为写队列 gate；`executor_execution_blocked=false`
+  与 `gates_planner_writes_only=true` —— 本工具只挡 planner-owned 写入，绝不阻塞 Executor
+  执行已批准任务。
+- **并发语义（fast-forward-safe）**：绝不 fetch / pull / merge / rebase / **force push**，绝不
+  隐藏远端变化，绝不自动冲突覆盖；stale 的唯一处置是「重新读取最新 HEAD 并重建事实包」。
+- **职责边界（不可协商）**：本工具只产事实；`authority` 段硬编码 `tool_can_mutate=false` /
+  `tool_can_write_{tasks,results,project_state,review_ledger}=false` / `tool_can_sign_review=false` /
+  `tool_can_advance_state=false` / `auto_merge=auto_rebase=force_push=auto_fetch_or_pull=false`
+  （源码守卫测试锁定）。
+- **只读保证**：外部进程调用只经由 §2.8 的只读 Git 白名单；本模块自身不启动任何外部进程，
+  零网络、零数据库、零业务证据、零模型调用；唯一写操作是显式 `--output`，先拒绝
+  `<root>/.ai/**`（`runtime` 除外）的**任何**目标，再复用 §2.6 守卫 ⇒ 不可能写 `.ai/tasks` /
+  `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`。
+- **退出码**：`0` HEAD 一致且无事实漂移 / `2` fail-closed（stale / 漂移 / HEAD 不可解析）/
+  `3` `PROJECT_STATE` 不可读 / `4` `--output` 被拒（此时绝不写文件）。
+- **回归测试**：`tests/unit/test_ai_orchestrator_planner_mutation_precondition.py`（24 项：
+  事实包完整性、digest 幂等与内容敏感、stale / 非法 expected / HEAD 不可解析 / 各类 state
+  漂移 fail-closed、**Executor completion push 让旧 precondition 失效且重读后可恢复**、
+  authority 与源码守卫、CLI fail-closed 与受控输出）+
+  `tests/integration/test_planner_mutation_precondition_regression.py`（5 项：真实仓库 HEAD /
+  digest 由测试独立复算、漂移 gate 与独立复算一致、stale 只改变 HEAD 事实、CLI 幂等 + 前后
+  零改写、Phase 3.3 blocker 与交易安全不变量不变）。
+- **边界不变**：§2.12 不改变 ledger schema、滚动队列、L1~L4 档位、Phase 3.3 data blocker、
+  Phase 3.4 边界与 `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
+
 
 

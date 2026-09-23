@@ -1895,6 +1895,49 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
   ```
 
 
+### GPT 写队列前的远端 HEAD 并发保护事实包（`orchestrator/planner_mutation_precondition.py`，GOLD-038）
+
+> **合规红线**：本项**只读、只产事实** —— 不写 `.ai/tasks` / `.ai/results` /
+> `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`，不生成任务、不补队列、不决定 Phase、
+> 不跨 L3/L4，也不执行任何 Git 写操作（绝不 fetch / pull / merge / rebase / **force push**）；
+> `PHASE3_3_DATA` 保持 BLOCKED，`LIVE_TRADING=false` /
+> `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
+
+- **一句话**：GPT 云端「读取事实」与「写队列」之间存在时间窗口，Executor 可能在此期间完成并
+  push；本工具用**一个**确定性事实包证明「observed HEAD 与我上次读到的 expected HEAD 完全一致，
+  且 `PROJECT_STATE` 声称的执行指针未与 results 事实漂移」，任何不一致都 fail-closed 并**明确禁止
+  planner mutation**；
+- **事实包内容**：`remote_head`（`branch` / `observed_head_sha` / `expected_head_sha` /
+  `matches_expected` / `stale` / `resolved`）、`queue_head`、`task_queue`（声明 vs 真实 pending）、
+  `state`（blob sha256 + 解析 digest + 指针回显）、`tasks_digest`、`results_digest`、
+  `refill.facts_digest`（复用 GOLD-034）、`review_backlog` 指针 + `backlog_digest`（复用 GOLD-037）、
+  `drift`、`planner_mutation`、`issues` 与稳定 `precondition_digest`（wall-clock 不参与）；
+- **结果语义**：只有 `planner_mutation.allowed=true` 才允许 GPT 写 task / state / queue；
+  `false` 时同时给出 `forbidden=true` / `requires_reread=true`，必须重新读取最新 HEAD 后重建事实包；
+  本工具**只挡 planner 写入**（`executor_execution_blocked=false`），绝不阻塞 Executor 执行已批准任务；
+- **fail-closed（稳定 reason code）**：`STALE_REMOTE_HEAD`（expected != observed）/
+  `EXPECTED_HEAD_SHA_INVALID` / `GIT_INFO_UNAVAILABLE`（HEAD 不可解析）/ `STATE_BRANCH_DRIFT` /
+  `STATE_RESULT_DRIFT`（并附带复用的 `PROJECT_STATE_POINTER_*` / `QUEUE_DECLARATION_MISMATCH` /
+  `QUEUE_TASK_MISSING`）/ `REVIEW_BACKLOG_FACTS_UNAVAILABLE`；`last_reviewed_task` 落后只报告
+  （review backlog 口径），不阻塞写队列；
+- **退出码**：`0` 可安全写队列 / `2` fail-closed（stale / 漂移 / HEAD 不可解析）/
+  `3` `PROJECT_STATE` 不可读 / `4` `--output` 目标被拒（守卫只允许 `.ai/runtime/**` 或系统临时目录，
+  且 `.ai/**` 内除 `runtime` 外一律拒绝）；
+- **回归测试**：`tests/unit/test_ai_orchestrator_planner_mutation_precondition.py`（24 项，含
+  Executor completion push 让旧 precondition 失效、重读最新 HEAD 后可重新生成有效事实包）+
+  `tests/integration/test_planner_mutation_precondition_regression.py`（5 项：真实仓库 HEAD /
+  digest 由 `git` 与 `hashlib` 独立复算、前后零改写、CLI 幂等）；
+- **用法**（只读）：
+
+  ```bash
+  # ① 写队列前确认远端 HEAD 未变化（传入上次读到的 HEAD）
+  .venv\Scripts\python.exe -m orchestrator.planner_mutation_precondition --expected-head-sha <sha>
+
+  # ② 需要人工诊断时才写受控镜像（只允许 .ai/runtime/** 或系统临时目录）
+  .venv\Scripts\python.exe -m orchestrator.planner_mutation_precondition --output .ai\runtime\planner_mutation_precondition.json
+  ```
+
+
 ## 8. 数据模型
 
 
