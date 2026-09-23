@@ -83,7 +83,19 @@ Orchestrator 使用 **3-task rolling queue** 降低任务供给断档：
 任务 validation 不应使用不确定的 `py` / `python` 解释器。
 应由 Orchestrator 使用已确认的项目 Python 解释器绝对路径或项目 venv 路径执行测试。
 
-## 7. 外部阻塞
+## 7. 外部 Provider / Billing 阻塞
 
-Quota / rate-limit / provider outage 等外部错误应标记为可重试 blocker，不应立刻消耗所有任务重试次数。
-恢复后创建 recovery task 或重新排队。
+Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理：
+
+- 默认显式使用 `AI_CLINE_PROVIDER=deepseek`，CLI 调用必须传 `--provider deepseek`；API Key 只保存在 Cline 本地认证配置中，**不得**写入仓库、task、日志或命令行 `--key`。
+- `AI_CLINE_MODEL` 默认留空，沿用 Cline CLI 在 DeepSeek Provider 下已经保存的模型；只有显式设置环境变量时才传 `--model`。
+- **不可重试外部错误**：余额不足、billing/payment required、quota exhausted、invalid API key、authentication failed、model unavailable。命中后：
+  1. 不运行 validation；
+  2. 不消耗后续 task retry；
+  3. 若工作区已有 Cline 修改，先保存到 `.ai/runtime/recovery/<task-attempt-timestamp>/`（tracked diff + untracked snapshot）；
+  4. 清理本次工作区修改；
+  5. runtime state 标记为 `waiting_external`；
+  6. 立即停止 rolling queue，由人工修复余额/认证/Provider 后重新运行 `start_agent.bat`，同一 task 从原 attempt 重新开始。
+- **可重试外部错误**：timeout、rate limit、临时 5xx/provider unavailable、网络 reset/refused 等；可进入受限 retry，但 Cline 非零退出时不浪费时间运行全量 validation。
+- 任意失败 attempt 在 rollback 前都应尽量保存 recovery snapshot；recovery artifact 只在本地 runtime，不进入 Git。
+- 外部错误绝不能自动降级到 Cline Usage-Billing、其它 Provider、其它模型或静默切换 API Key。
