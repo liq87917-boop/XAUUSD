@@ -3318,3 +3318,137 @@ GOLD-014 verified receipt 与 qualification recheck 聚合成**确定性、脱�
   `operator_results[].generated_at` / `qualification_recheck.as_of` 都**只是审计操作时间**，
   产出里根本没有证据时间键。
 
+---
+
+## 第八十轮（2026-09-23）：GOLD-016 —— L3 Human Gate 决策记录与防伪审计闭环
+
+### 1. 交付内容
+
+在 `PHASE3_3_DATA` 仍 **BLOCKED** 的前提下，为"**人到底作出过什么决策**"补上**可核验的审计记录**：
+把**人工显式**给出的 L3 Gate 决策绑定到**具体**的 GOLD-015 packet，并支持事后**防伪核验**：
+
+- **核心 `src/evidence/decision_record.py`**（零网络 / 零数据库 / 零新增依赖）：
+  - `HumanDecision`（`approve` / `reject` / `needs_changes`；**必须**人工显式给出，工具**绝不**
+    自行生成批准、大小写敏感、不做静默归一）与 `DecisionRecordCode`（21 个**稳定**原因码；
+    与 GOLD-015 同义者**沿用**其字符串：`READINESS_MISMATCH` / `EVIDENCE_TIME_SUBSTITUTION` /
+    `FUTURE_TIMESTAMP`）+ `DecisionRecordArgumentError` / `...StateError` / `...PathError` /
+    `...VerificationError` / `...NotSubmittableError` / `...WriteError`；
+  - `PacketBinding` / `load_decision_packet(...)`：GOLD-015 packet 的**严格只读绑定** + **逐项**
+    完整性核验 —— 文档身份（`kind` / 报告名 / schema / 契约版本 / 执行模式）、11 个安全字段
+    不可被削弱（含 `data_qualification_passed_count` / `auto_intake_allowed` / `writes_database` /
+    `operator_explicit_flag`）、`packet_id` 必须是内容寻址摘要、handoff 标识 / schema / 安全字段 /
+    `thresholds` 必须等于**当前**唯一阈值来源 / 状态与 `ready_for_human_review` 一致、
+    **缺口与检查的算术可重算**（`status` / `remaining` / `remaining_checks` / `coverage_applicable`
+    与 `current` / `required` / `comparator` / `evaluable` 逐条自洽）、`unmet_check_keys` 必须可由
+    各 scope 检查状态**重新推导**、`submit_to_l3_human_gate` 必须等于三个独立事实的**合取**、
+    readiness 快照必须与 handoff **指纹同源**、收据状态与 `receipt_verified` 往返一致、recheck 与
+    `qualification_recheck_ready` 合取一致、批准 / ledger / 执行结果计数自洽、
+    `verification.violations` 必须为空且 `revalidated_at` 与 `generated_at` 一致、
+    **递归禁止任何证据时间键**、**禁止未来时间**（不得对尚未产生的 packet 作决策）；
+    另绑定 `content_sha256`（规范化 JSON 内容摘要，格式无关）与 `artifact_sha256`（原始字节摘要）；
+  - `HumanDecisionRecord` / `build_decision_record(...)` / `compute_record_id(...)`：内容寻址
+    `record_id`（只由策略块 + `decision` + `reviewer` + 受约束的 `note` / `reason_code` +
+    `revision` / `supersedes` + packet 绑定派生，**不含**任何审计时间）；`human_decision_recorded` /
+    `human_decision` / `packet_verified` 三个事实独立，`data_qualification_passed` /
+    `phase_transition_allowed` / `phase_transition_executed` **恒为** false、
+    `blocker_active` / `human_gate_required` 恒为 true、`human_gate_level` 恒 `L3`（**硬编码**）；
+    `approve` **只**允许落在 packet 本身 `submit_to_l3_human_gate=true` 时（否则
+    `PACKET_NOT_SUBMITTABLE`，**预期 BLOCKED**、零写入）；
+  - `verify_decision_record(...)` + `DecisionRecordVerification`：**防伪核验** —— 由记录文档
+    **重新推导** `record_id`（`RECORD_ID_MISMATCH`）、与**当前** packet 比对 `packet_id` /
+    内容摘要（`PACKET_ID_MISMATCH` / `PACKET_CONTENT_MISMATCH`）、判定当前 packet 是否更新
+    （`PACKET_STALE`）、并判定当初的 `approve` **是否仍然成立**（`PACKET_NOT_SUBMITTABLE`）；
+    记录自身被改写 / 安全字段被削弱 / 出现证据时间键 → `RECORD_TAMPERED`（fail-closed）；
+  - `run_decision_record(...)`：默认**只读预检**；只有显式 `out_path` 才先取 GOLD-010
+    **单实例锁**，锁内**重新**核验 packet（`packet_id` / 内容摘要 / 产物摘要任一变化 →
+    `PACKET_STALE`，防 TOCTOU），再做既有记录冲突检查，最后**原子**落盘；**没有任何** intake /
+    commit / 数据库调用；`render_decision_record_summary(...)` / `decision_record_exit_code_for(...)`；
+  - **幂等 / 不静默改写历史**：同一 packet + 同一人工决策 + 同一 `revision` / `supersedes` →
+    同一 `record_id`，同一审计时点**逐字节稳定**；`packet_id` / `decision` / `reviewer` / `note` /
+    `reason_code` / `revision` / `supersedes` 或 packet 内容任一变化 → **新** `record_id`；
+    覆盖既有记录必须显式 `--revision`（严格大于既有）**且** `--supersedes` 必须等于**当前**
+    `record_id`，否则 `RECORD_CONFLICT` / `SUPERSEDES_MISMATCH` / `REVISION_INVALID`（零写入）；
+  - **人工身份与脱敏**：reviewer 只接受**非敏感 label**（拒绝空值 / 超长 / 非法字符 / 疑似凭据 /
+    长 blob，**绝不**采集口令 / token / 密钥）；`note` / `reason_code` 走
+    `src.common.redaction` 脱敏 + 限长（超长输入 fail-closed，不静默截断成假事实）；
+    `decision_at` / `generated_at` / 文件 mtime **都只是审计操作时间**（`contains_evidence_times`
+    恒 false）；
+- **CLI `scripts/evidence_decision_record.py`**：`--packet` / `--decision` / `--reviewer` 必填，
+  `--note` / `--reason-code` / `--revision` / `--supersedes` / `--out`（**唯一**写开关）/
+  `--lock` / `--as-of` / `--json`，以及纯只读的 `--verify-record`（与写参数互斥，退出码 `2`）；
+  **没有**任何 intake / 写库 / 改 `PROJECT_STATE` 的参数；退出码 `0` 已记录 / `2` 参数 /
+  `3` 路径或输出不可用（含把记录写到 packet 文件上的拒绝 `PACKET_OVERWRITE_REFUSED`）/
+  `4` 缺失 / 损坏 / 篡改 / stale / 冲突 / `record_id` 不一致或防伪核验不通过（fail-closed，
+  零写入）/ `5` `approve` 被拒（packet 不可提交，**预期 BLOCKED**）/ `6` 锁冲突；
+- **导出**：`src/evidence/__init__.py` 增加 GOLD-016 的模块说明与 40+ 个新 API 导出。
+- **文档**：`README.md`（§1 交付表新增 GOLD-016 行、§7 新增「Evidence Qualification L3 人工决策记录」
+  与**八步**人工路径、§10 下一步与摩擦清单）、`TECH_DEBT.md`（TD-58 + 变更日志）、
+  `PROGRESS_LOG.md`（本轮）三处均明确 `PHASE3_3_DATA` **保持 BLOCKED**、Phase 切换仍是 L3 人工 Gate。
+
+### 2. 测试与验收
+
+- **`tests/unit/test_evidence_decision_record.py`（**202 项**）**：退出码映射；人工输入逐项校验
+  （决策必须显式且不做静默归一、reviewer 凭据 / 非法字符 / 超长拒绝、note 脱敏 + 限长、
+  reason-code 形态、`revision` / `supersedes` 规则、naive 时点）；packet **逐项**完整性核验
+  （文档身份 5 项、安全字段 11 项、`packet_id` 形态 4 项、handoff 块 13 项、缺口算术与检查重算
+  18 项、readiness 同源 8 项、布尔合取 6 项、plan / 收据 10 项、recheck 12 项、批准与执行计数 15 项、
+  verification 块 8 项、证据时间键递归拒绝、未来时间、`written_path` 绑定、内容摘要与格式无关）；
+  `approve` 门禁（BLOCKED → 拒绝）与 `reject` / `needs_changes` 可记录且**不改变**任何资格状态；
+  记录文档的独立性布尔 / 审计时间清单 / `record_id` 幂等与内容寻址 / byte-stable；运行入口默认
+  只读、原子写、幂等复写、锁冲突、写失败包装、目录输出拒绝、不得覆盖 packet 自身；冲突 / revision /
+  supersedes / 既有记录被改写 / 未知既有文档 fail-closed；防伪核验 6 项（通过、packet 被更新 →
+  `PACKET_CONTENT_MISMATCH` + `PACKET_STALE`、记录被改写 → `RECORD_ID_MISMATCH`、记录被削弱 →
+  `RECORD_TAMPERED`、`approve` 失效 → `PACKET_NOT_SUBMITTABLE`、缺文件）；CLI 编排（缺参数 /
+  naive 时点 / 互斥参数 / 退出码 / stdout 纯净 / Markdown 保留 blocker / 防伪核验模式）；
+  源码守卫（**无** sqlalchemy / requests / aiohttp / httpx / subprocess / socket / urlopen /
+  `intake_evidence` / `os.stat` / `getmtime` / `PROJECT_STATE.json`，且不直接 `open`）；
+- **`tests/integration/test_evidence_decision_record_integration.py`（**4 项**）**：**真实链路**
+  （真实 inbox 预检 → 真实人工复核 / 批准清单 → 真实 GOLD-013 plan → **人工显式** operator
+  真落库 → 真实 recheck / **真实** handoff → **真实** GOLD-015 决策包）→ GOLD-016：①证据未达标时
+  决策包诚实 BLOCKED（退出 `5`）→ `approve` 被拒（退出 `5`、**零写入**）而 `needs_changes`
+  可记录（退出 `0`，`data_qualification_passed` 恒 false）→ 防伪核验通过；②库内达标（Mock 证据块，
+  **仅控制流**）→ `approve` 可记录（退出 `0`）→ 防伪核验通过 → 覆盖既有记录必须先显式
+  `revision` + `supersedes`（未声明 → 退出 `4` 且记录不变；声明正确 → revision 2 落盘并可复核）
+  → packet 被改写 → `approve` 与防伪核验**双双** fail-closed（退出 `4`、零写入）；③并发锁冲突
+  （退出 `6`、零写入）；④**真实子进程** `python -m scripts.evidence_decision_record` 端到端
+  冒烟（stdout 为纯 JSON）。全链路临时目录 / 临时 SQLite / 零网络，且断言**数据库零变化**、
+  packet 与原始 evidence 零改写；
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **2488 passed / 1 skipped**（新增 206 项）；
+  - `.venv\Scripts\python.exe -m ruff check .` → **All checks passed!**；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` → **Success: no issues found
+    in 170 source files**（GOLD-015 为 168）。
+
+### 3. 范围守规
+
+- 只读输入、显式人工输入、默认零写入；`--out` 是唯一写开关（先取单实例锁再原子落盘）；
+- 未新增 / 未升级任何第三方依赖；未新增 migration / schema；未联网、未接第三方推送、
+  未安装 / 未修改任何 OS 计划任务；
+- *复用而不复制*：`packet_id` / 原因码 / 脱敏 / 原子写 / 单实例锁全部复用 GOLD-010 / 015 的既有
+  契约；`src/alpha/**`、`src/monitoring/**`、`src/scheduler/**`、`src/collectors/**`、
+  `src/processors/**` 与 GOLD-005 ~ GOLD-015 的既有模块**均未改动**（只**复用**其契约 / 原因码 /
+  阈值；`src/evidence/__init__.py` 仅新增导出与说明）；
+- **未解除** `PHASE3_3_DATA`：记录持续显式 `blocker_active=true` / `human_gate_required=true` /
+  `data_qualification_passed=false` / `phase_transition_allowed=false` /
+  `phase_transition_executed=false`；即使记录了 `approve` 也**不会**自动改变任何安全字段；
+  未进入 Phase 3.4，未训练 Alpha、未生成任何交易信号或订单；`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 未变；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；未执行任何 git
+  写操作（commit / push / reset / rebase / merge 由 Orchestrator 负责）。
+
+### 4. 遗留 / 下一步
+
+- 仍无真实合格授权证据 → `PHASE3_3_DATA` 保持 **BLOCKED**。GOLD-016 **只是**"把一次人工决策
+  绑定到具体决策包并可事后防伪核验"的**审计层**：它**不是**资格判定器、**不是** Phase transition
+  executor，也**不具备**解除 blocker 的能力；
+- 完整人工路径（**八步**）：业务方按 `evidence-intake-v1` 提供真实授权 Author / News 数据 →
+  `evidence_inbox --out` 预检 → `evidence_review --decision approve --approved-out` 人工复核 →
+  `evidence_intake_plan --out` 生成计划 → 人工**显式**执行 `evidence_operator workflow
+  --no-dry-run --manifest` 落库 → `evidence_operator recheck --no-dry-run --report` 复核 →
+  `evidence_intake_receipt --out` 生成收据 → `evidence_decision_packet --out` 生成决策包 →
+  `evidence_decision_record --decision approve --reviewer <label> --out` 记录 L3 人工决策 →
+  `--verify-record` 事后防伪复核 → **L3 人工确认**（由人工 / Orchestrator 显式更新
+  `PROJECT_STATE`）；
+- 记录**不缓存**任何输入：packet 内容 / `packet_id` / 人工决策 / reviewer / note / revision 任一
+  变化 → 新 `record_id` 或直接 fail-closed（旧记录不会"升级"）；`decision_at` / `generated_at` /
+  `packet.generated_at` 都**只是审计操作时间**，产出里根本没有证据时间键。

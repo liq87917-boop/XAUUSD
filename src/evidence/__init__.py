@@ -53,6 +53,19 @@
   **恒为** true（**硬编码**），只能给出 ``submit_to_l3_human_gate`` 与缺口 / 稳定原因码；
   默认零写入（只有显式 ``--out`` 才原子落盘 packet 本身），**绝不**自动 intake、**绝不**写
   数据库、**绝不**解除 ``PHASE3_3_DATA``；Phase 切换仍是 **L3 人工 Gate**。
+- :mod:`src.evidence.decision_record`：**纯本地、显式人工输入**的 L3 人工决策记录（GOLD-016）：
+  把**人工显式**给出的 ``approve`` / ``reject`` / ``needs_changes`` 绑定到**具体**的 GOLD-015
+  决策包（``packet_id`` + 内容摘要 + 产物摘要），生成**确定性、脱敏、内容寻址**（``record_id``）
+  的人工决策记录；工具**绝不**自行生成批准、**绝不**判断数据资格、**绝不**修改 ``PROJECT_STATE``；
+  ``approve`` 只允许落在 packet **本身** ``submit_to_l3_human_gate=true`` 且完整性核验
+  （文档身份 / 安全字段 / 缺口算术 / 三个布尔合取 / readiness 同源 / 收据与 recheck 绑定 /
+  计数自洽 / **禁止证据时间键** / **禁止未来时间**）**全部**通过时；任一不一致 →
+  **fail-closed**（稳定原因码 + 零写入）；同 packet + 同人工决策幂等（同 ``record_id``、
+  同审计时点逐字节稳定），写下的记录**绝不**被静默覆盖（必须显式 ``revision`` + ``supersedes``）；
+  ``verify_decision_record`` 提供**防伪核验**（重新推导 ``record_id``、与**当前** packet 比对
+  ``packet_id`` / 内容摘要、判定当初的 ``approve`` 是否仍成立）；默认零写入（只有显式 ``--out``
+  才先取单实例锁再原子落盘记录本身），**绝不**修改 ``PROJECT_STATE``、**绝不**解除
+  ``PHASE3_3_DATA``；Phase 切换仍是 **L3 人工 Gate**。
 
 红线（与 `.clinerules` 一致）：
 
@@ -65,7 +78,10 @@
 （GOLD-007 单入口 operator workflow；两者均默认 dry-run、默认零写入、默认零网络）；
 ``scripts/evidence_inbox.py``（GOLD-011 只读发现 + 预检；唯一写入口是显式 ``--out``）；
 ``scripts/evidence_decision_packet.py``（GOLD-015 L3 人工决策包；默认只读，唯一写入口是显式
-``--out``，且**没有**任何 intake 参数）。
+``--out``，且**没有**任何 intake 参数）；
+``scripts/evidence_decision_record.py``（GOLD-016 L3 人工决策记录；**必须**显式给出
+``--decision`` / ``--reviewer``，默认只读预检，唯一写入口是显式 ``--out``，``--verify-record``
+为纯只读防伪核验模式，且**没有**任何 intake / 写库参数）。
 """
 
 from __future__ import annotations
@@ -131,6 +147,45 @@ from src.evidence.decision_packet import (
     verify_decision_packet,
 )
 from src.evidence.decision_packet import exit_code_for as decision_packet_exit_code_for
+from src.evidence.decision_record import (
+    DECISION_RECORD_ACTIONS,
+    DECISION_RECORD_EXECUTION_MODE,
+    DECISION_RECORD_FILE_NAME,
+    DECISION_RECORD_KIND,
+    DECISION_RECORD_LOCK_SUFFIX,
+    DECISION_RECORD_NOTE,
+    DECISION_RECORD_REPORT_NAME,
+    DECISION_RECORD_SCHEMA_VERSION,
+    DECISION_RECORD_TIME_SEMANTICS_NOTE,
+    DECISION_SCOPE,
+    MAX_RECORD_NOTE_CHARS,
+    MAX_RECORD_NOTE_INPUT_CHARS,
+    MAX_RECORD_REASON_CODE_CHARS,
+    MAX_RECORD_REVIEWER_CHARS,
+    MAX_RECORD_REVISION,
+    PACKET_CHECKS,
+    REVIEWER_KIND,
+    DecisionRecordArgumentError,
+    DecisionRecordCode,
+    DecisionRecordError,
+    DecisionRecordNotSubmittableError,
+    DecisionRecordPathError,
+    DecisionRecordStateError,
+    DecisionRecordVerification,
+    DecisionRecordVerificationError,
+    DecisionRecordWriteError,
+    HumanDecision,
+    HumanDecisionRecord,
+    PacketBinding,
+    build_decision_record,
+    compute_record_id,
+    decision_record_exit_code_for,
+    load_decision_packet,
+    main_verification_exit_code,
+    render_decision_record_summary,
+    run_decision_record,
+    verify_decision_record,
+)
 from src.evidence.handoff import (
     BLOCKED_STATUS,
     CHECK_CATEGORIES,
@@ -420,6 +475,16 @@ __all__ = [
     "DECISION_PACKET_NOTE",
     "DECISION_PACKET_REPORT_NAME",
     "DECISION_PACKET_SCHEMA_VERSION",
+    "DECISION_RECORD_ACTIONS",
+    "DECISION_RECORD_EXECUTION_MODE",
+    "DECISION_RECORD_FILE_NAME",
+    "DECISION_RECORD_KIND",
+    "DECISION_RECORD_LOCK_SUFFIX",
+    "DECISION_RECORD_NOTE",
+    "DECISION_RECORD_REPORT_NAME",
+    "DECISION_RECORD_SCHEMA_VERSION",
+    "DECISION_RECORD_TIME_SEMANTICS_NOTE",
+    "DECISION_SCOPE",
     "DEFAULT_JOURNAL_LIMIT",
     "EVIDENCE_CONTRACT_VERSION",
     "EVIDENCE_SCHEMA_VERSION",
@@ -468,6 +533,11 @@ __all__ = [
     "MANIFEST_REQUIRED_FIELDS",
     "MAX_NOTE_CHARS",
     "MAX_PATH_CHARS",
+    "MAX_RECORD_NOTE_CHARS",
+    "MAX_RECORD_NOTE_INPUT_CHARS",
+    "MAX_RECORD_REASON_CODE_CHARS",
+    "MAX_RECORD_REVIEWER_CHARS",
+    "MAX_RECORD_REVISION",
     "MAX_REVIEWER_CHARS",
     "NEXT_STEP_NOTE",
     "OPERATOR_EXPLICIT_FLAG",
@@ -475,6 +545,7 @@ __all__ = [
     "OPERATOR_STEPS",
     "OPERATOR_WORKFLOW_SCHEMA_VERSION",
     "PACKAGE_SUMMARY_KEYS",
+    "PACKET_CHECKS",
     "PACKET_EXECUTION_MODE",
     "PACKET_NEXT_STEP_NOTE",
     "PACKET_TIME_SEMANTICS_NOTE",
@@ -494,6 +565,7 @@ __all__ = [
     "REVIEW_REPORT_KIND",
     "REVIEW_REPORT_NAME",
     "REVIEW_SCHEMA_VERSION",
+    "REVIEWER_KIND",
     "RUNNER_NOTE",
     "RUNNER_REPORT_NAME",
     "RUNNER_SCHEMA_VERSION",
@@ -530,6 +602,15 @@ __all__ = [
     "DecisionPacketStatus",
     "DecisionPacketVerificationError",
     "DecisionPacketWriteError",
+    "DecisionRecordArgumentError",
+    "DecisionRecordCode",
+    "DecisionRecordError",
+    "DecisionRecordNotSubmittableError",
+    "DecisionRecordPathError",
+    "DecisionRecordStateError",
+    "DecisionRecordVerification",
+    "DecisionRecordVerificationError",
+    "DecisionRecordWriteError",
     "EvidenceHandoffReport",
     "EvidenceIntakeReport",
     "EvidenceLedger",
@@ -538,6 +619,8 @@ __all__ = [
     "ExcludedEvidence",
     "GatewayAuthorEvidence",
     "HandoffDocument",
+    "HumanDecision",
+    "HumanDecisionRecord",
     "InboxArtifactWriteError",
     "InboxDirError",
     "InboxError",
@@ -573,6 +656,7 @@ __all__ = [
     "NormalizedRow",
     "OperatorHandoffStep",
     "OperatorResult",
+    "PacketBinding",
     "PacketVerificationCode",
     "PacketViolation",
     "PendingEntry",
@@ -628,6 +712,7 @@ __all__ = [
     "attribute_gateway_author_evidence",
     "build_approved_intake_list",
     "build_decision_packet",
+    "build_decision_record",
     "build_evidence_checklist",
     "build_excluded_evidence",
     "build_handoff_report",
@@ -640,7 +725,9 @@ __all__ = [
     "compute_packet_id",
     "compute_plan_id",
     "compute_receipt_id",
+    "compute_record_id",
     "decision_packet_exit_code_for",
+    "decision_record_exit_code_for",
     "detect_changes",
     "ensure_outside_inbox",
     "evaluate_write_gate",
@@ -654,6 +741,7 @@ __all__ = [
     "intake_receipt_exit_code_for",
     "ledger_from_raw_json",
     "load_approved_intake_list",
+    "load_decision_packet",
     "load_event_journal",
     "load_evidence_ledger",
     "load_gateway_author_evidence",
@@ -667,11 +755,13 @@ __all__ = [
     "load_readiness_state_document",
     "load_review_ledger",
     "load_snapshot_state",
+    "main_verification_exit_code",
     "normalize_input_row",
     "quarantine_payload",
     "read_input_file",
     "record_review_decision",
     "render_decision_packet_summary",
+    "render_decision_record_summary",
     "render_handoff_markdown",
     "render_inbox_summary",
     "render_intake_plan_summary",
@@ -687,6 +777,7 @@ __all__ = [
     "resolve_format",
     "review_exit_code_for",
     "run_decision_packet",
+    "run_decision_record",
     "run_inbox_scan",
     "run_intake_plan",
     "run_intake_receipt",
@@ -697,6 +788,7 @@ __all__ = [
     "template_columns",
     "template_output_name",
     "verify_decision_packet",
+    "verify_decision_record",
     "verify_intake_plan_inputs",
     "verify_intake_receipt",
     "write_approved_intake_list",
