@@ -4597,3 +4597,94 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   生成真实 artifact 后跑 `--audit`），并把 `earliest_failure_stage` + `reason_codes` 作为
   交接单的必填字段。
 
+
+---
+
+## GOLD-031：确定性 GPT Review Binding Manifest
+
+### 1. 背景 / 问题
+
+- `.ai/DEVELOPMENT_PROTOCOL.md` §2.7 要求 GPT 在 Review 台账里手工填写
+  `reviewed_result.result_sha256` 与 `reviewed_commit.sha`，但当时没有任何**只读**工具
+  能确定性地产出这两个内容身份：
+  - 人工 `sha256sum` 会受 `core.autocrlf` 影响（Windows 工作树是 CRLF，GitHub / Git 存储
+    是 LF），口径不一致就会让台账绑定到一个**无法被外部复算**的摘要；
+  - 「找完成 commit」「确认工作树版本就是被 review 的版本」全靠肉眼；
+  - 若把这件事交给 Executor，就等于把 Review 证据的生成权交给了执行方。
+- GOLD-028 在 `PROJECT_STATE.blockers` 里也明确记录了「cryptographic Review Ledger binding
+  不是编造出来的」这一 blocker 语义，本任务提供可复算的事实来源以便 GPT 后续安全绑定。
+
+### 2. 变更（最小范围）
+
+- `orchestrator/review_binding.py`（新增，纯只读）：
+  - CLI `python -m orchestrator.review_binding --task <task_id>`（stdout 纯 ASCII JSON，
+    stderr 只有人类摘要）；契约 `schema=gold-ai/review-binding-manifest/v1` +
+    `schema_version=1`，字段顺序固定（`MANIFEST_FIELD_ORDER`），
+    `facts_digest` 只覆盖确定性事实（排除 `generated_at` / `facts_digest` / `determinism`）；
+  - **内容身份双口径**：`task` / `result` 的 `sha256` + `bytes` 是 **canonical 口径**
+    （目标 commit 里 Git 存储 / GitHub 提供的字节，与 ledger 的
+    `reviewed_result.result_sha256` 同口径），`worktree_sha256` + `worktree_bytes` 是本地
+    工作树原始字节口径，`worktree_matches_commit` 以 **Git blob id** 口径判定漂移
+    （换行转换不算漂移）；
+  - `commit` 段只从 **HEAD 可达历史**里按 `ai: complete <task_id>` / `ai: blocked <task_id>`
+    （与 `ai_orchestrator.commit_task_result` 同源）解析终态 commit identity
+    （`sha` / `branch` / `head` / `subject` / `committed_at`）；
+  - `validation` 段只汇总 result 里**已记录**的 validation（命令 / 返回码 / 超时），
+    **不重新执行**任何测试；
+  - **fail-closed** 稳定原因码：`TASK_ID_INVALID` / `TASK_FILE_MISSING` /
+    `TASK_FILE_UNREADABLE` / `TASK_FILE_TASK_ID_MISMATCH` / `RESULT_MISSING` /
+    `RESULT_UNREADABLE` / `RESULT_TASK_ID_MISMATCH` / `RESULT_STATUS_UNKNOWN` /
+    `RESULT_NOT_TERMINAL` / `GIT_INFO_UNAVAILABLE` / `GIT_LOG_UNAVAILABLE` /
+    `COMPLETION_COMMIT_NOT_FOUND` / `COMPLETION_COMMIT_AMBIGUOUS` /
+    `COMPLETION_COMMIT_SHA_INVALID` / `RESULT_NOT_IN_COMMIT` / `TASK_NOT_IN_COMMIT` /
+    `WORKTREE_COMMIT_MISMATCH`（多终态 commit 歧义**绝不猜测**）；
+  - **GPT-only 边界**：输出里没有 `verdict` / `acceptance_summary` / `reviewed_at` /
+    `reviewer`；`authority` 段硬编码 `review_authority=gpt_only` /
+    `tool_can_sign_review=false` / `tool_can_advance_state=false` /
+    `tool_can_qualify_data=false` / `tool_can_cross_human_gate=false` / `writes_*=false`；
+  - 唯一外部进程调用是**只读** git 白名单（`log` / `ls-tree` / `cat-file` / `hash-object`），
+    白名单外子命令在代码级直接拒绝；零网络 / 零数据库 / 零业务证据写入 / 零模型调用。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.8 记录 manifest 契约、口径、fail-closed 码、
+  GPT-only 边界与只读保证（§2.7 ledger 语义不变）。
+- 未新增依赖、未新增 migration / schema、未改 `pyproject.toml`、未改
+  `.ai/tasks` / `.ai/results` / `PROJECT_STATE` / review 台账。
+
+### 3. 验证
+
+- 新增单元回归 `tests/unit/test_ai_orchestrator_review_binding.py`（**73 项**）：
+  确定性 / 只读（两次构建字节相同、树摘要不变）、字段顺序契约、wall-clock 与 mtime 不进
+  `facts_digest`、canonical 与 worktree 两套 SHA-256 可由独立 `hashlib` 复算、工作树漂移
+  fail-closed、validation 摘要（passed / failed / not_reported）、全部 fail-closed 分支
+  （invalid task_id / 缺失 / 损坏 / task_id 不一致 / 未知 status / 非终态 / Git 不可解析 /
+  commit 缺失 / commit 歧义 / sha 非法 / blob 缺失 / blob 不可读 / 无 `.git`）、
+  L3/L4 只记录不跨越、`run_git` 拒绝写子命令、源码守卫（无写入路径 / 无 ledger 与状态路径 /
+  无数据库与网络 import / 单一 `subprocess.run` 收口）、CLI 选项契约与 ASCII/exit code 契约；
+- 新增真实仓库集成回归 `tests/integration/test_review_binding_regression.py`（**8 项**）：
+  - **必须能复算 GPT 已写入台账的绑定**：对 `GOLD-027` 复算出与
+    `.ai/GPT_REVIEW_LEDGER.json` 完全一致的 `result_sha256`（`d1cf9b90…`）与
+    `reviewed_commit.sha`（`e3cadbd1…`）；
+  - 对 `GOLD-028`：`result.sha256` == `sha256(git cat-file blob HEAD:.ai/results/GOLD-028.json)`，
+    `worktree_sha256` == 独立 `hashlib` 结果，完成 commit（`06a96622…`）可由测试自己的
+    `git log` 复现且是 `HEAD` 的祖先；
+  - 命令零副作用：`git status --porcelain`、`.ai/tasks` / `.ai/results` 树摘要、
+    `PROJECT_STATE.json`、`GPT_REVIEW_LEDGER.json` **前后字节完全一致**；
+  - Phase / blocker / 交易安全不变量未变（`Phase 3` / `BLOCKED` / `PHASE3_3_DATA` /
+    `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`）。
+
+### 4. 范围守规
+
+- 只读、零网络、零数据库、零真实凭据；未进入 Phase 3.4、未跨 L3/L4；
+  `PHASE3_3_DATA` 保持 BLOCKED；`LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`；
+  测试写入全部发生在 `tmp_path`；Cline 未执行任何 Git 写操作。
+- planner snapshot / review ledger schema / rolling queue 语义未变。
+
+### 5. 遗留 / 下一步
+
+- 本层只提供**事实**：`binding.facts_complete=true` 仅代表事实齐全，**不代表**任务被 Review
+  通过；verdict / `acceptance_summary` / `reviewed_at` 仍必须由 GPT 自己签发。
+- 建议下一步（由 GPT 决定）：用 `python -m orchestrator.review_binding --task GOLD-028`
+  的 `result.sha256` + `commit.sha` 完成 GOLD-028 的 ledger 绑定，再按 §2 状态机推进指针；
+  若出现同一 task 多个终态 commit（`COMPLETION_COMMIT_AMBIGUOUS`），必须人工裁决，
+  工具不会替任何一方选一个 commit。
+

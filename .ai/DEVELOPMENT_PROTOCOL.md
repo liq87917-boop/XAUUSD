@@ -260,6 +260,47 @@ Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任�
   `LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；ledger 只记录 review
   结论，不能解除 blocker、不能资格化数据、也不能代替人工 Gate。
 
+## 2.8 确定性 GPT Review Binding Manifest（GOLD-031）
+
+- **为什么**：§2.7 的 ledger 需要 GPT 手工填写 `reviewed_result.result_sha256` 与
+  `reviewed_commit.sha`。§2.8 提供一个**纯只读、确定性**的事实清单，让 GPT 直接取得这两个
+  内容身份，而**不**把「产生 Review 证据」的能力交给 Executor。
+- **命令**：`python -m orchestrator.review_binding --task <task_id>`（只读；stdout 是纯 ASCII
+  JSON，stderr 只有人类摘要）。契约 `schema=gold-ai/review-binding-manifest/v1` +
+  `schema_version=1`，字段顺序固定（`MANIFEST_FIELD_ORDER`），`facts_digest` 只覆盖确定性事实
+  （排除 `generated_at` / `facts_digest` / `determinism`），绝不使用 mtime / 当前时间 / 模型输出
+  作为内容身份。
+- **输出事实**（只产事实，不含任何结论）：
+  - `task` / `result` 内容身份：`sha256` + `bytes` 为 **canonical 口径**（目标 commit 里 Git
+    存储 / GitHub 提供的字节，与 ledger `reviewed_result.result_sha256` 同口径，可由
+    `git cat-file` / 独立 `hashlib` 复算）；`worktree_sha256` + `worktree_bytes` 为本地工作树
+    原始字节口径；`worktree_matches_commit` 以 Git blob id 口径判定两者是否一致
+    （`core.autocrlf` 等换行转换**不算**漂移）；
+  - `commit`：终态完成 commit identity（`sha` / `branch` / `head` / `subject` / `committed_at`），
+    只从 **HEAD 可达历史**里按 `ai: complete <task_id>` / `ai: blocked <task_id>`
+    （与 `ai_orchestrator.commit_task_result` 同源）解析；
+  - `validation`：result 里**已记录**的 validation 摘要（命令 / 返回码 / 是否超时），
+    **绝不重新执行**任何测试。
+- **fail-closed（稳定 reason code）**：`TASK_ID_INVALID` / `TASK_FILE_MISSING` /
+  `TASK_FILE_UNREADABLE` / `TASK_FILE_TASK_ID_MISMATCH` / `RESULT_MISSING` /
+  `RESULT_UNREADABLE` / `RESULT_TASK_ID_MISMATCH` / `RESULT_STATUS_UNKNOWN` /
+  `RESULT_NOT_TERMINAL` / `GIT_INFO_UNAVAILABLE` / `GIT_LOG_UNAVAILABLE` /
+  `COMPLETION_COMMIT_NOT_FOUND` / `COMPLETION_COMMIT_AMBIGUOUS` /
+  `COMPLETION_COMMIT_SHA_INVALID` / `RESULT_NOT_IN_COMMIT` / `TASK_NOT_IN_COMMIT` /
+  `WORKTREE_COMMIT_MISMATCH`。同一 task 出现多个终态 commit 时**绝不猜测**（歧义必须由
+  GPT / 人工裁决）。
+- **职责边界（不可协商）**：本工具**只产事实**，绝不签发 verdict、绝不写
+  `.ai/GPT_REVIEW_LEDGER.json`、绝不推进任何 review 指针、绝不修改 `PROJECT_STATE`；
+  `binding.facts_complete` 只表示「事实是否齐全」，**不是** Review 结论。机器可读契约见
+  manifest 的 `authority` 段（`review_authority=gpt_only`、`tool_can_sign_review=false`、
+  `tool_can_advance_state=false`、`writes_* = false`）。
+- **只读保证**：唯一外部进程调用是**只读** git 白名单（`log` / `ls-tree` / `cat-file` /
+  `hash-object`；代码级白名单拒绝其余子命令）；零网络、零数据库、零业务证据写入、
+  零模型调用；模块内不存在任何写入路径（源码守卫测试锁定）。
+- **退出码**：`0` 事实齐全 / `2` fail-closed（缺事实、漂移或身份不可解析）。
+- **边界不变**：§2.8 不改变 planner snapshot、ledger schema、rolling queue、L1~L4 档位、
+  Phase 3.3 data blocker 与 `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
+
 ## 3. 恢复任务命名
 
 原任务失败或阻塞后不得修改既有审计历史。
