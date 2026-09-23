@@ -62,6 +62,7 @@ from typing import Any
 
 from orchestrator import ai_orchestrator as orch
 from orchestrator import planner_snapshot as planner
+from orchestrator import result_terminal_consistency as terminal_consistency
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -132,6 +133,15 @@ ISSUE_COMMIT_SHA_INVALID = "COMPLETION_COMMIT_SHA_INVALID"
 ISSUE_RESULT_NOT_IN_COMMIT = "RESULT_NOT_IN_COMMIT"
 ISSUE_TASK_NOT_IN_COMMIT = "TASK_NOT_IN_COMMIT"
 ISSUE_WORKTREE_COMMIT_MISMATCH = "WORKTREE_COMMIT_MISMATCH"
+
+# GOLD-039：终态一致性校验器里**已由本模块自己的 code 表达**的事实，避免重复上报。
+# - ``status`` 缺失 / 未知 ⇒ 本模块 ``RESULT_STATUS_UNKNOWN``；
+# - result 不是 JSON 对象 ⇒ 本模块 ``RESULT_UNREADABLE``。
+DELEGATED_TERMINAL_CONSISTENCY_CODES = (
+    terminal_consistency.REASON_STATUS_MISSING,
+    terminal_consistency.REASON_STATUS_UNKNOWN,
+    terminal_consistency.REASON_RESULT_INVALID,
+)
 
 SEVERITY_ERROR = "error"
 
@@ -522,6 +532,31 @@ def result_view(path: Path, payload: dict[str, Any], raw: bytes) -> dict[str, An
     }
 
 
+def terminal_consistency_issues(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """result 终态一致性 fail-closed issue（GOLD-039，只报告，绝不修复）。
+
+    复用 ``orchestrator.result_terminal_consistency`` 的**唯一**判定：只要 result 的
+    终态事实自相矛盾（例如顶层 ``status=completed`` 但最终 attempt ``finish_reason=
+    aborted``）或落进未知组合，就给出稳定 reason code ⇒ ``facts_complete=false``，
+    让 GPT 明确看到「事实不齐」而不是被诱导去猜一个 PASS。
+
+    ``status`` 缺失 / 未知这类事实已由本模块自己的 ``RESULT_STATUS_UNKNOWN``
+    fail-closed 表达（见 ``DELEGATED_TERMINAL_CONSISTENCY_CODES``），
+    这里不再重复上报同一事实。
+    """
+
+    report = terminal_consistency.analyze_result_terminal_consistency(payload)
+
+    return [
+        make_issue(
+            str(item["code"]),
+            f"result 终态事实不自洽（format={report['format']}）：{item['detail']}",
+        )
+        for item in report["details"]
+        if str(item["code"]) not in DELEGATED_TERMINAL_CONSISTENCY_CODES
+    ]
+
+
 def validation_section(payload: dict[str, Any]) -> dict[str, Any]:
     """result 里**已记录**的 validation 摘要（命令 / 返回码 / 超时；**绝不重新执行**）。"""
 
@@ -829,6 +864,10 @@ def load_result_facts(
         return section, raw, None, issues
 
     section.update(result_view(result_path, payload, raw))
+
+    # GOLD-039：终态一致性事实（只报告）。矛盾 ⇒ 稳定 reason code ⇒
+    # binding.facts_complete=false，review / backlog 自动 fail-closed。
+    issues.extend(terminal_consistency_issues(payload))
 
     declared = text_value(payload.get("task_id"))
 

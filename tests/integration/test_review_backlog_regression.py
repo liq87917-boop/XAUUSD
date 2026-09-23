@@ -40,6 +40,16 @@ REVIEW_LEDGER = REPO_ROOT / ".ai" / "GPT_REVIEW_LEDGER.json"
 
 AUDIT_TIME = "2026-09-23T00:00:00+08:00"
 
+# GOLD-039：历史 result（GOLD-020 之前的「唯一 finish_reason」格式）的稳定矛盾 code。
+# 测试**自己**复算这个结论，绝不 import 被测模块的判定。
+LEGACY_CONTRADICTION_CODE = "RESULT_TERMINAL_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS"
+
+NORMALIZED_MARKER_KEYS = (
+    "execution_outcome",
+    "normalized_finish_reason",
+    "cline_finish_reason_raw",
+)
+
 
 def tree_digest(root: Path) -> dict[str, str]:
     return {
@@ -116,6 +126,37 @@ def project_state() -> dict[str, Any]:
     assert isinstance(payload, dict)
 
     return payload
+
+
+def independent_legacy_contradiction(payload: dict[str, Any]) -> bool:
+    """测试自己按 §2.2 / GOLD-039 口径复算「历史 result 终态矛盾」。
+
+    规则（只覆盖本仓库真实存在的历史形状，故意不复用被测模块）：
+
+    - 顶层与最终 attempt 都没有 GOLD-020 归一化字段（即历史「唯一 finish_reason」格式）；
+    - ``status=completed``；
+    - 那个唯一的 ``finish_reason`` 既不是空值也不是 ``completed``（raw Cline 值）。
+    """
+
+    if any(key in payload for key in NORMALIZED_MARKER_KEYS):
+        return False
+
+    attempts = payload.get("attempts")
+
+    if not isinstance(attempts, list) or not attempts:
+        return False
+
+    final = attempts[-1]
+
+    if not isinstance(final, dict) or any(key in final for key in NORMALIZED_MARKER_KEYS):
+        return False
+
+    if str(payload.get("status", "")).strip().lower() != "completed":
+        return False
+
+    raw = final.get("finish_reason")
+
+    return isinstance(raw, str) and raw.strip() not in ("", "completed")
 
 
 def expected_backlog_ids() -> list[str]:
@@ -244,8 +285,19 @@ def test_backlog_item_identity_is_independently_recomputable_with_git() -> None:
 
         assert item["result"]["sha256"] == hashlib.sha256(blob).hexdigest()
         assert item["result"]["status"] == "completed"
-        assert item["facts_complete"] is True
-        assert item["missing_reason_codes"] == []
+
+        # GOLD-039：测试自己按协议口径复算「历史终态矛盾」，
+        # 不信任被测模块的结论。
+        contradicted = independent_legacy_contradiction(
+            json.loads((RESULTS_DIR / f"{task_id}.json").read_text(encoding="utf-8"))
+        )
+
+        assert item["facts_complete"] is (not contradicted)
+
+        if contradicted:
+            assert item["missing_reason_codes"] == [LEGACY_CONTRADICTION_CODE]
+        else:
+            assert item["missing_reason_codes"] == []
 
 
 def test_backlog_marks_review_status_objectively() -> None:
@@ -265,8 +317,15 @@ def test_backlog_marks_review_status_objectively() -> None:
         assert item["ledger"]["entry_present"] is (task_id in bound_ids)
 
         if item["ledger"]["entry_present"] is False:
-            # 无 ledger 条目且 facts 完整 ⇒ 客观 pending（不是任何 verdict）
-            assert item["review_status"] == backlog.REVIEW_STATUS_PENDING
+            # 无 ledger 条目：客观待 review（facts 齐）或客观 invalid（facts 不齐）。
+            # 绝不把「事实不齐」当成可 review 的正常项。
+            expected_status = (
+                backlog.REVIEW_STATUS_PENDING
+                if item["facts_complete"]
+                else backlog.REVIEW_STATUS_INVALID
+            )
+
+            assert item["review_status"] == expected_status
 
 
 # ============================================================

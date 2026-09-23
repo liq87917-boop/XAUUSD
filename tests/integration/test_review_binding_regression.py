@@ -37,6 +37,11 @@ LEDGER_TASK_ID = "GOLD-027"
 
 AUDIT_TIME = "2026-09-23T00:00:00+08:00"
 
+# GOLD-039：历史 result（GOLD-020 之前的「唯一 finish_reason」格式）的稳定矛盾 code。
+LEGACY_CONTRADICTION_CODE = "RESULT_TERMINAL_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS"
+
+REVIEWED_LEDGER_TASK_IDS = ("GOLD-025", "GOLD-026", "GOLD-027")
+
 
 def tree_digest(root: Path) -> dict[str, str]:
     return {
@@ -139,13 +144,11 @@ def test_manifest_reproduces_review_ledger_binding_for_reviewed_task() -> None:
 
 
 def test_gold028_result_sha256_is_independently_recomputable() -> None:
+    """GOLD-028 内容身份仍可独立复算；它的历史终态矛盾必须被 fail-closed 暴露。"""
+
     manifest = build_manifest()
 
-    assert manifest["issues"] == []
-    assert manifest["binding"]["facts_complete"] is True
-    assert manifest["summary"]["exit_code"] == binding.EXIT_OK
-
-    # canonical 口径（Git 存储 / GitHub 提供的字节）——可由测试自己用 git cat-file 复算
+    # 内容身份不因「事实不齐」而丢失：canonical sha256 仍可由 git cat-file 复算
     assert manifest["result"]["sha256"] == result_sha256_from_git()
     assert manifest["result"]["bytes"] == len(git_blob_bytes(f"HEAD:.ai/results/{TASK_ID}.json"))
 
@@ -158,6 +161,12 @@ def test_gold028_result_sha256_is_independently_recomputable() -> None:
     assert manifest["result"]["worktree_bytes"] == result_path.stat().st_size
     assert manifest["result"]["worktree_matches_commit"] is True
     assert manifest["result"]["finished_at"] == "2026-09-23T16:57:20+08:00"
+
+    # GOLD-039：GOLD-028 与 GOLD-035 属同一类历史矛盾
+    # （status=completed，但那个「唯一」finish_reason 里是 raw Cline 值 aborted）。
+    assert manifest["binding"]["facts_complete"] is False
+    assert manifest["binding"]["reason_codes"] == [LEGACY_CONTRADICTION_CODE]
+    assert manifest["summary"]["exit_code"] == binding.EXIT_DRIFT
 
 
 
@@ -258,15 +267,18 @@ def test_cli_is_deterministic_and_zero_side_effect() -> None:
 
     second = subprocess.run(command, capture_output=True, cwd=str(REPO_ROOT), check=False)
 
-    assert first.returncode == binding.EXIT_OK
-    assert first.stderr == b""
+    # 检出历史终态矛盾 ⇒ fail-closed（退出码 2 + stderr 明确 facts_complete=False）
+    assert first.returncode == binding.EXIT_DRIFT
+    assert b"facts_complete=False" in first.stderr
+    assert first.stderr == second.stderr
     assert first.stdout == second.stdout
     assert first.stdout.isascii()
 
     payload = json.loads(first.stdout.decode("ascii"))
 
     assert payload["schema"] == binding.REVIEW_BINDING_SCHEMA
-    assert payload["binding"]["facts_complete"] is True
+    assert payload["binding"]["facts_complete"] is False
+    assert payload["binding"]["reason_codes"] == [LEGACY_CONTRADICTION_CODE]
     assert payload["result"]["sha256"] == result_sha256_from_git()
     assert payload["commit"]["sha"] == own_terminal_commit(TASK_ID)
     assert payload["generated_at"] == AUDIT_TIME
@@ -308,3 +320,42 @@ def test_phase33_blocker_and_trading_invariants_unchanged() -> None:
     assert "ALLOW_EXTERNAL_ORDER_SUBMISSION=false" in state["invariants"]
     assert state["queue_status"] == "ACTIVE"
     assert isinstance(state["last_reviewed_task"], str)
+
+
+def test_gold035_terminal_contradiction_is_exposed_fail_closed() -> None:
+    """GOLD-039 核心验收：GOLD-035 的历史矛盾必须被 review tooling fail-closed 暴露。"""
+
+    manifest = build_manifest("GOLD-035")
+
+    assert manifest["result"]["status"] == "completed"
+
+    # GPT 不猜、不静默归一化：事实不齐 + 稳定 reason code
+    assert manifest["binding"]["facts_complete"] is False
+    assert manifest["binding"]["reason_codes"] == [LEGACY_CONTRADICTION_CODE]
+    assert manifest["summary"]["exit_code"] == binding.EXIT_DRIFT
+
+    # 仍然只产事实：绝不出现任何 Review 结论字段
+    keys = collect_keys(manifest)
+
+    for forbidden in binding.FORBIDDEN_MANIFEST_KEYS:
+        assert forbidden not in keys, forbidden
+
+    # 历史 result 只读：manifest 构建前后字节完全不变
+    result_file = RESULTS_DIR / "GOLD-035.json"
+
+    before = hashlib.sha256(result_file.read_bytes()).hexdigest()
+
+    build_manifest("GOLD-035")
+
+    assert hashlib.sha256(result_file.read_bytes()).hexdigest() == before
+
+
+def test_formal_ledger_reviewed_tasks_remain_facts_complete() -> None:
+    """正式台账已绑定的任务保持自洽 ⇒ 新门禁不破坏既有 Review 台账链。"""
+
+    for task_id in REVIEWED_LEDGER_TASK_IDS:
+        manifest = build_manifest(task_id)
+
+        assert manifest["issues"] == [], task_id
+        assert manifest["binding"]["facts_complete"] is True, task_id
+        assert manifest["summary"]["exit_code"] == binding.EXIT_OK, task_id

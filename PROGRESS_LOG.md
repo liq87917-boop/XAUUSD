@@ -5295,3 +5295,77 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   事实并修正 `PROJECT_STATE` 指针与 `task_queue` 声明，然后重新取得有效 precondition；
 - 建议下一步（由 GPT 决定）：按 GOLD-039 建立 result 顶层状态与 attempt 终态一致性门禁。
 
+## GOLD-039：result 顶层状态与 attempt 终态一致性门禁 + 历史矛盾 fail-closed 暴露
+
+### 1. 背景 / 问题
+
+- §2.2（GOLD-020）已规定 Orchestrator 判定与 Cline raw finish reason 必须分开保存，但历史
+  result（GOLD-020 之前旧版本进程写入）只有**唯一**的 `finish_reason`，里面是 raw Cline 值：
+  GOLD-035 的 result 就是 `status=completed` + 最终 attempt `finish_reason=aborted`；
+- GPT 因此拒绝为 GOLD-035 写正式 Review 台账（**不猜测、不静默归一化、不回写历史**），
+  正式台账停在 GOLD-027；PROJECT_STATE 把这条事实写在 PHASE3_3_DATA blocker 里；
+- 目标：① 未来**不可能**再生成自相矛盾的终态 result；② 历史矛盾被 review tooling
+  **fail-closed 暴露**（稳定 reason code + `facts_complete=false`），而不是被自动改写；
+  ③ 不改变业务资格、不改变 Planner 权限、不破坏台账 / 滚动队列 / Git 恢复行为。
+
+### 2. 变更（最小范围）
+
+- 新增 `orchestrator/result_terminal_consistency.py`（纯函数、纯标准库；零网络 / 零数据库 /
+  零外部进程 / 零 wall-clock），契约 `schema=gold-ai/result-terminal-consistency/v1`：
+  - **终态语义表**：`completed` 只能对应成功语义（最终 attempt `completed`、
+    `cline_exit_code==0`、未超时、`failure_class=none`、已记录 validation 全通过）；
+    `blocked` 允许最终 attempt `blocked` / `failed`（retry-exhausted，需失败证据）/
+    `waiting_external`（provider fatal，需 non-retryable 证据）；历史 V1 顶层 `failed`
+    只允许最终 attempt `failed`；
+  - **fail-closed 稳定 code**：raw 值落进归一化键、`completed`+`aborted`/`failed`、
+    `blocked`+最终 attempt `completed`、status 与 outcome 不一致、outcome 与
+    normalized finish reason 不一致、未知 status / 未知 outcome / 结构非法 /
+    失败语义缺证据 …… 全部给出稳定 reason code（绝不猜测、绝不静默归一化）；
+  - **历史格式只读兼容**：顶层与最终 attempt 都没有归一化字段 ⇒ 唯一 `finish_reason` 是
+    raw Cline 值，`status=completed` 而 raw 不是 `completed`（或反向）⇒
+    `RESULT_TERMINAL_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS`，只报告、绝不重写；
+  - **没有事实就不做组合判定**：`attempts` 缺失 / 空 / 只有 V1 迁移空壳 attempt 时只校验顶层，
+    既不猜测成功也不凭空指控（合成 fixture 与迁移路径兼容）；
+  - `authority` 段机器可读声明只读（`tool_can_sign_review=false` /
+    `tool_can_repair_result=false` / `tool_can_advance_state=false` / `writes_*=false`）。
+- `orchestrator/ai_orchestrator.py`：新增 **写入前门禁** `ensure_result_terminal_consistency()`
+  + `ResultTerminalConsistencyError`；`write_final_result()` 在 `atomic_write_json` 之前调用
+  同一份规则（经 `repo_scoped_import` 复用，**不复制第二套词表 / 组合表**）：
+  矛盾 / 未知组合一律 raise，**矛盾 result 绝不落盘**；校验器不可用同样 fail-closed。
+- `orchestrator/review_binding.py`：`load_result_facts()` 追加 `terminal_consistency_issues()`
+  ⇒ 矛盾 result 得到稳定 code ⇒ `binding.facts_complete=false`；`review_backlog` 与
+  `review_ledger_integrity` 沿用既有事实链自动 fail-closed（无需复制算法，也不改 ledger schema）。
+- 文档：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.13（契约 / 自洽语义 / 稳定 code / 写入前门禁 /
+  review 暴露 / 不改动的边界）。
+
+### 3. 验证
+
+- 新增 `tests/unit/test_result_terminal_consistency.py`（28 项）与
+  `tests/integration/test_result_terminal_consistency_regression.py`（7 项）；
+- 真实语料核对：GOLD-001-R2 / 002 / 003 / 005 / 016 / 020 / 021 / 023 / 028 / 031 / 035 / 038
+  被稳定 code 暴露，其中 **GOLD-035 就是本任务的直接验收对象**；测试用**自己的**
+  hashlib / 协议口径独立复算，逐份与模块判定一致；
+- 正式台账（GOLD-025~027）保持 `facts_complete=true`，`review_ledger_integrity` 仍退出码
+  `0` / `integrity_ok=True`（新门禁不破坏既有台账链）；
+- 既有 `test_review_binding_regression.py` / `test_review_backlog_regression.py` 按新语义更新
+  （历史矛盾 ⇒ `facts_complete=false` / `review_status=invalid` / 退出码 2），
+  GOLD-035 由 review 入口 fail-closed 暴露；
+- 回归命令：`tests/unit/test_result_terminal_consistency.py` +
+  `tests/integration/test_result_terminal_consistency_regression.py` +
+  review binding / backlog / ledger integrity 回归共 **63 passed**（35s）；
+- 全量门禁：`.venv\Scripts\python.exe -m pytest tests -q`、
+  `.venv\Scripts\python.exe -m ruff check .`、
+  `.venv\Scripts\python.exe -m mypy config database src scripts`；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json`、`src/alpha/**`、`src/execution/**`、`database/**`、`.env`；
+  未新增依赖；测试写入全部落在 `tmp_path`；Cline 未执行任何 Git 写操作。
+
+### 4. 遗留 / 下一步
+
+- 历史矛盾 result **保持原样**（只读）：GPT 何时、以何种方式为 GOLD-028~038 记录正式 Review
+  仍需 Planner 决策；本任务只保证「矛盾被显式看到」而不是「被自动洗白」；
+- 归一化写入路径从此有写入前门禁，若未来出现别的写 result 路径，同样必须经过
+  `orchestrator.result_terminal_consistency`（唯一规则来源）；
+- 建议下一步（由 GPT 决定）：基于 §2.13 的稳定 code 决定 GOLD-035 这类历史矛盾的处理口径，
+  或继续补 control-plane 事实包。
+

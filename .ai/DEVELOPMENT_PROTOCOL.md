@@ -656,5 +656,76 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
 - **边界不变**：§2.12 不改变 ledger schema、滚动队列、L1~L4 档位、Phase 3.3 data blocker、
   Phase 3.4 边界与 `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
 
+## 2.13 Result 终态一致性门禁与历史矛盾 fail-closed 暴露（GOLD-039）
+
+- **为什么**：§2.2 要求 Orchestrator 判定（`status` / `execution_outcome` /
+  `normalized_finish_reason`）与 Cline raw `finish_reason` **分开保存**；但历史 result
+  （GOLD-020 之前旧版本进程写入）仍把 raw 值写在**唯一**的 `finish_reason` 上：
+  GOLD-035 就是 `status=completed` + 最终 attempt `finish_reason=aborted`。GPT 拒绝为它写
+  正式 Review 台账（不猜测、不静默归一化、不回写历史），正式台账停在 GOLD-027。
+  §2.13 把「一份 result 的终态事实是否自洽」变成**确定性、可复用、fail-closed** 的判定，
+  并把矛盾**显式暴露**给 GPT，而不是替 GPT 判定或篡改历史。
+- **唯一规则来源**：`orchestrator/result_terminal_consistency.py`（纯函数 + 纯标准库；
+  零网络、零数据库、零外部进程、零 wall-clock）。`orchestrator/ai_orchestrator.py`
+  （写入前门禁）与 `orchestrator/review_binding.py`（review / backlog / ledger 事实层）
+  **只调用同一份规则**，不存在第二套词表 / 组合表。
+- **稳定契约**：`schema=gold-ai/result-terminal-consistency/v1` + `schema_version=1`；
+  报告恒定形状（`status` / `status_known` / `status_terminal` / `format` / `outcome` /
+  `normalized_finish_reason` / `attempt_count` / `final_attempt` / `final_outcome` /
+  `final_finish_reason` / `final_cline_finish_reason_raw` / `failure_evidence` /
+  `consistent` / `reason_codes` / `details`）。
+- **自洽语义（任一不满足即 fail-closed）**：
+  - 顶层 `status=completed` 只能对应成功语义：最终 attempt 的 `execution_outcome` /
+    `normalized_finish_reason` / `finish_reason` 必须是 `completed`，且 `cline_exit_code==0`、
+    未超时、`failure_class` 为 `none`、最终 attempt **已记录**的 validation 全部通过；
+  - 顶层 `status=blocked` 允许最终 attempt `blocked`（Cline 自报阻塞）、`failed`
+    （retry-exhausted，必须带失败证据）、`waiting_external`（provider fatal，必须带
+    non-retryable 证据）；`failed`（历史 V1 顶层状态）只允许最终 attempt `failed`；
+  - 矛盾 / 未知组合一律稳定 code：`RESULT_TERMINAL_FINISH_REASON_INVALID`（raw 值落进
+    归一化键）、`RESULT_TERMINAL_RAW_FINISH_REASON_MISPLACED`、
+    `RESULT_TERMINAL_FINAL_ATTEMPT_CONTRADICTS_STATUS`、
+    `RESULT_TERMINAL_FINAL_EXIT_CODE_CONTRADICTS_STATUS`、
+    `RESULT_TERMINAL_FINAL_TIMEOUT_CONTRADICTS_STATUS`、
+    `RESULT_TERMINAL_FINAL_FAILURE_CLASS_CONTRADICTS_STATUS`、
+    `RESULT_TERMINAL_FINAL_VALIDATION_CONTRADICTS_STATUS`、
+    `RESULT_TERMINAL_STATUS_OUTCOME_MISMATCH`、
+    `RESULT_TERMINAL_OUTCOME_FINISH_REASON_MISMATCH`（`execution_outcome` 与
+    `normalized_finish_reason` 不一致）、`RESULT_TERMINAL_OUTCOME_INVALID`、
+    `RESULT_TERMINAL_STATUS_MISSING` / `_UNKNOWN`、`RESULT_TERMINAL_ATTEMPTS_INVALID` /
+    `_ATTEMPT_INVALID`、`RESULT_TERMINAL_FAILURE_EVIDENCE_MISSING`、
+    `RESULT_TERMINAL_RESULT_INVALID`；
+  - **历史格式只读兼容**：顶层与最终 attempt 都没有归一化字段 ⇒ 唯一 `finish_reason`
+    是 raw Cline 值，`status=completed` 而 raw 不是 `completed`（或 `blocked`/`failed`
+    而 raw 恰好是 `completed`）⇒ `RESULT_TERMINAL_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS`，
+    只报告、绝不重写历史 result；
+  - **没有事实就不做组合判定**：`attempts` 缺失 / 空 / 只有迁移空壳 attempt 时只校验顶层
+    字段，既不猜测成功也不凭空指控矛盾（合成 fixture 与 V1 迁移路径兼容）。
+- **写入前门禁（Orchestrator）**：`write_final_result()` 在 `atomic_write_json` **之前**
+  调用同一校验器；检出矛盾 / 未知组合一律 raise `ResultTerminalConsistencyError`，
+  **绝不写出一份自相矛盾的终态 result**（矛盾 result 不会落盘）；校验器不可用同理
+  fail-closed（无法证明自洽就不写终态事实）。失败 attempt 的 raw 值只允许留在
+  `cline_finish_reason_raw`。
+- **Review 层 fail-closed 暴露**：`orchestrator.review_binding` 对矛盾 result 追加稳定
+  reason code ⇒ `binding.facts_complete=false`；`orchestrator.review_backlog` 逐项
+  `facts_complete=false` + `review_status=invalid` + `BACKLOG_ITEM_FACTS_INCOMPLETE`；
+  §2.9 台账完整性据 manifest 得到 `LEDGER_MANIFEST_FACTS_INCOMPLETE`。GPT 因此看到的是
+  「事实不齐 + 稳定 code」，**绝不**据此猜 PASS、也绝不自动改写历史。
+- **不破坏既有链路**：正式台账已绑定的任务（GOLD-025~027）保持 `facts_complete=true`，
+  §2.9 台账完整性仍退出码 `0`；`last_reviewed_task` 指针落后仍只是**事实**（§2.12 口径，
+  不 gate planner writes）；rolling queue / Git 恢复状态机 / L1~L4 档位 / Phase 3.3 data
+  blocker / `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 全部不变。
+- **职责边界（不可协商）**：本门禁**只判事实**——不签发 verdict、不写 ledger / state /
+  task / result、不修复历史、不提升 Executor 为 Planner、不改变业务资格；`authority`
+  段机器可读地声明 `tool_can_sign_review=false` / `tool_can_repair_result=false` /
+  `tool_can_advance_state=false` / `writes_*=false`（源码守卫 + 契约测试锁定）。
+- **回归测试**：`tests/unit/test_result_terminal_consistency.py`（28 项：正常成功 / blocked /
+  provider fatal / timeout / retry-exhausted 自洽；completed+aborted、completed+failed、
+  blocked+completed、未知组合 fail-closed；历史 result 只读兼容；写入前门禁拒绝落盘；
+  authority 与源码守卫）+ `tests/integration/test_result_terminal_consistency_regression.py`
+  （真实语料逐份与测试**独立复算**一致、GOLD-035 矛盾被暴露、正式台账已绑定任务不误伤、
+  §2.9 台账完整性仍通过、CLI 前后零改写、Phase 3.3 / 交易安全不变量不变）+
+  既有 `tests/integration/test_review_binding_regression.py` /
+  `test_review_backlog_regression.py` 按新语义更新（历史矛盾 ⇒ fail-closed）。
+
 
 

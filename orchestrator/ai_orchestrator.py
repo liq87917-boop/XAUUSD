@@ -5339,6 +5339,65 @@ def build_attempt_record(
 # 最终结果
 # ============================================================
 
+# ============================================================
+# Result 终态一致性门禁（GOLD-039）
+# ============================================================
+#
+# 为什么需要它：
+# GOLD-035 的真实 result 出现了「顶层 status=completed，最终 attempt
+# finish_reason=aborted」的自相矛盾（旧版本把 Cline raw 值直接写进了唯一字段）。
+# 归一化写入逻辑（GOLD-020）与 review 侧的 fail-closed 暴露之外，这里再加一道
+# **写入前**门禁：任何自相矛盾 / 未知组合的终态 result 一律拒绝落盘。
+
+class ResultTerminalConsistencyError(
+    RuntimeError
+):
+    """写入终态 result 前检出终态事实自相矛盾（fail-closed，绝不落盘）。"""
+
+
+def ensure_result_terminal_consistency(
+    result
+):
+    """终态 result 写入前的确定性一致性门禁（GOLD-039，只复用一份规则）。
+
+    - 判定规则**唯一来源**：``orchestrator.result_terminal_consistency``
+      （绝不在此复制第二套词表 / 组合表）；
+    - 检出矛盾 ⇒ raise，绝不写出一份自相矛盾的终态 result；
+    - 校验器不可用 ⇒ 同样 fail-closed（无法证明自洽就不写终态事实）。
+    """
+
+    module = repo_scoped_import(
+        "orchestrator.result_terminal_consistency"
+    )
+
+    if module is None:
+
+        raise ResultTerminalConsistencyError(
+            "terminal consistency validator 不可用："
+            "fail-closed，拒绝写入终态 result"
+        )
+
+    report = module.analyze_result_terminal_consistency(
+        result
+    )
+
+    if not report[
+        "consistent"
+    ]:
+
+        raise ResultTerminalConsistencyError(
+            "terminal result 自相矛盾，拒绝写入"
+            "（fail-closed）："
+            + ", ".join(
+                report[
+                    "reason_codes"
+                ]
+            )
+        )
+
+    return report
+
+
 def write_final_result(
     task,
     status,
@@ -5416,6 +5475,13 @@ def write_final_result(
         result[
             "note"
         ] = note
+
+    # GOLD-039：写入前门禁（fail-closed）。
+    # 自相矛盾 / 未知组合的终态 result 一律拒绝落盘，
+    # 绝不让「completed + aborted」这类事实再次进入仓库。
+    ensure_result_terminal_consistency(
+        result
+    )
 
     atomic_write_json(
         result_path(task_id),
