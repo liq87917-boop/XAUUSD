@@ -1,0 +1,65 @@
+{
+  "task_id": "GOLD-018",
+  "type": "BUGFIX_BLOCKER_TOOLING",
+  "title": "修复 monitoring/evidence 循环导入并建立 Import-Order 回归门禁",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-017"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "修复 GOLD-017 在纯净 HEAD 复现的 src.monitoring <-> src.evidence 循环导入，使 monitoring/evidence 及其 evidence CLI 在任意合理导入顺序下稳定可导入；只修模块边界与导出依赖，不改变 Phase 3.3 资格算法、阈值、证据契约或安全语义。",
+  "recovery_context": [
+    "GOLD-017 completed，权威结果：2557 passed / 1 skipped，ruff PASS，mypy 172 source files PASS。",
+    "GOLD-017 任务外发现并在 git archive HEAD 纯净树复现：先 import src.monitoring 再进入 src.evidence 链时，ImportError: cannot import name 'BatchQuantification' from partially initialized module 'src.monitoring.evidence_readiness'。",
+    "当前 src.monitoring.__init__ eager import monitoring.evidence_readiness；monitoring.evidence_readiness 又 import src.evidence.contracts/intake/ledger；Python 加载 src.evidence 子模块前会执行 src.evidence.__init__，而该 __init__ eager import decision_packet/handoff/readiness_runner 等，再反向 import src.monitoring.evidence_readiness，形成循环。"
+  ],
+  "requirements": [
+    "先用最小可复现脚本锁定至少两种 import 顺序：import src.monitoring -> import src.evidence，以及 import src.evidence -> import src.monitoring；修复前测试必须能证明旧行为失败或在提交说明中给出可复现证据。",
+    "优先通过包边界治理解决：避免 src.evidence.__init__ 或 src.monitoring.__init__ 在包初始化阶段 eager import 整个依赖图；可采用 lazy exports/__getattr__、更窄的直接子模块 import、TYPE_CHECKING 或提取无环公共类型，但不得复制业务类/阈值/枚举形成双份事实源。",
+    "保持现有公开 API 尽可能兼容：现有 `from src.evidence import X` 与 `from src.monitoring import Y` 的公开导出若被测试/脚本使用应继续工作；若必须改变导入方式，需有兼容层和文档说明。",
+    "新增 import-order regression tests：monitoring-first、evidence-first、重复导入、fresh subprocess；至少覆盖 src.monitoring、src.evidence、src.evidence.decision_packet、src.evidence.handoff、src.evidence.readiness_runner。",
+    "增加所有 evidence CLI 的轻量 smoke/import 门禁（至少 --help 或模块 import，不联网、不连接真实数据库、不写文件），确保 package init 顺序不再触发循环导入。",
+    "不得改变 evidence-intake-v1、PHASE3_3_DATA 阈值、readiness 算术、安全字段、L3/L4 Gate、LIVE_TRADING 或外部订单设置。",
+    "更新 TECH_DEBT/PROGRESS_LOG；若 README 有相关模块入口说明则只做必要更新。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/evidence/**",
+      "src/monitoring/**",
+      "scripts/evidence_*.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md",
+      "README.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      "database/migrations/**",
+      "src/alpha/**",
+      "src/collectors/**",
+      "src/scheduler/**"
+    ]
+  },
+  "constraints": [
+    "不新增第三方依赖、不新增 migration/schema、不联网。",
+    "不通过删除公开 API、注释测试、skip 或导入时吞异常来掩盖循环依赖。",
+    "不进入 Phase 3.4，不训练 Alpha，不生成交易信号或订单。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "fresh Python subprocess 中 monitoring-first 与 evidence-first 两种顺序均无 ImportError。",
+    "所有 evidence CLI 轻量 import/help smoke 通过且零网络/零数据库写入。",
+    "既有公开导出兼容或有明确兼容层，资格算法/阈值/安全字段无变化。",
+    "全量 pytest、ruff、mypy 通过；PHASE3_3_DATA 保持 BLOCKED。"
+  ]
+}
