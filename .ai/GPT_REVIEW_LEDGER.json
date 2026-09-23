@@ -1,0 +1,58 @@
+{
+  "schema": "gold-ai/gpt-review-ledger/v1",
+  "schema_version": 1,
+  "reviewed_from": "GOLD-025",
+  "entries": [
+    {
+      "task_id": "GOLD-025",
+      "verdict": "PASS",
+      "reviewer_role": "GPT",
+      "reviewer": "gpt",
+      "reviewed_result": {
+        "result_sha256": "f015189914c6864c10f8582232adff558e957d9bf43eb0a1ed3e4fa86898c989",
+        "status": "completed",
+        "finished_at": "2026-09-23T14:44:24+08:00"
+      },
+      "reviewed_commit": {
+        "sha": "fc8736a96901ae42a951ad5db5b60bb9f58a79e4",
+        "branch": "cline-agent"
+      },
+      "acceptance_summary": "GPT review PASS: Review Ledger/状态一致性门禁按任务范围落地；Executor 无签发权限；2911 passed/1 skipped，ruff PASS，mypy PASS；未改变 Phase 3.3 blocker、L3/L4 或交易安全开关。",
+      "reviewed_at": "2026-09-23T16:17:00+08:00"
+    },
+    {
+      "task_id": "GOLD-026",
+      "verdict": "PASS",
+      "reviewer_role": "GPT",
+      "reviewer": "gpt",
+      "reviewed_result": {
+        "result_sha256": "60cc05a001b0a529c785f7c3b61a4d4746b3583baf54b7472626c6aa6eec2813",
+        "status": "completed",
+        "finished_at": "2026-09-23T15:07:53+08:00"
+      },
+      "reviewed_commit": {
+        "sha": "0b5e49bfc940b9cb1619e3c361d1a04b43a5f074",
+        "branch": "cline-agent"
+      },
+      "acceptance_summary": "GPT review PASS: PHASE3_3_DATA readiness diagnostic 为只读/fail-closed，明确区分 code-ready/evidence-missing/human-verification-required/gate-blocked；未伪造时间或资格；全量测试、ruff、mypy 通过。",
+      "reviewed_at": "2026-09-23T16:17:00+08:00"
+    },
+    {
+      "task_id": "GOLD-027",
+      "verdict": "PASS",
+      "reviewer_role": "GPT",
+      "reviewer": "gpt",
+      "reviewed_result": {
+        "result_sha256": "d1cf9b90064ae569ced729d59ca2ac67dd2c6e65babcd7f6833a36bc8b9b8f9e",
+        "status": "completed",
+        "finished_at": "2026-09-23T15:47:50+08:00"
+      },
+      "reviewed_commit": {
+        "sha": "e3cadbd11a0ce2490b958316cb5fd60463f55d6a",
+        "branch": "cline-agent"
+      },
+      "acceptance_summary": "GPT review PASS: 授权证据 Intake Handoff/预检契约完整且 fail-closed；结构完整不等于 evidence qualified；2996 passed/1 skipped，ruff PASS，mypy PASS；PHASE3_3_DATA 与 L3/L4 保持阻塞。",
+      "reviewed_at": "2026-09-23T16:17:00+08:00"
+    }
+  ]
+}
