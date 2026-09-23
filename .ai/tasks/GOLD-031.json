@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-031",
+  "type": "PLANNER_TOOLING",
+  "title": "建立确定性 GPT Review Binding Manifest",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-030"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "为 GPT Review 提供纯只读、确定性的 result/commit 内容身份清单，使 GPT 能在不把 Review 权交给 Executor 的前提下取得 result SHA-256、reviewed commit identity 与任务验收事实；工具只计算事实，绝不签发 PASS/FAIL、绝不写 Review Ledger 或 PROJECT_STATE。",
+  "requirements": [
+    "新增 planner/review binding 的只读库与 CLI，输入 task_id 后输出稳定 JSON，至少包含 task_id、result 文件 SHA-256、result status/finished_at、对应完成 commit SHA/branch、task 文件内容身份与 validation 摘要。",
+    "SHA-256 必须对仓库中原始文件 bytes 计算；输出必须可重复，字段顺序稳定，不得把文件 mtime、当前时间或模型输出作为内容身份。",
+    "严格保持 GPT-only Review：Executor 只能生成事实 manifest；不得产生 verdict、acceptance_summary、reviewed_at，不得写 .ai/GPT_REVIEW_LEDGER.json，不得推进 last_reviewed_task，不得修改 PROJECT_STATE。",
+    "对 result 缺失、JSON 损坏、task/result task_id 不一致、未知 status、Git identity 不可解析、工作树版本与目标 commit 不一致等情况 fail-closed 并给出稳定 reason code。",
+    "提供针对 GOLD-028 类已完成任务的回归测试，证明 manifest 的 result_sha256 可由独立 hashlib 复算且 commit identity 可追溯；证明命令零网络、零数据库、零业务证据写入。",
+    "保持 planner_snapshot、Review Ledger schema、rolling queue、L3/L4 与 PHASE3_3_DATA 语义不变。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；本任务不得把 Review verdict 或状态推进授权给 Cline/DeepSeek。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false；PHASE3_3_DATA 保持 BLOCKED。",
+    "不得访问外部网络、真实凭据或真实业务证据；不得进入 Phase 3.4 或跨 L3/L4。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 可从 manifest 获得可独立复算的 result SHA-256 与 reviewed commit identity，而 Executor 没有任何 Review/状态推进权限。",
+    "异常/漂移全部 fail-closed；工具只读且确定性。",
+    "全量 pytest/ruff/mypy 通过；Phase、L3/L4、交易安全与 PHASE3_3_DATA blocker 不变。"
+  ]
+}
