@@ -1,0 +1,66 @@
+{
+  "task_id": "GOLD-019",
+  "type": "AUTOMATION_INFRA",
+  "title": "加固 Rolling Queue 依赖图与 Fail-Closed 停线语义",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-018"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "在现有 3-task rolling queue 基础上补齐依赖图校验与 fail-closed 安全语义，确保格式错误、未知 gate、缺依赖、依赖环、blocked/unknown 状态都只能停线，绝不跳过前置任务继续跑后续任务。",
+  "recovery_context": [
+    "Rolling queue 已在 commits 62618c9/04c38c7/246496e0/a3a5527 落地：20s Git polling、queue target=3、idle log=1800s、depends_on/auto_start/human_gate 基础支持。",
+    "当前 find_next_task_with_reason 对 load_task 异常会记录后 continue，理论上可能跳过一个损坏的前置 task 去执行后续 task；depends_on 目前也未做多节点循环依赖检测。",
+    "用户已重启 start_agent，新 rolling queue 进程已用于执行本任务链；本任务修改的 orchestrator 文件会在下次进程重启后完整加载，但不得依赖热重载才能完成本任务或后续 GOLD-020。"
+  ],
+  "requirements": [
+    "严格校验 task queue 元数据：depends_on 只能是非空 task_id 字符串或字符串数组；auto_start/requires_human_approval 必须是 bool；human_gate 仅接受明确支持的 gate 词表，未知值 fail-closed。",
+    "建立依赖图校验：检测 self dependency、直接/间接 cycle、缺失依赖；错误必须给稳定可读原因并停线，不得继续扫描执行后续任务。",
+    "修改 find_next_task_with_reason：第一个非终态任务若 task JSON 损坏、元数据非法、依赖异常、human gate 等待、dependency blocked/unknown/pending，均返回 no-runnable + reason；不得 continue 到后续 task。",
+    "terminal completed/blocked 任务仍可跳过；blocked 依赖必须阻断所有依赖它的任务，但不重写历史 result。",
+    "队列诊断输出应包含 pending count/target、首个停线 task/reason；不得每 20 秒刷同一条日志，继续沿用 1800s idle throttle。",
+    "新增充分单元测试：malformed first task no-skip、unknown gate、non-bool auto_start、multi-node cycle、missing dependency、blocked dependency、unknown result status、合法 3-task chain 顺序。",
+    "保留现有 20s polling、push 成功后 immediate next-task、L3/L4 永不自动跨越的行为。",
+    "更新 DEVELOPMENT_PROTOCOL 与必要的自动化说明；不修改业务 Phase 状态。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/**",
+      "tests/unit/test_ai_orchestrator_queue.py",
+      "tests/unit/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      "src/alpha/**",
+      "src/evidence/**",
+      "src/monitoring/**",
+      "database/**"
+    ]
+  },
+  "constraints": [
+    "不新增第三方依赖，不进行真实远端 Git 写入测试；Git 行为测试必须 mock/fake。",
+    "不得降低 L3/L4 Gate，不得让 malformed task 被静默跳过。",
+    "不得要求本任务运行中热重启 Orchestrator；修改应在下次重启生效。",
+    "Cline 不执行 git commit/push/reset/rebase/merge；Git 由当前 Orchestrator 管理。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "非法/损坏的第一个非终态 task 会 fail-closed 停线且绝不执行后续 task。",
+    "依赖环、缺失依赖、blocked/unknown dependency 都有回归测试并停线。",
+    "合法 GOLD-A -> GOLD-B -> GOLD-C 链按顺序可执行，20s polling 和 immediate continuation 保持。",
+    "全量 pytest、ruff、mypy 通过；业务 Phase 与安全 Gate 无变化。"
+  ]
+}
