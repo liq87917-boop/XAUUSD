@@ -4,13 +4,13 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-031",
-  "last_completed_task": "GOLD-030",
+  "current_task": "GOLD-032",
+  "last_completed_task": "GOLD-031",
   "last_reviewed_task": "GOLD-027",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-029 and GOLD-030 execution completed and substantive GPT review found both implementations/tests acceptable. Formal cryptographic Review Ledger advancement intentionally remains at GOLD-027 until GOLD-031 provides deterministic result SHA-256/commit binding facts. Real authorized Author/News evidence with trustworthy independent time/availability semantics is still missing; no real evidence qualification has occurred and Phase 3.4 remains forbidden.",
+      "detail": "GOLD-031 execution completed and substantive GPT review found the deterministic Review Binding Manifest implementation/tests acceptable: it exposes only objective binding facts, is read-only/fail-closed, and preserves GPT-only review authority. Formal cryptographic Review Ledger advancement intentionally remains at GOLD-027 until GPT records a correctly bound ledger entry using GOLD-031 facts. Real authorized Author/News evidence with trustworthy independent time/availability semantics is still missing; no real evidence qualification has occurred and Phase 3.4 remains forbidden.",
       "retryable": false
     }
   ],
@@ -21,7 +21,7 @@
     {"code": "CLINE_PROVIDER_BILLING_ROUTE", "resolved_by": "2026-09-23: Cline CLI switched to direct DeepSeek BYOK; launcher hard-pins AI_CLINE_PROVIDER=deepseek and provider fatal errors fail fast."},
     {"code": "GPT_REVIEW_LEDGER_BOOTSTRAP", "resolved_by": "2026-09-23: GPT created .ai/GPT_REVIEW_LEDGER.json with cryptographically bound PASS reviews for GOLD-025 through GOLD-027 and advanced last_reviewed_task to GOLD-027."}
   ],
-  "next_action": "Execute GPT-approved queue GOLD-031 -> GOLD-032 -> GOLD-033. GOLD-031 establishes deterministic Review Binding Manifest facts; GOLD-032 validates Review Ledger integrity/continuity without granting Executor review authority; GOLD-033 builds a read-only human evidence submission readiness bundle. Keep PHASE3_3_DATA BLOCKED; do not enter Phase 3.4 or cross L3/L4 gates.",
+  "next_action": "Execute GPT-approved GOLD-032 then GOLD-033. GOLD-032 validates Review Ledger integrity/continuity without granting Executor review authority; GOLD-033 builds a read-only human evidence submission readiness bundle. After GOLD-033, stop for real authorized evidence/human action unless GPT identifies a concrete non-duplicative blocker-facing task. Keep PHASE3_3_DATA BLOCKED; do not enter Phase 3.4 or cross L3/L4 gates.",
   "human_gates": [
     {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."},
     {"code": "PHASE3_3_L3_DECISION", "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."}
@@ -36,6 +36,6 @@
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ],
   "queue_target_size": 3,
-  "task_queue": ["GOLD-031", "GOLD-032", "GOLD-033"],
+  "task_queue": ["GOLD-032", "GOLD-033"],
   "queue_status": "ACTIVE"
 }
