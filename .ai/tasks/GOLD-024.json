@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-024",
+  "type": "AUTOMATION_INFRA",
+  "title": "将 Planner Snapshot 固化为稳定 CLI 与机器可读交接产物",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-023"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把 GOLD-023 的只读 planner snapshot 变成 GPT 可稳定消费的版本化 CLI/JSON 契约，减少 Planner 每轮从分散文件重建状态的歧义，同时保持 Executor 无规划权限。",
+  "requirements": [
+    "为 orchestrator/planner_snapshot.py 提供稳定只读 CLI 入口，输出版本化 JSON；必须包含 branch/head、PROJECT_STATE 摘要、非终态任务及依赖、终态 result 摘要、queue drift、state pointer drift、human gates/invariants 和 diagnostics。",
+    "定义 snapshot schema_version 与确定性排序；相同 Git 树和状态输入必须产生语义等价输出，禁止把 wall-clock now 混入资格/状态事实。",
+    "CLI 默认只读 stdout；可选 --output 只能写用户明确指定的 runtime/临时路径，不得改写 .ai/tasks、.ai/results、PROJECT_STATE、业务数据或 Git。",
+    "对损坏 JSON、未知 task/result status、依赖缺失/环、PROJECT_STATE 落后或 queue 声明漂移必须 fail-closed 地报告 diagnostics，不得静默修复。",
+    "新增单元测试覆盖正常链、GOLD-021~023 已完成但 state 落后场景、损坏输入、确定性输出、零写入副作用和 Executor 不具备 follow-on planning API。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "scripts/**", "tests/unit/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", "src/**", "database/**"]
+  },
+  "constraints": [
+    "GPT 仍是唯一 Planner/Reviewer/Architect；CLI 只提供事实快照，不给出 next task 建议。",
+    "不得改变 PHASE3_3_DATA、L3/L4 Gate、LIVE_TRADING=false、ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "不得新增模型/供应商 API 或网络依赖。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_planner_snapshot.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 可通过单一稳定 JSON snapshot 获得规划所需事实，且 snapshot 不包含自动规划/自动修复能力。",
+    "异常/漂移均可机器识别并 fail-closed 报告；输出确定、可审计、零业务写入。",
+    "全量 pytest/ruff/mypy 通过；Phase 与安全 Gate 不变。"
+  ]
+}
