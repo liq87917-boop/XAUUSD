@@ -1239,9 +1239,6 @@ NON_RETRYABLE_EXTERNAL_PATTERNS = {
     "unauthorized":
         "AUTHENTICATION_FAILED",
 
-    "forbidden":
-        "PROVIDER_FORBIDDEN",
-
     "model not found":
         "MODEL_UNAVAILABLE",
 
