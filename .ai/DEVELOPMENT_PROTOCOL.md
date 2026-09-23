@@ -29,6 +29,30 @@
 ### RUNNING
 不得创建并行冲突任务，等待当前任务结束。
 
+## 2.1 Rolling Task Queue
+
+Orchestrator 使用 **3-task rolling queue** 降低任务供给断档：
+
+- Planner 默认维持未来 **3 个非终态任务**；目标数量由 `AI_QUEUE_TARGET_SIZE` 控制，默认 `3`。
+- Task 可增加 `depends_on: ["GOLD-xxx"]`；只有全部依赖的 result 都是 `completed` 才能自动开始。
+- Task 可增加 `auto_start: false` 或 `requires_human_approval: true` 强制等待人工动作。
+- Task 可增加 `human_gate: "L1"|"L2"|"L3"|"L4"`；**L3/L4 永不自动跨越**，队列在该任务处停线。
+- 队列严格按任务文件顺序处理：第一个非终态任务若依赖未满足 / 被 BLOCKED / 等待 Human Gate，**不得跳过它执行后续任务**。
+- 一个任务只有在 validation 全通过、commit 完成且 push 成功后，Orchestrator 才会立即检查下一项；push pending 时先恢复 Git 同步，不得继续后续任务。
+- 任一依赖任务为 `blocked` 时，依赖它的后续任务保持等待；不得因为队列中还有其他任务就绕过失败。
+- Git 轮询仍默认每 **20 秒**一次；`No runnable task` 日志默认每 **1800 秒**最多打印一次，降日志噪声但不降低检测频率。
+
+任务示例：
+
+```json
+{
+  "task_id": "GOLD-019",
+  "depends_on": ["GOLD-018"],
+  "auto_start": true,
+  "human_gate": "L1"
+}
+```
+
 ## 3. 恢复任务命名
 
 原任务失败或阻塞后不得修改既有审计历史。
