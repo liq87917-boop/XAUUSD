@@ -1,0 +1,80 @@
+{
+  "task_id": "GOLD-030",
+  "title": "建立 Phase 3.3 Evidence Chain 端到端防漂移验收",
+  "status": "completed",
+  "finished_at": "2026-09-23T17:59:29+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M src/evidence/__init__.py",
+    " M tests/integration/test_evidence_cli_smoke.py",
+    "?? scripts/evidence_chain_audit.py",
+    "?? src/evidence/chain_audit.py",
+    "?? src/evidence/rehearsal.py",
+    "?? tests/integration/test_evidence_chain_audit_integration.py",
+    "?? tests/unit/test_evidence_chain_audit.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md                              |  95 ++++++++\n README.md                                    |  80 +++++++\n src/evidence/__init__.py                     | 335 ++++++++++++++++-----------\n tests/integration/test_evidence_cli_smoke.py |   1 +\n 4 files changed, 378 insertions(+), 133 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T17:29:39+08:00",
+      "finished_at": "2026-09-23T17:59:29+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 234,
+      "duration_ms": 1433341,
+      "usage": {
+        "inputTokens": 73794002,
+        "outputTokens": 187947,
+        "cacheReadTokens": 73378432,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.39523899599999995
+      },
+      "cline_final_text": "Submission recorded (verified): # GOLD-030 完成总结（Phase 3.3 Evidence Chain 端到端防漂移验收）\n\n## 1. 完成内容\n- **新增只读审计层** `src/evidence/chain_audit.py`：把 GOLD-027 handoff → GOLD-028 材料级人工核验凭证 → GOLD-012/029 review 批准 → GOLD-013 plan → 人工显式执行结果 → GOLD-014 receipt/recheck → GOLD-015 packet → GOLD-016 L3 决策记录 串成**固定八段**顺序审计（`ChainStage`/`CHAIN_STAGE_ORDER`）；**逐段直接复用**既有核验入口（`load_intake_handoff`/`verify_attestation`/`build_approved_intake_list`/`build_intake_plan`/`verify_intake_receipt`/`verify_decision_packet`/`load_decision_packet`/`verify_decision_record`），**不新增、不降低**任何资格阈值。任一段缺失/损坏/被篡改/漂移即 **fail-closed**（`FAIL`/`MISSING` + 稳定原因码），其后阶段 `NOT_EVALUATED`，`earliest_failure_stage` 指向最早失败段。\n- **确定性内容身份**：`compute_chain_facts_digest()`（各段身份事实，不含路径/时间）+ `compute_chain_id()`（策略块 + 段/状态/原因码 + facts_digest）；重复审计同一 artifact 得同一身份，任一漂移必变。\n- **四个独立结论 + 硬编码安全语义**：`engineering_chain_ready` / `real_evidence_missing` / `human_verification_missing` / `l3_human_gate_pending`；`data_qualification_passed`/`phase_transition_allowed` 恒 false、`blocker_active`/`human_gate_required`/`gate_blocked` 恒 true，`PHASE3_3_DATA` 保持 BLOCKED；`rehearsal_fixture` 时三个\"缺失/待人工\"结论恒 true。\n- **纯本地演练 fixture** `src/evidence/rehearsal.py`：`build_rehearsal_chain(work_dir, moment, scenario=ready|blocked)` **原样调用**既有 6 个模块搭起全链；人工执行结果用**显式标注 Mock manifest**（`fixture=true`，零落库、零 DB、零网络）；handoff/recheck 为显式 fixture 产物；`ensure_rehearsal_work_dir()` 拒绝仓库内非 `logs/` 路径。\n- **CLI** `scripts/evidence_chain_audit.py`：`--rehearsal --work-dir <dir> [--scenario ready|blocked]` 单一 rehearsal 命令；或显式 artifact 路径的只读审计；`--out` 为唯一写开关（原子写、单实例锁）；退出码 0/2/3/4/5/6 与既有 CLIs 同口径；`--help` 无任何 intake/`--no-dry-run`/qualify/advance 开关。\n- **文档**：README 新增 GOLD-030 章节（合规红线、八段、四个结论、单一 rehearsal 命令与故障定位口径、退出码、回归测试清单）；PROGRESS_LOG 追加第九十三轮。\n\n## 2. 修改的文件\n- `src/evidence/__init__.py`（惰性导出 `chain_audit` / `rehearsal` 公开名，`__all__` 与 `_LAZY_EXPORTS` 同源 433 名）\n- `tests/integration/test_evidence_cli_smoke.py`（登记新 CLI 入口，覆盖守门）\n- `README.md`、`PROGRESS_LOG.md`\n\n## 3. 新增的文件\n- `src/evidence/chain_audit.py`、`src/evidence/rehearsal.py`、`scripts/evidence_chain_audit.py`\n- `tests/unit/test_evidence_chain_audit.py`（44 项）、`tests/integration/test_evidence_chain_audit_integration.py`（16 项）\n\n## 4. 执行的测试（task `validation_commands`）\n- `.venv\\Scripts\\python.exe -m pytest tests -q`（附加 `-o cache_dir` / `--basetemp` 指向 %TEMP%，避免污染仓库）\n- `.venv\\Scripts\\python.exe -m ruff check .`\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts`\n- 另跑：新 unit+integration（60 项）、`test_evidence_cli_smoke.py`+`test_evidence_import_order.py`（49 项）\n\n## 5. 测试结果（实测输出）\n- **pytest tests**：`3142 passed, 1 skipped in 355.62s (0:05:55)`（唯一 skip 为既有 `test_text_similarity.py` 环境分支）\n- **ruff check .**：`All checks passed!`\n- **mypy config database src scripts**：`Success: no issues found in 181 source files`\n- 新测试：`60 passed`（44 unit + 16 integration）；CLI smoke/import-order：`49 passed`\n- 行为实测：`--rehearsal --work-dir <tmp> --json` → EXIT=0、8/8 段 PASS、`engineering_chain_ready=true`、`real_evidence_missing/human_verification_missing/l3_human_gate_pending=true`、`data_qualification_passed=false`、`blocker_active=true`；只给 inbox → EXIT=5 且 `earliest_failure_stage=attestation`；收据篡改 → EXIT=5 + `RECEIPT_ID_MISMATCH`；锁冲突 → EXIT=6 且零写入\n- 副作用检查：`git status --porcelain` 仅 4 个允许路径被修改 + 5 个新增（`.ai/**`、`src/alpha/**`、`src/execution/**`、`database/**`、`docs/**`、`.env`、`config/rss_sources.json` 零改动）；审计/演练对 inbox 原始 evidence 与历史 artifact 逐字节零改写\n\n## 6. 未解决的问题\n- 本层只做\"内容身份是否前后一致\"的绑定核对，**不能**证明授权材料真实存在或法律有效，也不校验人工核验者身份（仍归 GOLD-028 + L3 人工 Gate）；`--audit` 模式下 `real_evidence_missing=false` 仅表示\"工程审计未发现结构性缺口\"，已在 README/输出 notes 显式写明。\n- 演练的 GOLD-008 handoff / recheck 是人工构造的算术自洽 fixture，不代表真实量化结论；契约演进时需同步更新 fixture（现有 8 段断言会立即暴露漂移）。\n- 未改 `TECH_DEBT.md`（避免在大表格文件中引入格式风险，限制与语义已在 README/PROGRESS_LOG 记录）。\n\n## 7. 是否满足 acceptance\n- ✅ 单一 rehearsal/audit 从头到尾验证 Phase 3.3 证据 artifact 绑定，任一漂移给出**确定性失败阶段 + 稳定原因码**（每段均有 tamper/stale/missing 用例并断言\"此前全 PASS、其后 NOT_EVALUATED\"）。\n- ✅ 工程链全绿也不把 Mock/fixture 当真实资格：`rehearsal_fixture` 下三个\"缺失/待人工\"结论恒 true；`data_qualification_passed=false`、`phase_transition_allowed=false`、`blocker_active=true` 硬编码，不解除 blocker、不越过 L3/L4。\n- ✅ 全量 pytest/ruff/mypy 全部通过；对真实仓库/数据库/原始 evidence 零副作用（零网络、零 DB、零 intake、零改写，写入仅限 tmp_path / 显式 `--work-dir` / 显式 `--out`）。\n\n## 8. 建议下一步\n- 把该层接入日常流程：提交真实证据前跑 `--rehearsal`；生成真实 artifact 后跑 `--audit`，并把 `earliest_failure_stage` + `reason_codes` 作为交接单必填字段。\n- 后续若引入外部密钥/追加式签名日志以保护 ledger 完整性（GOLD-029 遗留项），可把该审计层扩展为同时核验签名链。\n- 保持八段顺序与安全字段的回归钉住（`test_stage_order_is_locked` 等），任何契约演进必须显式改测试。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M src/evidence/__init__.py",
+        " M tests/integration/test_evidence_cli_smoke.py",
+        "?? scripts/evidence_chain_audit.py",
+        "?? src/evidence/chain_audit.py",
+        "?? src/evidence/rehearsal.py",
+        "?? tests/integration/test_evidence_chain_audit_integration.py",
+        "?? tests/unit/test_evidence_chain_audit.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md                              |  95 ++++++++\n README.md                                    |  80 +++++++\n src/evidence/__init__.py                     | 335 ++++++++++++++++-----------\n tests/integration/test_evidence_cli_smoke.py |   1 +\n 4 files changed, 378 insertions(+), 133 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  4%]\n........................................................................ [  6%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 13%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 25%]\n........................................................................ [ 27%]\n........................................................................ [ 29%]\n........................................................................ [ 32%]\n........................................................................ [ 34%]\n........................................................................ [ 36%]\n........................................................................ [ 38%]\n........................................................................ [ 41%]\n........................................................................ [ 43%]\n........................................................................ [ 45%]\n........................................................................ [ 48%]\n........................................................................ [ 50%]\n........................................................................ [ 52%]\n........................................................................ [ 54%]\n........................................................................ [ 57%]\n........................................................................ [ 59%]\n........................................................................ [ 61%]\n........................................................................ [ 64%]\n........................................................................ [ 66%]\n........................................................................ [ 68%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 75%]\n........................................................................ [ 77%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 84%]\n........................................................................ [ 87%]\n........................................................................ [ 89%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 96%]\n........................................................................ [ 98%]\n..s............................................                          [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3142 passed, 1 skipped in 350.95s (0:05:50)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 181 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

@@ -30,6 +30,7 @@ SENTINEL = "GOLD018_CLI_OK"
 
 #: 证据链 CLI 入口（``scripts/evidence_*.py`` + 单步 intake 入口）。
 EVIDENCE_CLI_MODULES: tuple[str, ...] = (
+    "scripts.evidence_chain_audit",
     "scripts.evidence_decision_packet",
     "scripts.evidence_decision_record",
     "scripts.evidence_gap_diagnostic",

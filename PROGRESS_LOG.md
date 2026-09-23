@@ -4502,3 +4502,98 @@ GOLD-028 交付了**材料级人工核验凭证**（`phase33_human_verification_
   `evidence_intake_plan` → **人工显式** `evidence_operator workflow --no-dry-run`；
   `PHASE3_3_DATA` 仍 BLOCKED。
 
+
+## 第九十三轮（2026-09-23）：GOLD-030 — Phase 3.3 Evidence Chain 端到端防漂移验收
+
+### 1. 背景 / 问题
+
+GOLD-027 ~ GOLD-029 各自都有严格的**只读**核验入口，但**没有任何一个**入口把整条链串起来：
+业务方在提交真实授权证据前，只能人工逐个跑 5 ~ 6 个 CLI，且"某一段 artifact 与上游内容
+身份是否仍然一致"（凭证绑定的 package、批准引用的 review revision、plan / receipt / packet /
+record 之间的绑定）**没有被一次性验证**。真实证据到来时才暴露跨模块契约漂移，代价极高。
+
+### 2. 变更（最小范围）
+
+- `src/evidence/chain_audit.py`（新增，只读审计层）：
+  - 固定**八段**顺序（`ChainStage` / `CHAIN_STAGE_ORDER`）：`intake_handoff` →
+    `attestation` → `review_approval` → `approved_list_and_plan` → `operator_result` →
+    `intake_receipt` → `decision_packet` → `decision_record`；任一段未通过即**短路**，其后为
+    `NOT_EVALUATED`，`earliest_failure_stage` **明确指向最早失败阶段**；
+  - **逐段复用既有核验**（不复制资格规则）：`load_intake_handoff` / `verify_attestation` /
+    `build_approved_intake_list` + GOLD-029 binding 勾稽 / `build_intake_plan` /
+    `verify_intake_receipt`（含 receipt_id 重算）/ `verify_decision_packet` +
+    GOLD-016 `load_decision_packet` / `verify_decision_record`；
+  - **稳定原因码**：`ChainStageStatus`（PASS / FAIL / MISSING / NOT_EVALUATED）+
+    `ChainAuditCode`（`CHAIN_ARTIFACT_MISSING` / `CHAIN_ARTIFACT_TAMPERED` /
+    `CHAIN_BINDING_MISMATCH` / `CHAIN_SCHEMA_DRIFT` / `CHAIN_INVALID_CANDIDATE` /
+    `CHAIN_NO_APPROVED_EVIDENCE` …）+ 直接沿用上游模块原因码（`ATTESTATION_*` /
+    `PLAN_*` / `OPERATOR_*` / `RECHECK_*` / `RECEIPT_ID_MISMATCH` / `RECORD_ID_MISMATCH` …）；
+  - **内容身份**：`compute_chain_facts_digest()`（各段身份事实，**不含路径与时间**）+
+    `compute_chain_id()`（策略块 + 段 / 状态 / 原因码 + facts_digest）；重复审计同一份 artifact
+    得到同一身份，任一漂移必然改变；
+  - **四个独立结论 + 硬编码安全语义**：`engineering_chain_ready` / `real_evidence_missing` /
+    `human_verification_missing` / `l3_human_gate_pending`；`data_qualification_passed` /
+    `phase_transition_allowed` 恒 false、`blocker_active` / `human_gate_required` /
+    `gate_blocked` 恒 true，`evidence_source=rehearsal_fixture` 时前三个"缺失 / 待人工"结论
+    恒为 true；
+  - `run_chain_audit()`：默认零写入，只有显式 `out_path` 才（先取单实例锁）**原子**写审计报告
+    本身，并拒绝写进 inbox。
+- `src/evidence/rehearsal.py`（新增，纯本地演练 fixture）：
+  - `build_rehearsal_chain(work_dir, moment, scenario=ready|blocked)` **原样调用**既有模块
+    （`run_attestation` / `run_review` / `run_intake_plan` / `run_intake_receipt` /
+    `run_decision_packet` / `run_decision_record`）搭起整条链；
+    人工"显式执行结果"是**显式标注**的 Mock manifest（`fixture=true`，**未真实落库**、
+    **未建数据库连接**、**未联网**）；GOLD-008 handoff 与 qualification recheck 是**显式
+    fixture** 产物（算术自洽、阈值只引用 `src.alpha.evidence_gate`）；
+  - `ensure_rehearsal_work_dir()`：仓库内**仅允许** `logs/` 之下，其余仓库路径一律拒绝
+    （防止 fixture 污染仓库、被误当真实证据）。
+- `scripts/evidence_chain_audit.py`（新增 CLI）：`--rehearsal --work-dir <dir>
+  [--scenario ready|blocked]` 单一 rehearsal 命令；或 `--inbox-dir … --handoff … --attestation …
+  --ledger … --approved-list … --plan … --operator-result … --recheck … --readiness … --receipt …
+  --packet … --record …` 只读审计既有 artifact；`--out` 是唯一写开关；`--help` **不含**任何
+  intake / `--no-dry-run` / qualify / advance / 交易参数；退出码 `0/2/3/4/5/6` 与既有 CLIs 同口径。
+- `src/evidence/__init__.py`：惰性导出新增 `chain_audit` / `rehearsal` 两个子模块的公开名
+  （`__all__` 与 `_LAZY_EXPORTS` 同源；共享的 `EXIT_*` 仍由既有模块提供，不重复登记）。
+
+### 3. 验证
+
+- 新增单元回归 `tests/unit/test_evidence_chain_audit.py`（**44 项**）：ready / blocked happy path
+  8 段全 PASS；`chain_id` / `facts_digest` 确定性与漂移必变；**每一关键绑定点的 tamper / stale /
+  missing**（候选包内容漂移 → `CHAIN_INVALID_CANDIDATE`；候选移除 / 凭证改写 → `ATTESTATION_*`；
+  ledger 缺 binding → `ATTESTATION_MISSING`；ledger 绑定他证 → `ATTESTATION_TAMPERED`；
+  批准清单改写 / plan_id 改写 → `APPROVED_LIST_*` / `PLAN_STALE`；dry-run → `OPERATOR_NOT_EXECUTED`；
+  recheck 改写 → `RECEIPT_ID_MISMATCH`；readiness 改写 → `READINESS_TAMPERED`；
+  packet 安全字段削弱；record reviewer / packet 内容漂移 → `RECORD_ID_MISMATCH`）且断言
+  **此前全 PASS、其后全 `NOT_EVALUATED`**；工程链全绿仍 `data_qualification_passed=false` /
+  `blocker_active=true`；审计零改写 + `--out` 只写报告 + 写进 inbox 被拒 + 锁冲突零写入；
+  演练工作目录拒绝仓库路径；源码级守卫（审计 / 演练模块不 import 数据库 / 网络 / 子进程）；
+- 新增集成回归 `tests/integration/test_evidence_chain_audit_integration.py`（**16 项**）：
+  CLI 只读审计（纯 JSON、artifact 零改写）、缺 artifact / 收据篡改 → 退出码 `5` + 最早失败阶段、
+  `--out` 原子写 + 锁冲突退出码 `6` 零写入、参数互斥、演练工作目录拒绝仓库路径（退出码 `3`）、
+  演练 ready / blocked 模式只在显式工作目录内落盘、**fresh subprocess**（干净 cwd）演练与审计
+  **零副作用**、`--help` 冒烟；`tests/integration/test_evidence_cli_smoke.py` 同步登记新入口；
+- 全量回归：`pytest tests`（unit + integration）**3142 passed / 1 skipped**；
+  `ruff check .` → **All checks passed!**；
+  `mypy config database src scripts` → **Success: no issues found in 181 source files**。
+
+### 4. 范围守规
+
+- 零网络 / 零数据库 / 零模型训练 / 零交易；不新增 / 不升级依赖；未改 Phase 3.3 blocker、
+  数据资格阈值、L3-L4 Gate、`LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+  `PHASE3_3_DATA` 仍 BLOCKED；演练**绝不**真实落库、**绝不**产生真实 L3 批准；
+- 未修改 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`、
+  `src/alpha/**`、`src/execution/**`、`database/**`、`docs/**`、`.env`、`config/rss_sources.json`；
+- 写入测试全部发生在 `tmp_path` / 显式工作目录；Cline 未执行任何 Git 写操作。
+
+### 5. 遗留 / 下一步
+
+- 本层只做"**内容身份是否前后一致**"的绑定核对：它**不能**证明授权材料真实存在或法律有效，
+  也不判断人工核验者身份——这些仍归 GOLD-028 材料级核验与 **L3 人工 Gate**；`--audit` 模式下
+  `real_evidence_missing=false` 只表示"工程审计未发现结构性缺口"，README 已显式写明该语义；
+- 演练 fixture 的 GOLD-008 handoff / recheck 是**人工构造**的算术自洽产物（用于工程链演练），
+  不代表真实量化结论；后续若 GOLD-008 / recheck 契约演进，需要同步更新 fixture 并由本层回归
+  测试立即暴露（当前已由 8 段断言钉住）；
+- 建议下一步：把本层接到定时/交接流程（例如每次提交真实证据前跑一次 single rehearsal；
+  生成真实 artifact 后跑 `--audit`），并把 `earliest_failure_stage` + `reason_codes` 作为
+  交接单的必填字段。
+

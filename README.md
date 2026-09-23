@@ -1644,6 +1644,86 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   \+ `tests/unit/test_evidence_intake_plan.py`（计划链 `ATTESTATION_MISSING` / `ATTESTATION_STALE`）。
 
 
+### 证据链端到端只读审计与单一 rehearsal 命令（`scripts/evidence_chain_audit.py`，GOLD-030）
+
+> **合规红线**：本项**只做纯本地只读审计 / 演练** —— 不采集、不写库、不联网、不执行 intake、
+> 不移动 / 删除 / 改写任何原始 evidence 或历史 artifact；演练只用 fixture /
+> Mock operator result，`PHASE3_3_DATA` **保持 BLOCKED**，L3 / L4 只能人工推进。
+
+- **一句话**：把 `GOLD-027 handoff → GOLD-028 材料级人工核验凭证 → GOLD-012/029 review 批准 →
+  GOLD-013 plan → 人工显式执行结果 → GOLD-014 receipt/recheck → GOLD-015 packet →
+  GOLD-016 L3 决策记录` 串成**一条**可重复、**fail-closed** 的端到端验收链：逐段核验
+  artifact identity / schema / content binding，任一漂移都给出**最早失败阶段**与**稳定原因码**；
+- **复用而不复制**：每一段都直接调用既有核验入口（`load_intake_handoff` /
+  `verify_attestation` / `build_approved_intake_list` / `build_intake_plan` /
+  `verify_intake_receipt` / `verify_decision_packet` / `verify_decision_record`），
+  本工具**不新增、不降低**任何资格阈值，也不重新解释任何契约字段；
+- **八段固定顺序**（`stage_order`）：`intake_handoff` / `attestation` / `review_approval` /
+  `approved_list_and_plan` / `operator_result` / `intake_receipt` / `decision_packet` /
+  `decision_record`；任一段未通过即**短路**，其后为 `NOT_EVALUATED`；
+- **内容身份**：确定性 `facts_digest`（各段身份事实：指纹 / 摘要 / id / 计数）与
+  `chain_id`（策略块 + 段 / 状态 / 原因码 + `facts_digest`）；任一 artifact 漂移
+  （含某段从 `PASS` 变 `FAIL`）必然产生**新** `chain_id`；
+- **四个独立结论**：`engineering_chain_ready`（工程链契约是否全部一致）/
+  `real_evidence_missing` / `human_verification_missing` / `l3_human_gate_pending`；
+  **即使工程链全绿**，`data_qualification_passed` / `phase_transition_allowed`
+  **恒为 false**、`blocker_active` / `human_gate_required` / `gate_blocked` 恒为 true
+  （**硬编码**），`PHASE3_3_DATA` 保持 BLOCKED；
+- **演练只证明工具链健康**：`evidence_source=rehearsal_fixture` 时
+  `real_evidence_missing` / `human_verification_missing` / `l3_human_gate_pending`
+  **恒为 true**：fixture / Mock **绝不**被当作真实资格证据、**绝不**解除 blocker、
+  **绝不**产生真实 L3 批准；
+- **用法**（面向 operator 的**单一** rehearsal 命令 + 只读审计）：
+
+  ```bash
+  # ① 单一 rehearsal 命令：先验证工具链健康（纯本地 fixture + Mock 执行结果）
+  .venv\Scripts\python.exe -m scripts.evidence_chain_audit ^
+      --rehearsal --work-dir logs/chain_rehearsal --json
+
+  # ② 诚实 BLOCKED 场景（packet 不可提交 + reject 记录）
+  .venv\Scripts\python.exe -m scripts.evidence_chain_audit ^
+      --rehearsal --work-dir logs/chain_rehearsal_blocked --scenario blocked --json
+
+  # ③ 只读审计**真实** artifact 链（零写入；stdout 为纯 JSON）
+  .venv\Scripts\python.exe -m scripts.evidence_chain_audit ^
+      --inbox-dir logs/evidence/inbox --handoff logs/evidence/handoff.json ^
+      --attestation logs/evidence/phase33_human_verification_attestation.json ^
+      --ledger logs/evidence/inbox_review_ledger.json ^
+      --approved-list logs/evidence/approved_for_intake.json ^
+      --plan logs/evidence/evidence_intake_plan.json ^
+      --operator-result logs/evidence/author_manifest.json ^
+      --recheck logs/evidence/phase33_recheck.json ^
+      --readiness logs/evidence/readiness_state.json ^
+      --receipt logs/evidence/evidence_intake_receipt.json ^
+      --packet logs/evidence/evidence_decision_packet.json ^
+      --record logs/evidence/l3_human_decision_record.json --json
+
+  # ④ 唯一写开关：显式 --out 原子落盘**审计报告本身**（仍不写库、不 intake、不解除 blocker）
+  .venv\Scripts\python.exe -m scripts.evidence_chain_audit --rehearsal ^
+      --work-dir logs/chain_rehearsal --json ^
+      --out logs/evidence/phase33_evidence_chain_audit.json
+  ```
+
+- **故障定位口径**（业务方提交真实证据**前**的预检流程）：先跑 ①；若 `exit=5`，读 JSON 的
+  `earliest_failure_stage` 与对应段的 `reason_codes`——例如 `attestation` 段的
+  `ATTESTATION_STALE` / `CHAIN_INVALID_CANDIDATE` 说明"提交材料或凭证已漂移，需重新核验"，
+  `intake_receipt` 段的 `RECEIPT_ID_MISMATCH` 说明"收据与当前 plan/执行/复核不再一致"，
+  `decision_record` 段的 `RECORD_ID_MISMATCH` / `PACKET_CONTENT_MISMATCH` 说明"记录绑定的
+  packet 已变化"。修复该段后**必须重新生成下游 artifact**（旧结论绝不静默继承）再重跑；
+- 退出码：`0` 工程链全部 PASS（**不是**资格通过）/ `2` 参数或时区错误 /
+  `3` 路径不可用（inbox / 输出不可用、把输出写进 inbox、演练工作目录落在仓库非 `logs/` 之处）/
+  `4` artifact 损坏 / 被篡改 / 漂移或校验失败（fail-closed，零写入）/
+  `5` 证据链未走通（**当前预期**：缺真实证据 / 未人工核验）/ `6` 锁冲突；
+- 回归测试：`tests/unit/test_evidence_chain_audit.py`（44 项）+
+  `tests/integration/test_evidence_chain_audit_integration.py`（16 项），其中包含
+  「happy path（ready / blocked）8 段全 PASS」「每一关键绑定点的 tamper / stale / missing →
+  稳定原因码 + 最早失败阶段」「`chain_id` / `facts_digest` 确定性且漂移必变」
+  「工程链全绿仍 `data_qualification_passed=false` / `blocker_active=true`」
+  「审计与演练**零改写**、`--out` 只写报告本身、写进 inbox 被拒」
+  「演练工作目录**不得**污染仓库」「fresh subprocess 零副作用 + `--help` 冒烟」
+  「源码级守卫：审计 / 演练模块不 import 数据库 / 网络 / 子进程」等。
+
+
 ## 8. 数据模型
 
 
