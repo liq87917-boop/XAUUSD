@@ -122,6 +122,54 @@ Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任�
 - 启动日志只含 branch / HEAD / provider / model，**绝不打印 API Key 或任何凭据**；
   DeepSeek provider hard-pin 与 provider fail-fast 语义保持不变。
 
+## 2.5 GPT Planner / Executor 职责边界与只读项目快照（GOLD-023）
+
+- **角色唯一性（不可协商）**：GPT 是**唯一**的 **Planner / Reviewer / Architect**；
+  Cline 与 DeepSeek 一律只是 **Executor**。Executor 只能消费**已被批准**的
+  `.ai/tasks/<task>.json`，不得成为 planner 或 reviewer。
+- **Executor 明确禁止**（任一命中即属越权，必须停线并请求 GPT）：
+  - 生成 / 拆分 / 追加 follow-on task，或自行补齐 rolling queue（`generate_follow_on_task`、
+    `refill_rolling_queue`）；
+  - 修改 `.ai/PROJECT_STATE.json`（含 `current_task` / `last_completed_task` /
+    `last_reviewed_task` 指针、`blockers`、`task_queue`、`queue_status`）；
+  - 决定 Phase 切换（`decide_phase`）；放宽 / 改写 task 的 `acceptance`
+    （`loosen_acceptance`）；跨越 L3 / L4 Human Gate（`cross_human_gate`）；
+  - 自我 Review 自己的 task（`review_task_result`）或自我提升为 planner
+    （`self_promote_to_planner`，架构变更同理属于 Architect 权限）。
+- **Executor 允许能力（白名单，其余一律拒绝）**：`consume_approved_task`、
+  `run_validation`、`report_task_result`、`recover_interrupted_worktree`（§2.4）、
+  `request_planner_decision`。**未知能力 fail-closed**：未登记不等于许可。
+- **机器可测试契约**：`orchestrator/planner_snapshot.py` 导出
+  `role_contract()`（`schema=gold-ai/role-contract/v1`，含 `planner_only_decisions` +
+  `planner_decision_guards` + 全部 `executor_can_* = false`）与
+  `executor_capability(capability) -> (allowed, reason)` / `executor_allowed(capability)`。
+  任何「Executor 可以规划 / 改状态 / 决定 Phase」的改动都会让契约测试直接失败。
+- **Planner 的确定性输入（只读）**：GPT 每次规划前用
+
+  ```text
+  python -m orchestrator.planner_snapshot            # 快照写 stdout（纯 ASCII JSON）
+  ```
+
+  读取 `schema=gold-ai/planner-snapshot/v1` 快照：`PROJECT_STATE`（原样回显）+
+  非终态 task（依赖 / `human_gate` / readiness 与原因）+ result 终态
+  （`terminal` / `unresolved` / `unknown` / `missing_results`）+
+  最近 reviewed/completed 指针 vs `latest_terminal_result` + 安全 Gate
+  （blockers、`invariants`、L3/L4 等待项）+ `role_contract`。
+- **一致性诊断（只报告，绝不自动修复）**：`issues` 使用稳定 code ——
+  `PROJECT_STATE_POINTER_BEHIND_RESULTS`（指针落后于 results，例如 state 仍 GOLD-017/018
+  而 results 已到 GOLD-020）、`PROJECT_STATE_POINTER_AHEAD_OF_RESULTS` /
+  `_MISSING` / `_UNKNOWN_TASK`、`QUEUE_DECLARATION_MISMATCH`（`task_queue` 声明与真实
+  非终态任务不一致 / 含已终态 / 顺序不符）、`QUEUE_TASK_MISSING`、`UNKNOWN_RESULT_STATUS`、
+  `TASK_FILE_INVALID`、`TASK_METADATA_INVALID`、`DEPENDENCY_GRAPH_INVALID`、
+  `GATE_INCONSISTENT`、`QUEUE_GATE_STALLED`（ACTIVE 队列却在 L3/L4 处停线，warning）、
+  `BLOCKER_STATE_INCONSISTENT`、`SAFETY_INVARIANT_MISSING`、`PROJECT_STATE_UNREADABLE`。
+  退出码：`0` 无漂移 / `2` 检出漂移 / `3` `PROJECT_STATE` 不可读。
+- **只读保证**：快照**绝不写** `.ai/PROJECT_STATE.json`、`.ai/tasks/**`、`.ai/results/**`
+  （模块内不存在任何写入路径，并有源码守卫测试锁定）；发现漂移时**只报告**，
+  由 GPT 决定如何修正状态指针、补队列或进入下一 Phase。
+- **边界不变**：§2.5 不改变 Phase 3.3 blocker、数据资格 Gate、Human Gate 档位、
+  `LIVE_TRADING` 或外部订单开关；快照只读，不与 §2.1 rolling queue、§2.4 恢复状态机冲突。
+
 ## 3. 恢复任务命名
 
 原任务失败或阻塞后不得修改既有审计历史。

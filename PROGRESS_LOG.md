@@ -3872,3 +3872,79 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
 - snapshot 记录 tracked patch + untracked 内容：恢复不重建原来的 staged 状态（已在 §2.4 注明）；
 - 建议下一步：按队列继续 GOLD-023（GPT planner / executor 边界契约）。
 
+
+## 第八十六轮（2026-09-23）：GOLD-023 —— GPT Planner 只读项目快照与职责边界契约
+
+### 1. 背景
+
+- GPT 是**唯一**的 Planner / Reviewer / Architect；Cline / DeepSeek 只是 Executor。
+  但在 GOLD-017/018 期间真实出现过「`.ai/PROJECT_STATE.json` 指针落后于 `.ai/results/**`」
+  与「rolling queue 的 `task_queue` 声明与真实非终态任务漂移」：规划依据与实际仓库状态不一致，
+  而当时没有任何**机器可读、只读、确定**的快照来暴露这件事。
+- 本轮只建 **handoff / diagnostic 契约**，不接入任何新的模型 / 供应商 API，
+  也不把 GPT 的规划权下放到本地模型。
+
+### 2. 交付内容
+
+- `orchestrator/planner_snapshot.py`（新增，**纯只读**）：
+  - `build_planner_snapshot(...)`：汇总 `PROJECT_STATE`（原样回显）+ 非终态 task
+    （依赖 / `human_gate` / `auto_start` / `requires_human_approval` / readiness 与原因）
+    + result 终态（`terminal` / `unresolved` / `unknown` / `missing_results`）
+    + 最近 reviewed/completed 指针 vs `latest_terminal_result` + 安全 Gate
+    （blockers / invariants / L3、L4 等待项）+ `role_contract`，输出
+    `schema=gold-ai/planner-snapshot/v1`；所有列表按**确定性任务序**排序
+    （项目自身前缀例如 `GOLD` 视为最新，避免 `TEST-002` 这类历史任务被误判成最新结果）。
+  - 一致性诊断 `issues`（稳定 code，**只报告不修复**）：`PROJECT_STATE_POINTER_BEHIND_RESULTS`
+    / `_AHEAD_OF_RESULTS` / `_MISSING` / `_UNKNOWN_TASK`、`QUEUE_DECLARATION_MISMATCH`、
+    `QUEUE_TASK_MISSING`、`UNKNOWN_RESULT_STATUS`、`TASK_FILE_INVALID`、
+    `TASK_METADATA_INVALID`、`DEPENDENCY_GRAPH_INVALID`、`GATE_INCONSISTENT`、
+    `QUEUE_GATE_STALLED`（warning）、`BLOCKER_STATE_INCONSISTENT`、
+    `SAFETY_INVARIANT_MISSING`、`PROJECT_STATE_UNREADABLE`；同码同因去重后稳定排序。
+  - `role_contract()` / `executor_capability()` / `executor_allowed()`：机器可测试的职责边界；
+    Executor 只有白名单能力（`consume_approved_task` / `run_validation` /
+    `report_task_result` / `recover_interrupted_worktree` / `request_planner_decision`），
+    **未登记能力一律 fail-closed 拒绝**；`planner_decision_guards` 把每条 planner-only 决策
+    绑定到拦住它的禁止能力。
+  - 语义只复用 `ai_orchestrator`（queue / readiness / 依赖图 / 状态词表）：
+    通过 `orchestrator_view()` 临时重定向只读视图并**必定还原**，不复制第二套实现。
+  - CLI：`python -m orchestrator.planner_snapshot [--root/--state/--tasks-dir/--results-dir/--generated-at]`，
+    `stdout` 是**纯 ASCII JSON**（机器通道，任意代码页安全），`stderr` 只放人类可读 issue 摘要；
+    退出码 `0` 无漂移 / `2` 检出漂移 / `3` `PROJECT_STATE` 不可读。
+- `tests/unit/test_ai_orchestrator_planner_snapshot.py`（**新增 57 项**，全部在 `tmp_path` 内，
+  对真实仓库零写入）：只读性（快照前后工作树 sha256 完全一致、两次构建完全一致、
+  渲染可 round-trip）/ 源码守卫（模块内不存在 `write_text` / `open(` / `mkdir` / `unlink` /
+  `rmtree` / `os.replace` / `subprocess` / 网络库与 `while` 循环）；本轮真实漂移场景
+  （state 仍 GOLD-017/018、results 已到 GOLD-020；以及当前仓库 GOLD-020/021 vs GOLD-022）
+  与指针 ahead / missing / unknown task；queue 声明不一致的 7 种形态（未声明 pending、
+  已终态仍在声明、声明缺文件、顺序不符、非法类型、ACTIVE 却无 pending、一致时不误报）；
+  未知 task / result status（`frobnicated`、缺 `status` 字段、损坏 result、损坏 task、
+  task_id 与文件名不一致、非法 `depends_on` / 非 bool `auto_start` / 未知 `human_gate`、
+  缺失依赖、依赖环）；Gate / blocker / 安全不变量一致性与 L3 停线 warning；职责边界契约
+  （planner 只属 GPT、禁止能力全拒、白名单允许、未知能力 fail-closed、flag 全 false）与
+  CLI（stdout/stderr 分流、退出码 0/2/3、子进程字节级稳定、默认读真实仓库且**零写入**）。
+- `.ai/DEVELOPMENT_PROTOCOL.md`：新增 §2.5「GPT Planner / Executor 职责边界与只读项目快照」。
+
+### 3. 实测结果（只读，未做任何修复）
+
+- 对**当前真实仓库**运行 `python -m orchestrator.planner_snapshot` 得到退出码 `2`，
+  检出 4 条漂移：`current_task=GOLD-021` 与 `last_completed_task` / `last_reviewed_task=GOLD-020`
+  落后于 `latest_terminal_result=GOLD-022`（3 条 `PROJECT_STATE_POINTER_BEHIND_RESULTS`），
+  以及 `task_queue=['GOLD-021','GOLD-022','GOLD-023']` 中 `GOLD-021/022` 已终态
+  （1 条 `QUEUE_DECLARATION_MISMATCH`）。
+- 快照**没有**修改 `.ai/PROJECT_STATE.json`、`.ai/tasks/**`、`.ai/results/**`
+  （测试用 sha256 逐文件验证；CLI 默认读真实仓库同样零写入）。
+
+### 4. 范围守规
+
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`src/**`、`database/**`；
+- 未改业务 Phase、数据资格 Gate、Human Gate 档位、`LIVE_TRADING` 或外部订单开关；
+  未新增任何依赖、未接入任何模型 / 供应商 API；Cline 未执行任何 git 写操作。
+
+### 5. 遗留 / 下一步
+
+- `PROJECT_STATE` 指针仍落后于 results（`GOLD-021/022` 已终态但 state 未更新）：
+  **按设计只报告、不自动修复**，是否更新状态指针 / 补 rolling queue 由 GPT 判断；
+- `TEST-001` / `TEST-002` 历史任务与 result 仍保留在队列目录中，快照已用「项目前缀优先」
+  的确定性排序避免其干扰 `latest_terminal_result` 判断；
+- 建议下一步：GPT 按快照输出决定队列补充与状态指针更新，并继续推进真实语料 Evidence 路径。
+
