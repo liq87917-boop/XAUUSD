@@ -39,6 +39,31 @@ POLL_SECONDS = int(
     )
 )
 
+QUEUE_TARGET_SIZE = max(
+    1,
+    int(
+        os.getenv(
+            "AI_QUEUE_TARGET_SIZE",
+            "3"
+        )
+    )
+)
+
+IDLE_LOG_SECONDS = max(
+    POLL_SECONDS,
+    int(
+        os.getenv(
+            "AI_IDLE_LOG_SECONDS",
+            "1800"
+        )
+    )
+)
+
+BLOCKING_HUMAN_GATES = {
+    "L3",
+    "L4"
+}
+
 DEFAULT_MAX_ATTEMPTS = int(
     os.getenv(
         "AI_MAX_ATTEMPTS",
@@ -674,6 +699,315 @@ def get_task_max_attempts(
 
 
 # ============================================================
+# Rolling Queue
+# ============================================================
+
+def get_task_dependencies(
+    task
+):
+
+    value = task.get(
+        "depends_on",
+        []
+    )
+
+    if value in (
+        None,
+        ""
+    ):
+        return []
+
+    if isinstance(
+        value,
+        str
+    ):
+        value = [
+            value
+        ]
+
+    if not isinstance(
+        value,
+        list
+    ):
+        raise ValueError(
+            "depends_on 必须是字符串或字符串数组"
+        )
+
+    task_id = str(
+        task.get(
+            "task_id",
+            ""
+        )
+    ).strip()
+
+    dependencies = []
+    seen = set()
+
+    for item in value:
+
+        dependency = str(
+            item
+        ).strip()
+
+        if not dependency:
+            raise ValueError(
+                f"{task_id}: depends_on 包含空任务 ID"
+            )
+
+        if dependency == task_id:
+            raise ValueError(
+                f"{task_id}: depends_on 不允许依赖自身"
+            )
+
+        if dependency in seen:
+            continue
+
+        seen.add(
+            dependency
+        )
+
+        dependencies.append(
+            dependency
+        )
+
+    return dependencies
+
+
+def get_task_human_gate(
+    task
+):
+
+    gate = task.get(
+        "human_gate"
+    )
+
+    if isinstance(
+        gate,
+        dict
+    ):
+        gate = gate.get(
+            "level"
+        )
+
+    if gate in (
+        None,
+        ""
+    ):
+        return None
+
+    return str(
+        gate
+    ).strip().upper()
+
+
+def task_result_status(
+    task_id
+):
+
+    existing_result = read_json(
+        result_path(
+            task_id
+        ),
+        default=None
+    )
+
+    if not existing_result:
+        return "pending"
+
+    status = str(
+        existing_result.get(
+            "status",
+            ""
+        )
+    ).strip().lower()
+
+    return (
+        status
+        or
+        "unknown"
+    )
+
+
+def evaluate_task_readiness(
+    task
+):
+
+    task_id = str(
+        task.get(
+            "task_id",
+            ""
+        )
+    ).strip()
+
+    auto_start = task.get(
+        "auto_start",
+        True
+    )
+
+    if auto_start is not True:
+
+        return (
+            False,
+            f"{task_id}: auto_start=false"
+        )
+
+    if task.get(
+        "requires_human_approval",
+        False
+    ) is True:
+
+        return (
+            False,
+            f"{task_id}: requires_human_approval=true"
+        )
+
+    gate = get_task_human_gate(
+        task
+    )
+
+    if (
+        gate
+        in
+        BLOCKING_HUMAN_GATES
+    ):
+
+        return (
+            False,
+            f"{task_id}: human_gate={gate}"
+        )
+
+    for dependency in get_task_dependencies(
+        task
+    ):
+
+        dependency_task = (
+            TASK_DIR
+            /
+            f"{dependency}.json"
+        )
+
+        if not dependency_task.exists():
+
+            return (
+                False,
+                f"{task_id}: dependency missing: {dependency}"
+            )
+
+        dependency_status = (
+            task_result_status(
+                dependency
+            )
+        )
+
+        if (
+            dependency_status
+            ==
+            "completed"
+        ):
+            continue
+
+        if (
+            dependency_status
+            ==
+            "blocked"
+        ):
+
+            return (
+                False,
+                f"{task_id}: dependency blocked: {dependency}"
+            )
+
+        return (
+            False,
+            (
+                f"{task_id}: dependency not completed: "
+                f"{dependency}={dependency_status}"
+            )
+        )
+
+    return (
+        True,
+        "ready"
+    )
+
+
+def queue_snapshot():
+
+    pending = []
+
+    for task_file in sorted(
+        TASK_DIR.glob(
+            "*.json"
+        )
+    ):
+
+        try:
+
+            task = load_task(
+                task_file
+            )
+
+        except Exception:
+            continue
+
+        task_id = task[
+            "task_id"
+        ]
+
+        status = task_result_status(
+            task_id
+        )
+
+        if status in {
+            "completed",
+            "blocked"
+        }:
+            continue
+
+        pending.append(
+            task_id
+        )
+
+    return {
+        "pending":
+            pending,
+
+        "count":
+            len(
+                pending
+            ),
+
+        "target":
+            QUEUE_TARGET_SIZE
+    }
+
+
+def should_log_idle(
+    last_logged_at,
+    current_time=None
+):
+
+    now = (
+        time.monotonic()
+        if current_time is None
+        else current_time
+    )
+
+    return (
+        last_logged_at
+        is None
+        or
+        (
+            now
+            -
+            last_logged_at
+        )
+        >=
+        IDLE_LOG_SECONDS
+    )
+
+
+# ============================================================
 # Task 读取
 # ============================================================
 
@@ -732,7 +1066,7 @@ def load_task(
 # 查找下一个任务
 # ============================================================
 
-def find_next_task():
+def find_next_task_with_reason():
 
     tasks = sorted(
         TASK_DIR.glob(
@@ -762,27 +1096,10 @@ def find_next_task():
             task["task_id"]
         )
 
-        existing_result = read_json(
-            result_path(task_id),
-            default=None
+        status = task_result_status(
+            task_id
         )
 
-        # 没有 result：
-        #
-        # pending
-        #
-        if not existing_result:
-
-            return task_file
-
-        status = str(
-            existing_result.get(
-                "status",
-                ""
-            )
-        ).lower()
-
-        # 终态
         if status in {
             "completed",
             "blocked"
@@ -790,22 +1107,37 @@ def find_next_task():
 
             continue
 
-        # 兼容旧结果
-        if status in {
-            "pending",
-            "running",
-            "failed"
-        }:
+        ready, reason = (
+            evaluate_task_readiness(
+                task
+            )
+        )
 
-            return task_file
+        if not ready:
 
-        # 未知状态
-        #
-        # 保守交给 process_task
-        #
-        return task_file
+            return (
+                None,
+                reason
+            )
 
-    return None
+        return (
+            task_file,
+            "ready"
+        )
+
+    return (
+        None,
+        "queue empty"
+    )
+
+
+def find_next_task():
+
+    task_file, _ = (
+        find_next_task_with_reason()
+    )
+
+    return task_file
 
 
 # ============================================================
@@ -1894,7 +2226,7 @@ def process_task(
             task_id
         )
 
-        return
+        return "blocked"
 
     # ========================================================
     # 输出任务信息
@@ -1946,7 +2278,7 @@ def process_task(
                 line
             )
 
-        return
+        return "deferred"
 
     attempts = list(
         prior_attempts
@@ -2140,7 +2472,11 @@ def process_task(
                     task_id
                 )
 
-            return
+            return (
+                "completed"
+                if pushed
+                else "push_pending"
+            )
 
         # ====================================================
         # FAILED
@@ -2309,7 +2645,7 @@ def process_task(
             max_attempts
         )
 
-        return
+        return "blocked"
 
 
 # ============================================================
@@ -2677,8 +3013,20 @@ def main():
     )
 
     _logger.info(
+        "Queue target: %s task(s)",
+        QUEUE_TARGET_SIZE
+    )
+
+    _logger.info(
+        "Idle log: %ss",
+        IDLE_LOG_SECONDS
+    )
+
+    _logger.info(
         ""
     )
+
+    last_idle_log_at = None
 
     # ========================================================
     # Main Loop
@@ -2706,21 +3054,71 @@ def main():
                 # Task
                 # ============================================
 
-                task_file = (
-                    find_next_task()
-                )
+                (
+                    task_file,
+                    wait_reason
+                ) = find_next_task_with_reason()
 
                 if task_file:
 
-                    process_task(
+                    outcome = process_task(
                         task_file
                     )
 
+                    last_idle_log_at = None
+
+                    if (
+                        outcome
+                        ==
+                        "completed"
+                    ):
+
+                        _logger.info(
+                            "Rolling queue: "
+                            "checking next task immediately."
+                        )
+
+                        continue
+
                 else:
 
-                    _logger.info(
-                        "No new task..."
-                    )
+                    now = time.monotonic()
+
+                    if should_log_idle(
+                        last_idle_log_at,
+                        current_time=now
+                    ):
+
+                        snapshot = (
+                            queue_snapshot()
+                        )
+
+                        pending_preview = (
+                            ", ".join(
+                                snapshot[
+                                    "pending"
+                                ][:
+                                    QUEUE_TARGET_SIZE
+                                ]
+                            )
+                            or
+                            "-"
+                        )
+
+                        _logger.info(
+                            "No runnable task. "
+                            "pending=%s/%s [%s] | %s",
+                            snapshot[
+                                "count"
+                            ],
+                            snapshot[
+                                "target"
+                            ],
+                            pending_preview,
+                            wait_reason
+                        )
+
+                        last_idle_log_at = now
 
                 # ============================================
                 # Sleep
