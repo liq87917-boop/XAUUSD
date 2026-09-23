@@ -1,0 +1,57 @@
+{
+  "task_id": "GOLD-030",
+  "type": "INTEGRATION_GUARD",
+  "title": "建立 Phase 3.3 Evidence Chain 端到端防漂移验收",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-029"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把现有 Phase 3.3 证据链从 intake handoff、人工 attestation、review、approved list/intake plan、receipt/recheck、decision packet 到 L3 decision record 做成一条可重复、纯本地、fail-closed 的端到端验收链，确保真实证据到来时不会因跨模块契约漂移才暴露问题。",
+  "requirements": [
+    "新增只读 evidence chain audit/rehearsal 入口，复用现有模块而不是复制资格规则；对 GOLD-027→028→029→intake plan→receipt/recheck→decision packet→decision record 的 artifact identity/schema/content binding 做逐段验证并输出稳定 stage/status/reason code。",
+    "提供 deterministic chain_id/facts_digest 或等价内容身份；任一阶段 package fingerprint、attestation、review revision、plan_id、receipt_id、recheck、packet_id、decision record 发生不匹配时必须 fail-closed，并明确最早失败阶段。",
+    "默认只读、零网络、零数据库写入；测试/演练只使用 fixture/tmp_path/Mock operator result，不得把 fixture/Mock 声称为真实资格证据，不得真实落库或调用交易代码。",
+    "输出必须明确区分 engineering_chain_ready、real_evidence_missing、human_verification_missing、l3_human_gate_pending；即使工程链全部 PASS，也必须保持 data_qualification_passed=false、phase_transition_allowed=false、blocker_active=true，除非未来由既有真实资格链与人工 Gate 独立改变。",
+    "新增端到端测试覆盖 happy-path fixture 以及每一关键绑定点的 tamper/stale/missing 场景，并断言历史 artifact 不被改写、CLI fresh subprocess 零副作用、安全开关不漂移。",
+    "在 README/PROGRESS_LOG 提供面向 operator 的单一 rehearsal 命令和故障定位说明，使业务方在提交真实证据前可先验证工具链健康。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "src/evidence/**",
+      "src/monitoring/**",
+      "scripts/evidence_*.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      "README.md",
+      "TECH_DEBT.md",
+      "PROGRESS_LOG.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**"
+    ]
+  },
+  "constraints": [
+    "不得用 fixture/Mock rehearsal 解除 PHASE3_3_DATA 或产生真实 L3 approve；演练只证明工程链契约一致。",
+    "不得新增真实数据源、网络采集、外部模型 API、数据库写入、Phase 3.4/Alpha/交易逻辑。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false；L3/L4 只能人工决策。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "单一 rehearsal/audit 能从头到尾验证 Phase 3.3 证据 artifact 绑定，并在任一漂移处给出确定性失败阶段和原因。",
+    "工程链全绿仍不会把 Mock/fixture 当真实资格，不会自动解除 blocker 或越过 L3/L4。",
+    "全量 pytest/ruff/mypy 通过；对真实仓库/数据库/原始 evidence 零副作用。"
+  ]
+}
