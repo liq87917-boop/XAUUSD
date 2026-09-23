@@ -1,0 +1,40 @@
+{
+  "task_id": "GOLD-038",
+  "type": "CONTROL_PLANE_PLANNER_CONCURRENCY_GUARD",
+  "title": "建立 GPT Planner 写队列前的远端 HEAD 并发保护事实包",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-037"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "为 GPT 云端补队列建立确定性的只读并发保护：在任何 planner-owned task/state 写入前提供 observed remote HEAD、queue/state digest 与 stale 判断所需事实，避免 GPT 与 Executor 同时 push 时覆盖刚完成的工作；Executor 仍无规划或写 task/state 权限。",
+  "requirements": [
+    "新增只读 planner mutation precondition builder/CLI，复用现有 planner_snapshot/refill/review binding 的事实与 digest，不复制任务资格算法。",
+    "输出至少包含 branch、observed_head_sha、queue_head、task_queue、state blob/digest、tasks digest、results digest、refill facts digest、formal review backlog pointer，以及稳定 precondition_digest。",
+    "支持调用方传入 expected_head_sha；若与当前 observed_head_sha 不一致必须 fail-closed 标记 STALE_REMOTE_HEAD，并明确禁止 planner mutation；不得自动 merge/rebase/force push。",
+    "若 state 声称 current_task/last_completed 与 results/HEAD 事实漂移，必须输出稳定 reason_codes 并禁止 planner mutation，直到 GPT 基于最新 HEAD 重新读取事实。",
+    "默认零写入；如支持 --output 仅允许 .ai/runtime/** 或系统临时目录；禁止写 .ai/tasks、.ai/results、PROJECT_STATE、GPT_REVIEW_LEDGER。",
+    "加入并发回归：Executor completion push 发生在 planner snapshot 之后时旧 precondition 必须失效；重新读取最新 HEAD 后可重新生成有效事实包。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行已批准任务，不得生成任务、修改 planner state 或签发 review verdict。",
+    "只允许 fast-forward-safe 的事实验证语义；不得引入 force push、自动冲突覆盖或隐藏远端变化。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "不得生成或推断 Author/News 授权、published_at、collected_at、effective_at、availability 或 OOS 证据。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 能在写队列前用单个确定性事实包确认远端 HEAD 未变化；任何 stale/mismatch 都 fail-closed 且要求重新读取。",
+    "Executor 无任何 task/state/ledger 写入或 Planner 权限提升；并发保护不会阻塞已批准任务正常执行。",
+    "全量 pytest/ruff/mypy 通过；Phase 3.3 blocker、L3/L4 与交易安全边界不变。"
+  ]
+}
