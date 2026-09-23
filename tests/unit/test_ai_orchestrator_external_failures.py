@@ -82,6 +82,17 @@ def test_success_has_no_failure_class() -> None:
     ) == ("none", None)
 
 
+def test_provider_fatal_stderr_wins_even_with_zero_exit_code() -> None:
+    assert orch.classify_cline_failure(
+        {
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "insufficient_credits",
+            "timed_out": False,
+        }
+    ) == ("non_retryable_external", "INSUFFICIENT_BALANCE")
+
+
 def test_cline_args_pin_provider_without_exposing_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
