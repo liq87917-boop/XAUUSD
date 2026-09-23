@@ -68,6 +68,7 @@ Strategy 事实，不进入实盘。
 | **Evidence Qualification L3 人工决策记录**（GOLD-016：`scripts/evidence_decision_record.py` 把**人工显式**给出的 `approve` / `reject` / `needs_changes` 绑定到**具体**的 GOLD-015 packet（`packet_id` + 内容摘要 `content_sha256` + 产物摘要 `artifact_sha256`），生成**确定性、脱敏、内容寻址**（`record_id`）的决策记录 —— packet **逐项**完整性核验（文档身份 / schema / 契约版本 / 安全字段不可被削弱 / 缺口与检查**算术可重算** / 三个布尔必须等于 `submit_to_l3_human_gate` 的合取 / readiness 快照**指纹同源** / 收据与 `receipt_verified` 往返一致 / recheck 与 `qualification_recheck_ready` 合取一致 / 批准与执行计数自洽 / `verification.violations` 必须为空 / **递归禁止任何证据时间键** / **禁止未来时间**）任一不一致 → **fail-closed**（稳定原因码 + 零写入）；`approve` **只**允许落在 packet 本身 `submit_to_l3_human_gate=true` 且完整性核验通过时（BLOCKED → `PACKET_NOT_SUBMITTABLE`，退出 `5`），`reject` / `needs_changes` 可记录但**绝不**改变任何资格状态；`human_decision_recorded` / `human_decision` / `packet_verified` 三个事实独立，`data_qualification_passed` / `phase_transition_allowed` / `phase_transition_executed` **恒为** false、`blocker_active` / `human_gate_required` 恒为 true、`human_gate_level` 恒为 `L3`（**硬编码**）；`record_id` **不含**任何审计时间（同 packet + 同人工决策幂等、同审计时点逐字节稳定），写下的记录**绝不**被静默覆盖（覆盖必须显式 `--revision` + `--supersedes`）；`--verify-record` 提供**防伪核验**（重新推导 `record_id`、与**当前** packet 比对 `packet_id` / 内容摘要、判定当初的 `approve` 是否仍成立）；人工身份只接受**非敏感 label**（不采集凭据），note / reason-code 一律脱敏 + 限长，`decision_at` / `generated_at` **绝不当证据时间**；只有显式 `--out` 才**原子**落盘记录本身（先取单实例锁）；**绝不写数据库、绝不调用 intake / commit、绝不修改 `PROJECT_STATE`、零网络**；`PHASE3_3_DATA` **保持 BLOCKED**） | `src/evidence/decision_record.py`、`scripts/evidence_decision_record.py` |
 | **Evidence 本地 Package / Manifest Builder**（GOLD-017：`scripts/evidence_package.py` 把**人工显式**给出的 `evidence_type` / `source` / `authorization_reference` / `time_semantics` / `availability_semantics` / `historical_oos_applicable` 与**人工指定**的现有 evidence 文件（package 目录内**单级**文件名）整理成 GOLD-011 inbox 可直接消费的 `manifest.json` —— 字段 / 允许键 / 必填项 / 格式词表**复用** GOLD-011 契约（`MANIFEST_REQUIRED_FIELDS` / `ALLOWED_MANIFEST_KEYS` / `FILE_ENTRY_REQUIRED_FIELDS` / `SUPPORTED_FILE_FORMATS`）与 `evidence-intake-v1`，**不复制、不降低**任何规则；每个文件按**原始字节**计算 SHA-256，`manifest.files` 按规范化相对路径**确定性排序**（同输入 → **byte-stable**，manifest 里**没有任何时间字段**，绝不用 mtime / 当前时间充数）；**默认 dry-run 零写入**，只有显式 `--out` 才写，且**必须正好**是 `<package-dir>/manifest.json`（先取单实例锁 → **原子写** → **写后复读自检**），既有 manifest **逐字节一致** → 幂等、**内容不同** → `MANIFEST_CONFLICT` fail-closed（**没有** `--force` / `--overwrite`，更正必须新建 package 目录）；写盘前先做与 GOLD-005 / GOLD-011 **同源**的本地逐行预检（`read_input_file` + `assess_row`）并输出 `accepted` / `quarantined` / `not_oos_eligible` 与稳定原因码；绝对路径 / `..` / 多级路径 / 符号链接 / 目录 / `manifest.json` 自引用 / 未支持格式 / 重复或大小写冲突路径 / 包内未声明文件 / 示例或合成名称 / 敏感值（凭据键名、疑似 blob、可被脱敏规则命中的取值）一律 **fail-closed**；**绝不**移动 / 删除 / 改写原始 evidence、**绝不**自动 intake、**绝不**写数据库、零网络，四个安全字段恒定，`PHASE3_3_DATA` **保持 BLOCKED**） | `src/evidence/package_builder.py`、`scripts/evidence_package.py` |
 | **Evidence Approved-for-Explicit-Intake Intake Plan 与最终写入前门禁**（GOLD-013：`scripts/evidence_intake_plan.py` 把 GOLD-012 的批准清单与**当前** inbox / review ledger **重新绑定核验** —— 清单结构自洽（文档标识 / schema / 契约版本 / 计数与列表长度一致 / 安全字段与 `approval_scope` 不可被削弱 / **不得**出现证据时间字段）、每条批准必须**当前仍是** ledger 上该指纹的**最新有效**决策（`review override` 后旧批准失效）、候选**当前仍在** inbox 且仍 `PREFLIGHT_PASS` 且非合成、清单与"用当前 inbox + ledger 重新算出的批准集合"完全一致；任一不一致 → **fail-closed**（退出码 `4`、**零写入**）；输出**确定性脱敏**、**内容级** `plan_id`（不含 `generated_at`；同输入同 `plan_id`、同审计时点逐字节稳定）的**只读**计划，`approved_for_explicit_intake` 与 `data_qualification_passed` 是两个独立字段（后者恒 false、`data_qualification_passed_count` 恒 0）；只有显式 `--out` 才**原子**落盘计划本身（先取单实例锁），`handoff` 只给**字符串**命令模板（必带 `--no-dry-run` 与显式 `--input`），`auto_intake_allowed` / `writes_database` 恒 false、`requires_explicit_operator_action` 恒 true；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除原始 evidence、零网络**；四个安全字段恒定，**不解除** `PHASE3_3_DATA`） | `src/evidence/intake_plan.py`、`scripts/evidence_intake_plan.py` |
+| **包边界惰性导出与 Import-Order 门禁**（GOLD-018：修复 `import src.monitoring` → `import src.evidence` 时 `src.evidence.__init__` eager 导入整个依赖图（`decision_packet` → `readiness_runner` → `handoff` → `src.monitoring.evidence_readiness`）造成的**初始化期循环导入** `ImportError: cannot import name 'BatchQuantification' from partially initialized module`；改为 **PEP 562 惰性导出**：包初始化阶段不加载任何子模块，惰性表只登记 `公开名 -> 定义子模块`（**不复制**任何类 / 阈值 / 枚举 / 常量），`__all__` 与既有 `from src.evidence import X` / `from src.monitoring import Y` / `from src.<pkg> import <子模块>` 用法**完全兼容**；**不改**资格算法 / 阈值 / 证据契约 / 安全字段，`PHASE3_3_DATA` **保持 BLOCKED**） | `src/evidence/__init__.py`、`src/monitoring/__init__.py`、`tests/unit/test_lazy_package_exports.py`、`tests/integration/test_evidence_import_order.py`、`tests/integration/test_evidence_cli_smoke.py` |
 
 
 **当前阻塞（需要真实数据，不得用 Mock 绕过）**：作者侧只有 11 条观点，31 个评价行全部因
@@ -1413,8 +1414,40 @@ Phase 切换仍需 `.ai/DEVELOPMENT_PROTOCOL.md` 的 **L3 人工确认**并由�
   --out logs/evidence/inbox/vendor-author-2026-06/manifest.json
 
 # ① GOLD-011：真实 scanner 只读预检 → 交付**人工确认队列**
+
 .\.venv\Scripts\python.exe -m scripts.evidence_inbox --inbox-dir logs/evidence/inbox --json
 ```
+
+### 包边界与导入顺序（`src/evidence/__init__.py` / `src/monitoring/__init__.py`，GOLD-018）
+
+> **合规红线**：本项**只治理包边界**（模块导入顺序），不改任何资格算法 / 阈值 / 证据契约 /
+> 安全字段 / L3 / L4 Gate；`PHASE3_3_DATA` **保持 BLOCKED**（见 TD-60）。
+
+- **修复的真实缺陷**（GOLD-017 任务外发现，纯净 HEAD 复现）：
+
+  ```text
+  .\.venv\Scripts\python.exe -c "import src.monitoring; import src.evidence"
+  ImportError: cannot import name 'BatchQuantification' from partially initialized module
+  'src.monitoring.evidence_readiness' (most likely due to a circular import)
+  ```
+
+  旧版两个包的 `__init__` 在**包初始化阶段**就 eager import 整个依赖图
+  （`src.evidence.__init__` → `decision_packet` → `readiness_runner` → `handoff` →
+  `src.monitoring.evidence_readiness` → `src.evidence.contracts`），于是"先导入谁"决定成败：
+  monitoring-first 必崩、evidence-first 正常；
+- **修复方式**：两个包的 `__init__` 改为 **PEP 562 惰性导出**（模块级 `__getattr__` + `__dir__`），
+  初始化阶段**不加载任何子模块**；惰性表只登记 `公开名 -> 定义子模块`（别名单独登记），
+  **不复制**任何类 / 阈值 / 枚举 / 常量，单一事实源仍是各子模块。`__all__` 未变，
+  以下既有用法**完全保持可用**：`from src.evidence import EvidenceIntakeReport`、
+  `from src.monitoring import PHASE3_3_BLOCKER_CODE`、`from src.evidence import decision_packet`、
+  `import src.monitoring` 后再取任意公开属性；
+- **门禁（已由测试锁定）**：任意导入顺序（monitoring-first / evidence-first / 直接子模块 first /
+  from-import / star-import / 重复与交错导入）在 **fresh subprocess** 中全部成功，且包初始化不再
+  拉入对方包（`tests/integration/test_evidence_import_order.py`）；`__all__` 与惰性表同源、每个
+  公开名 `is` 其定义子模块上的对象、源码级禁止 eager 子模块导入
+  （`tests/unit/test_lazy_package_exports.py`）；12 个 `scripts/evidence_*.py` +
+  `scripts/intake_evidence.py` + `scripts/report_collector_health.py` 均可 import + `--help`
+  可用，且 cwd 为空的临时目录 → 断言**零文件写入**（`tests/integration/test_evidence_cli_smoke.py`）。
 
 ## 8. 数据模型
 

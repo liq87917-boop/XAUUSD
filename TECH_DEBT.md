@@ -1083,6 +1083,53 @@
   永不移动 / 删除 / 改写原始证据、永不自动 intake、永不静默覆盖既有 manifest、永不自动解除
   blocker；永不因代码完成、模板、Mock 测试或"manifest 已生成"解除 `PHASE3_3_DATA`。
 
+### TD-60 monitoring ↔ evidence 包边界的导入顺序（P1，已修复，2026-09-23，GOLD-018）
+
+- **已修复的真实缺陷**（GOLD-017 任务外发现，并在**纯净 HEAD** 复现）：
+
+  ```text
+  .venv\Scripts\python.exe -c "import src.monitoring; import src.evidence"
+  ImportError: cannot import name 'BatchQuantification' from partially initialized module
+  'src.monitoring.evidence_readiness' (most likely due to a circular import)
+  ```
+
+  根因是**包边界**问题而非业务逻辑问题：两个包的 `__init__` 都在**包初始化阶段** eager import
+  整个依赖图 —— `src.evidence.__init__` → `decision_packet` → `readiness_runner` → `handoff` →
+  `src.monitoring.evidence_readiness` → `src.evidence.contracts`。两条链在"先导入谁"不同时会踩到
+  **尚未初始化完**的模块：monitoring-first 必崩、evidence-first 正常（同一份代码）。
+- **修复方式（只改模块边界，不改业务语义）**：`src/evidence/__init__.py` 与
+  `src/monitoring/__init__.py` 改为 **PEP 562 惰性导出**（模块级 `__getattr__` + `__dir__`），
+  包初始化阶段**不加载任何子模块**；惰性表只登记 `公开名 -> 定义子模块`（别名单独登记），
+  **不复制**任何类 / 阈值 / 枚举 / 常量，单一事实源仍是各子模块。`__all__` 逐字节未变，
+  `from src.evidence import X` / `from src.monitoring import Y` / `from src.<pkg> import <子模块>` /
+  `import src.<pkg>` 后取属性的既有用法**全部保持可用**。
+- **关键保证（已由测试锁定）**：
+  1. **任意导入顺序稳定**：monitoring-first / evidence-first / 直接子模块 first / from-import /
+     star-import / 重复与交错导入在 **fresh subprocess** 中全部成功，且不再出现循环导入签名
+     （`tests/integration/test_evidence_import_order.py`）；
+  2. **包初始化不再加载依赖图**：`import src.evidence` 不得拉入 `src.monitoring`；
+     `import src.monitoring` 不得拉入 `src.evidence.handoff` / `decision_packet`（同一文件）；
+  3. **零语义漂移**：`__all__` 与惰性表同源、每个公开名 `is` 其定义子模块上的对象（**禁止第二份
+     事实源**）、未登记名字抛 `AttributeError`、既有公开导出见证仍在
+     （`tests/unit/test_lazy_package_exports.py`）；
+  4. **CLI 门禁**：`scripts/evidence_*.py`（12 个）+ `scripts/intake_evidence.py` +
+     `scripts/report_collector_health.py` 在 fresh subprocess 里可 import、`--help` 可用，
+     且 cwd 为**空**临时目录 → 断言零文件写入 / 零网络 / 零数据库
+     （`tests/integration/test_evidence_cli_smoke.py`）；
+  5. **源码级守卫**：两个包的 `__init__` 模块级**只允许** `__future__` / `importlib` / `typing`
+     （防止有人把 eager 子模块导入写回来）。
+- **剩余边界（本条目跟踪）**：
+  1. 惰性导出把"包初始化即暴露全部名"改为"首次访问才 import 其定义子模块"（解析后缓存进模块
+     字典，后续零额外开销）；这要求子模块导入**无环** —— 现状成立并由上述用例锁定；
+  2. 惰性表与 `__all__` 仍需**人工同步**：新增公开导出必须同时更新两处；漏更新会被单元门禁当场
+     抓住（`set(__all__) == set(_LAZY_EXPORTS)`），但仍属人工纪律；
+  3. 本次**只修包边界**：未改 `evidence-intake-v1`、`PHASE3_3_DATA` 阈值、readiness 算术、
+     安全字段、L3/L4 Gate、`LIVE_TRADING` / 外部订单设置；`PHASE3_3_DATA` **仍 BLOCKED**；
+  4. GOLD-005 ~ GOLD-017 的人工路径与 fail-closed 语义不变：导入顺序修复**不构成**任何资格推进，
+     也不减少任何人工 Gate。
+- **不变量**：两个包的 `__init__` 永不 eager import 子模块；惰性表永不复制业务对象；
+  永不因代码完成 / 导入变快 / 测试通过解除 `PHASE3_3_DATA`。
+
 ---
 
 ## 4. 已知限制（设计取舍，非缺陷）
@@ -1141,4 +1188,6 @@
 | L3 人工决策包（2026-09-23，GOLD-015） | 新增 `src/evidence/decision_packet.py`（**纯本地只读**的 L3 人工决策包：`DecisionPacketStatus` / `PacketVerificationCode`（13 个稳定原因码；与 GOLD-014 同义的核验失败**沿用**其稳定原因码）/ `PacketViolation` / `HandoffDocument`（GOLD-008 handoff 严格只读视图：文档标识 / schema / 契约版本 / 安全字段 / `thresholds` 必须等于当前唯一来源 / 缺口与检查**算术自洽** / 拒绝任何证据时间键）/ `ReadinessStateDocument`（GOLD-010 `readiness_state.json` 只读视图；必须与 handoff **同源**）/ `ReceiptDocument`（GOLD-014 收据只读视图 + 内容寻址交叉核对）/ `DecisionPacket`（内容级 `packet_id`；五个布尔 + 安全字段恒定）；`load_handoff_document` / `load_readiness_state_document` / `load_intake_receipt_document` / `verify_decision_packet`（**复用** GOLD-013/014 的重新绑定口径，**不复制、不降低**任何资格规则）/ `build_decision_packet` / `compute_packet_id`（只由策略块 + handoff / readiness 摘要 + `plan_id` + 收据摘要 + recheck 摘要 + 五个布尔 + 状态派生，**不含** `generated_at`）/ `run_decision_packet`（默认只读；只有显式 `out_path` 才先取 GOLD-010 单实例锁再原子落盘 packet）/ `render_decision_packet_summary` / `exit_code_for`）+ `scripts/evidence_decision_packet.py`（`--handoff` / `--inbox-dir` / `--ledger` / `--approved-list` / `--plan` 必填、`--readiness` / `--receipt` / `--operator-result` / `--recheck` 可选、`--out` 唯一写开关、`--lock` / `--as-of` / `--json`；**没有**任何 intake / `--no-dry-run` 参数；退出码 `0` 可提交 L3 人工 Gate / `2` 参数 / `3` inbox 或输出不可用（含写进 inbox 的拒绝）/ `4` 任一输入缺失 / 损坏 / stale / 篡改或核验不通过（fail-closed，零写入）/ `5` 不可提交（预期 BLOCKED）/ `6` 锁冲突）；fail-closed 覆盖 handoff 结构 / 算术 / thresholds / 安全字段 / 证据时间键、readiness 快照不同源或指纹校验失败、plan stale / fingerprint drift / review override、执行结果缺失或被改写、recheck 缺失或早于执行或结论不一致、handoff stale（早于最近一次显式落库）、收据 `receipt_id` 不自洽或与当前重新绑定结果不一致、未来时间；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除 / 改写原始 evidence、零网络、零新增依赖 / migration**；`src/evidence/__init__.py` 导出新 API；新增 **83 项**测试（单元 71 + 集成 12，集成用例先跑**真实** operator 落库、**真实** recheck 与**真实** handoff 再核验决策包，含真实子进程 CLI 冒烟，全部临时目录 / 临时 SQLite / 零网络）；登记 **TD-57**；**未解除** `PHASE3_3_DATA`（决策包 ≠ 资格，Phase 切换仍须 L3 人工 Gate） |
 
 | 最终写入前 intake plan 门禁（2026-09-23，GOLD-013） | 新增 `src/evidence/intake_plan.py`（**纯本地只读**的 approved-for-explicit-intake **intake plan** 与最终写入前门禁：`IntakePlanStatus` / `PlanVerificationCode`（14 个稳定原因码）/ `PlanViolation` / `PlanEntry` / `OperatorHandoffStep` / `ApprovedListDocument`（批准清单严格只读视图：结构自洽 + 安全字段与 `approval_scope` 不可被削弱 + 拒绝任何证据时间字段）/ `IntakePlan`（内容级 `plan_id`、`handoff` 字符串模板、四个安全字段 + `auto_intake_allowed` / `writes_database` 恒为 false 硬编码）；`load_approved_intake_list` / `verify_intake_plan_inputs` / `build_intake_plan`（**复用** GOLD-012 的 `build_approved_intake_list` 做重新验证，**不复制、不降低**任何资格规则）/ `compute_plan_id`（只由策略块 + 批准条目 + ledger 最新决策摘要派生，**不含** `generated_at`）/ `intake_plan_handoff`（每个证据文件一条显式命令模板，必带 `--no-dry-run` 与显式 `--input`）/ `run_intake_plan`（默认只读；只有显式 `out_path` 才先取 GOLD-010 单实例锁再原子落盘计划）/ `render_intake_plan_summary` / `exit_code_for`）+ `scripts/evidence_intake_plan.py`（`--inbox-dir` / `--ledger` / `--approved-list` 必填、`--out` 唯一写开关、`--lock` / `--as-of` / `--json`；**没有**任何 intake / `--no-dry-run` 参数；退出码 `0` 有仍成立的批准 / `2` 参数 / `3` inbox 或输出不可用（含写进 inbox 的拒绝）/ `4` 清单或 ledger 损坏被篡改或核验不通过（fail-closed，零写入）/ `5` 无仍成立的批准（预期 BLOCKED）/ `6` 锁冲突）；fail-closed 覆盖 stale 指纹 / 候选消失 / preflight 回退 / review override / approved-list tamper / synthetic evidence / 计数与失效集合不一致 / 计划时间早于批准 / 损坏 state；**绝不写数据库、绝不调用 intake / commit、绝不移动 / 删除 / 改写原始 evidence、零网络、零新增依赖 / migration**；`src/evidence/__init__.py` 导出新 API；新增 **57 项**测试（单元 47 + 集成 10，含真实子进程 CLI 冒烟，全部临时目录 / 零网络 / 零数据库）；登记 **TD-55**；**未解除** `PHASE3_3_DATA`（计划 ≠ 资格，落库仍须人工**显式** `evidence_operator workflow --no-dry-run` + `handoff` / `recheck` + L3 人工 Gate） |
+| 包边界惰性导出与 Import-Order 门禁（2026-09-23，GOLD-018） | 修复 GOLD-017 任务外发现、纯净 HEAD 复现的 `src.monitoring` ↔ `src.evidence` **包初始化期循环导入**（`import src.monitoring` 后再进入 `src.evidence` 链 → `ImportError: cannot import name 'BatchQuantification' from partially initialized module 'src.monitoring.evidence_readiness'`；反向顺序却正常）：`src/evidence/__init__.py`（376 个公开名）/ `src/monitoring/__init__.py`（39 个公开名）改为 **PEP 562 惰性导出**（模块级 `__getattr__` + `__dir__`，包初始化阶段不加载任何子模块），惰性表只登记 `公开名 -> 定义子模块`（别名单独登记，**不复制**任何业务类 / 阈值 / 枚举 / 常量），`__all__` 逐字节未变、既有 `from src.evidence import X` / `from src.monitoring import Y` / `from src.<pkg> import <子模块>` 用法**完全兼容**；新增 **56 项**测试（单元 15 + 集成 41：9 种导入顺序的 fresh-subprocess 回归 + "包初始化不拉入对方包" + 公开名 `is` 同源 + 源码级禁止 eager 子模块导入 + 13 个证据 / 观测 CLI 的 import 与 `--help` 冒烟并以空 cwd 断言零写入）；登记 **TD-60**；**未改**任何资格算法 / 阈值 / 证据契约 / 安全字段，`PHASE3_3_DATA` **保持 BLOCKED** |
+
 

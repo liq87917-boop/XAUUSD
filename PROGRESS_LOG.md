@@ -3591,3 +3591,106 @@ manifest、**手工**算 SHA-256，容易造成格式 / 摘要 / 路径错误）
   或直接 fail-closed；既有 manifest 内容不同时**绝不**静默覆盖，更正必须新建 package 目录；
 - `--out` 是**唯一**写入口；package 位于 inbox 内时建议显式 `--lock <inbox 之外>/xxx.lock`，
   避免在 inbox 根目录留下锁文件痕迹（锁文件**绝不**放在 package 目录内）。
+
+---
+
+## 第八十二轮（2026-09-23）：GOLD-018 —— monitoring/evidence 循环导入修复与 Import-Order 回归门禁
+
+### 1. 交付内容
+
+修复 GOLD-017 任务外发现、并在**纯净 HEAD** 复现的**包初始化期循环导入**（`goal` 只允许改模块
+边界与导出依赖，**不得**改 Phase 3.3 资格算法 / 阈值 / 证据契约 / 安全语义）：
+
+- **故障与根因**（先锁定最小可复现，再动手）：
+
+  ```text
+  # 修复前（纯净 HEAD 实测）
+  .venv\Scripts\python.exe -c "import src.monitoring; import src.evidence"
+  ImportError: cannot import name 'BatchQuantification' from partially initialized module
+  'src.monitoring.evidence_readiness' (most likely due to a circular import)
+
+  # 同一份代码，反过来的顺序却正常
+  .venv\Scripts\python.exe -c "import src.evidence; import src.monitoring"   # OK
+  ```
+
+  两个包的 `__init__` 都在**包初始化阶段** eager import 整个依赖图：
+  `src.monitoring.__init__` → `evidence_readiness` → `src.evidence.contracts`（触发
+  `src.evidence.__init__`）→ `decision_packet` → `readiness_runner` → `handoff` →
+  回跳 `src.monitoring.evidence_readiness`（此时它只执行到第 38 行、`BatchQuantification`
+  尚未定义）→ `ImportError`。因此"先导入谁"决定成败，属**包边界治理缺陷**；
+- **修复方式（包边界治理，PEP 562 惰性导出）**：`src/evidence/__init__.py`（376 个公开名）
+  与 `src/monitoring/__init__.py`（39 个公开名）不再在初始化阶段 import 任何子模块，改为：
+
+  - `_LAZY_EXPORTS_BY_MODULE`：只登记 `公开名 -> 定义子模块`（**不复制**任何类 / 阈值 / 枚举 /
+    常量，单一事实源仍是子模块）；
+  - `_LAZY_EXPORT_ALIASES`：公开名与定义处属性名不同的别名（6 个 `*_exit_code_for`）；
+  - `_LAZY_EXPORTS`：合并后的 `公开名 -> (子模块, 属性名)` 总表；
+  - 模块级 `__getattr__`：**首次访问**才 import 其定义子模块并缓存进模块字典；子模块名
+    （`from src.evidence import decision_packet` 等）同样惰性可见；未登记名字抛 `AttributeError`
+    （**绝不**静默返回 None、**绝不**吞掉 `ImportError`）；
+  - 模块级 `__dir__`：`dir()` 与 eager 版一致（模块字典 ∪ 公开导出）；
+  - `__all__` **逐字节未变**；`from src.evidence import X` / `from src.monitoring import Y` /
+    `from src.<pkg> import <子模块>` / `import src.<pkg>` 后取属性的既有用法**完全兼容**；
+- **新增门禁测试（3 个文件，共 56 项）**：
+  - `tests/unit/test_lazy_package_exports.py`（15 项）：`__all__` 与惰性表**同源**；每个公开名
+    必须 **is** 其定义子模块上的对象（证明无第二份事实源）；别名表自洽；首次访问后缓存进模块
+    字典；既有公开导出见证（GOLD-005 ~ GOLD-017）仍在；子模块名仍可访问；未登记名字抛
+    `AttributeError`；重复导入幂等；**源码级守卫**：两个包的 `__init__` 模块级只允许
+    `__future__` / `importlib` / `typing`（谁把 eager 子模块导入写回来，用例立刻失败）；
+  - `tests/integration/test_evidence_import_order.py`（12 项）：在 **fresh subprocess** 里跑 9 种
+    导入顺序（monitoring-first / evidence-first / `handoff` first / `evidence_readiness` first /
+    `decision_packet` first / from-import 两种方向 / star-import / 重复与交错导入），断言成功且
+    不再出现循环导入签名；另加"包初始化不得拉入对方包"（`import src.evidence` 不得拉入
+    `src.monitoring`；`import src.monitoring` 不得拉入 `src.evidence.handoff` /
+    `decision_packet`）与"公开名仍 `is` 同一对象、`PHASE3_3_DATA` 仍 BLOCKED"两项语义门禁；
+  - `tests/integration/test_evidence_cli_smoke.py`（29 项）：`scripts/evidence_*.py`（12 个）+
+    `scripts/intake_evidence.py` + `scripts/report_collector_health.py` 在 fresh subprocess 里
+    **可 import** 且 `--help` 可用；子进程 cwd 指向**空**临时目录（项目以 `PYTHONPATH` 注入）→
+    跑完断言**零文件写入**（零网络 / 零数据库，`--help` 在 argparse 阶段退出）；另加覆盖守门：
+    `scripts/evidence_*.py` 新增入口必须同步登记，否则用例失败。
+
+### 2. 测试与验收
+
+- **全量门禁**（本轮实测，项目 `.venv`）：
+  - `.venv\Scripts\python.exe -m pytest tests -q` → **2646 passed / 1 skipped（315.10s）**
+    （新增 56 项；HEAD 基线为 2590 passed + 1 skipped = 2557（GOLD-017 权威结果）+
+    33（随后 3 个 orchestrator 测试提交）；另注：`tests/unit/test_config_encoding.py`
+    会 `rglob` 仓库内配置文件，本机 `.ai/runtime/**` 的运行期 JSON 会让收集数再 +2，
+    与本次改动无关）；
+  - `.venv\Scripts\python.exe -m ruff check .` → **All checks passed!**；
+  - `.venv\Scripts\python.exe -m mypy config database src scripts` → **Success: no issues found
+    in 172 source files**（与 GOLD-017 同数：本次未新增 / 删除源文件，只改两个包的 `__init__`）；
+- **修复前失败证据（本次实测）**：把 3 个新测试文件放进 `git archive HEAD` 解出的**纯净**树
+  （未做任何修复）后运行 → **16 failed / 40 passed**，失败集中在 monitoring-first 系列导入顺序、
+  "包初始化不得拉入对方包"、惰性表一致性、源码级守卫与 `report_collector_health` CLI 冒烟
+  （evidence-first 序列与证据链 CLI 冒烟按预期通过）→ 证明新增门禁**确实**能抓住旧行为；
+- 三个新增文件在本工作区（修复后）单独复跑：**56 passed**（单元 15 / 集成 41），其中 26 个 CLI
+  子进程用例与 12 个导入顺序子进程用例全部通过（子进程 cwd 为空临时目录 → 零写入可断言）。
+
+### 3. 范围守规
+
+- 只改**两个包的 `__init__`**（导入块 → PEP 562 惰性导出表）+ 文档 + 测试；业务子模块
+  （`contracts` / `intake` / `ledger` / `decision_packet` / `handoff` / `readiness_runner` /
+  `evidence_readiness` / `phase33_qualification` …）**未改动一行**；
+- **未改** `evidence-intake-v1`、`PHASE3_3_DATA` 阈值、readiness 算术、安全字段、L3/L4 Gate、
+  `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；
+- 未新增 / 未升级任何第三方依赖；未新增 migration / schema；**未联网**（新增用例只做本地
+  import 与 `--help`，不建连、不连真实数据库）、零数据库写入、零文件写入（以空 cwd 断言）；
+- **未通过**删除公开 API、注释 / skip 测试、导入期吞异常来掩盖循环依赖：`__all__` 未变，公开名
+  解析对象与旧版**逐一同源**（单元用例以 `is` 断言），未登记名字**显式**抛 `AttributeError`；
+- **未解除** `PHASE3_3_DATA`（仍 BLOCKED）；未进入 Phase 3.4、未训练 Alpha、未生成交易信号或订单；
+- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；未执行任何 git 写操作
+  （commit / push / reset / rebase / merge 由 Orchestrator 负责）；生成脚本仅存在于系统临时目录，
+  未进入仓库。
+
+### 4. 遗留 / 下一步
+
+- 惰性导出把"包初始化即暴露全部名"改为"首次访问才 import 其定义子模块"（解析结果缓存，后续零
+  额外开销）：这要求子模块导入保持**无环**，已由导入顺序用例锁定；后续若新增跨包依赖，必须先跑
+  `tests/integration/test_evidence_import_order.py`；
+- 惰性表与 `__all__` 仍需**人工同步**（新增公开导出必须同时更新），漏更新会被单元门禁当场抓住；
+- `PHASE3_3_DATA` **仍 BLOCKED**：本轮只修导入顺序，不产生任何真实授权证据；真实证据仍需业务方
+  提供 + 人工核验 + **L3 人工 Gate**（完整九步人工路径见第八十一轮 §4）；
+- 建议下一步：真实授权 Author / News 语料按 GOLD-017 → GOLD-011 → GOLD-012 → GOLD-013 →
+  显式落库 → GOLD-014 → GOLD-015 → GOLD-016 的九步路径推进，由人工完成授权与 L3 Gate。
+

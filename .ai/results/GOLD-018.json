@@ -1,0 +1,78 @@
+{
+  "task_id": "GOLD-018",
+  "title": "修复 monitoring/evidence 循环导入并建立 Import-Order 回归门禁",
+  "status": "completed",
+  "finished_at": "2026-09-23T11:28:46+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M TECH_DEBT.md",
+    " M src/evidence/__init__.py",
+    " M src/monitoring/__init__.py",
+    "?? tests/integration/test_evidence_cli_smoke.py",
+    "?? tests/integration/test_evidence_import_order.py",
+    "?? tests/unit/test_lazy_package_exports.py"
+  ],
+  "git_diff_stat": " PROGRESS_LOG.md            | 103 ++++++++\n README.md                  |  33 +++\n TECH_DEBT.md               |  49 ++++\n src/evidence/__init__.py   | 635 ++++++++++++++++-----------------------------\n src/monitoring/__init__.py | 130 ++++++----\n 5 files changed, 494 insertions(+), 456 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-23T11:00:39+08:00",
+      "finished_at": "2026-09-23T11:28:46+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "finish_reason": "completed",
+      "model": "deepseek-flash",
+      "iterations": 106,
+      "duration_ms": 1369943,
+      "usage": {
+        "inputTokens": 17702588,
+        "outputTokens": 113955,
+        "cacheReadTokens": 17567232,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.141378096
+      },
+      "cline_final_text": "Submission recorded (verified): ## GOLD-018 完成报告（BUGFIX_BLOCKER_TOOLING · PHASE3_3_DATA 仍 BLOCKED）\n\n### 1. 完成内容\n1. **先复现（修复前，纯净工作区）**：\n   - `.venv\\Scripts\\python.exe -c \"import src.monitoring; import src.evidence\"` → `ImportError: cannot import name 'BatchQuantification' from partially initialized module 'src.monitoring.evidence_readiness' (most likely due to a circular import)`；`import src.monitoring.evidence_readiness` first 同样失败；\n   - 反向顺序 `import src.evidence; import src.monitoring` → OK。根因确认：两个包的 `__init__` 都在**包初始化阶段** eager import 整个依赖图（evidence/`__init__` → decision_packet → readiness_runner → handoff → monitoring.evidence_readiness → evidence.contracts）。\n2. **包边界治理修复（PEP 562 惰性导出，只改模块边界）**：\n   - `src/evidence/__init__.py`（376 导出 / 18 子模块 / 6 别名）与 `src/monitoring/__init__.py`（39 导出 / 4 子模块）不再在初始化阶段 import 任何子模块；\n   - 新增 `_LAZY_EXPORTS_BY_MODULE`（只登记 `公开名 -> 定义子模块`）、`_LAZY_EXPORT_ALIASES`、`_LAZY_EXPORTS`、模块级 `__getattr__`（首访解析 + 缓存进模块字典；子模块名同样惰性可见；未登记名字显式抛 `AttributeError`）、`__dir__`；\n   - `__all__` **逐字节未变**；`from src.evidence import X` / `from src.monitoring import Y` / `from src.<pkg> import <子模块>` / `import src.<pkg>` 后取属性全部兼容；**未复制**任何类/阈值/枚举/常量（单一事实源仍是子模块）；未改资格算法、阈值、证据契约、安全字段、L3/L4 Gate、`LIVE_TRADING`/外部订单设置。\n3. **新增门禁测试 56 项**：`tests/unit/test_lazy_package_exports.py`（15：`__all__` 同源、公开名 `is` 子模块对象、别名自洽、缓存、既有导出见证、子模块名可用、未登记名抛错、重复导入幂等、源码级禁止 eager 子模块导入）；`tests/integration/test_evidence_import_order.py`（12：9 种导入顺序 fresh-subprocess + 包初始化不拉入对方包 + 语义/blocker 门禁）；`tests/integration/test_evidence_cli_smoke.py`（29：12 个 `scripts/evidence_*.py` + `intake_evidence` + `report_collector_health` 的 import 与 `--help` 冒烟，cwd 为空临时目录 → 断言零写入 + 覆盖守门）。\n4. **文档**：README（§1 新增一行 + §7 新增「包边界与导入顺序（GOLD-018）」小节）、TECH_DEBT（新增 **TD-60** + §6 变更日志行）、PROGRESS_LOG（**第八十二轮**）。\n\n### 2. 修改文件 / 新增文件\n- 修改：`src/evidence/__init__.py`、`src/monitoring/__init__.py`、`README.md`、`TECH_DEBT.md`、`PROGRESS_LOG.md`\n- 新增：`tests/unit/test_lazy_package_exports.py`、`tests/integration/test_evidence_import_order.py`、`tests/integration/test_evidence_cli_smoke.py`\n- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`；未执行任何 git 写操作。\n\n### 3. 执行的测试与结果（实测输出）\n- `.venv\\Scripts\\python.exe -m pytest tests -q` → **2646 passed, 1 skipped in 315.10s**（基线 2590 = GOLD-017 权威 2557 + 随后 3 个 orchestrator 测试提交 33；本轮新增 56）\n- `.venv\\Scripts\\python.exe -m ruff check .` → **All checks passed!**\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts` → **Success: no issues found in 172 source files**\n- 新增 3 文件于冻结状态复跑 → **56 passed in 33.46s**\n- **修复前失败证据**：把 3 个新文件放入 `git archive HEAD` 解出的纯净树运行 → **16 failed / 40 passed**（monitoring-first 系列、包初始化不拉入对方包、惰性表一致性、源码守卫、report_collector_health 冒烟失败；evidence-first 序列按预期通过）→ 证明门禁确实能抓住旧行为\n- 直连验收：`monitoring-first OK` / `evidence-first OK`；`PHASE3_3_DATA`（blocker 常量）不变；`live_trading=False`、`allow_external_order_submission=False` 未变\n\n### 4. 遗留问题\n- 惰性表与 `__all__` 仍需人工同步（新增导出须更新两处），漏更新会被单元门禁（`set(__all__) == set(_LAZY_EXPORTS)`）当场抓住；\n- 惰性导出要求各子模块导入保持无环（现状成立，已由导入顺序用例锁定）；\n- 任务外、未修改事项：本机 `.ai/runtime/**` 运行期 JSON 会让 `tests/unit/test_config_encoding.py` 的 rglob 参数化收集数 +2（与本改动无关）；`tests/integration/__pycache__/*test_evidence_cli_smoke*.pyc` 为历史尝试残留（.pyc 不入库）；\n- `PHASE3_3_DATA` 仍 **BLOCKED**：本轮只修导入顺序，不产生任何真实授权证据，人工九步路径与 L3 人工 Gate 不变。\n\n### 5. 是否满足 acceptance\n全部满足：①fresh subprocess 中 monitoring-first 与 evidence-first 均无 ImportError；②所有 evidence CLI 轻量 import/`--help` 冒烟通过且零网络/零数据库/零写入（以空 cwd 断言）；③既有公开导出完全兼容（`__all__` 未变、公开名解析对象同源、无 API 删除/跳过/吞异常），资格算法/阈值/安全字段无变化；④全量 pytest、ruff、mypy 通过，`PHASE3_3_DATA` 保持 BLOCKED。\n\n### 6. 建议下一步\n按 GOLD-017 → GOLD-011 → GOLD-012 → GOLD-013 → 人工显式落库 → GOLD-014 → GOLD-015 → GOLD-016 的九步人工路径推进真实授权语料；此后任何新增跨包依赖，先跑 `tests/integration/test_evidence_import_order.py`。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M TECH_DEBT.md",
+        " M src/evidence/__init__.py",
+        " M src/monitoring/__init__.py",
+        "?? tests/integration/test_evidence_cli_smoke.py",
+        "?? tests/integration/test_evidence_import_order.py",
+        "?? tests/unit/test_lazy_package_exports.py"
+      ],
+      "git_diff_stat": " PROGRESS_LOG.md            | 103 ++++++++\n README.md                  |  33 +++\n TECH_DEBT.md               |  49 ++++\n src/evidence/__init__.py   | 635 ++++++++++++++++-----------------------------\n src/monitoring/__init__.py | 130 ++++++----\n 5 files changed, 494 insertions(+), 456 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  2%]\n........................................................................ [  5%]\n........................................................................ [  8%]\n........................................................................ [ 10%]\n........................................................................ [ 13%]\n........................................................................ [ 16%]\n........................................................................ [ 19%]\n........................................................................ [ 21%]\n........................................................................ [ 24%]\n........................................................................ [ 27%]\n........................................................................ [ 29%]\n........................................................................ [ 32%]\n........................................................................ [ 35%]\n........................................................................ [ 38%]\n........................................................................ [ 40%]\n........................................................................ [ 43%]\n........................................................................ [ 46%]\n........................................................................ [ 48%]\n........................................................................ [ 51%]\n........................................................................ [ 54%]\n........................................................................ [ 57%]\n........................................................................ [ 59%]\n........................................................................ [ 62%]\n........................................................................ [ 65%]\n........................................................................ [ 68%]\n........................................................................ [ 70%]\n........................................................................ [ 73%]\n........................................................................ [ 76%]\n........................................................................ [ 78%]\n........................................................................ [ 81%]\n........................................................................ [ 84%]\n........................................................................ [ 87%]\n........................................................................ [ 89%]\n........................................................................ [ 92%]\n........................................................................ [ 95%]\n........................................................................ [ 97%]\n..........s............................................                  [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n2646 passed, 1 skipped in 310.01s (0:05:10)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 172 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
