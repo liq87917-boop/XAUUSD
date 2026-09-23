@@ -1,0 +1,39 @@
+{
+  "task_id": "GOLD-022",
+  "type": "AUTOMATION_INFRA",
+  "title": "建立异常中断任务的安全现场恢复状态机",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-021"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "针对 GOLD-018 重启后遗留 dirty worktree 的真实事故，把 stale lock、同一任务未提交修改、recovery snapshot 与安全重试固化为可审计状态机，减少人工 reset/clean。",
+  "requirements": [
+    "区分用户/未知 dirty worktree 与可证明属于上一次同一 task 的中断现场；证据不足必须 fail-closed，不得自动清理。",
+    "对可证明的 interrupted-task 现场，先保存 recovery snapshot（tracked patch、untracked files、metadata），验证 snapshot 可恢复后才允许清理并重试同一 task。",
+    "stale lock 只能在能证明无活动 owner/process 的情况下清理；活动 lock 或来源不明 lock 必须停线。",
+    "恢复动作必须有明确日志和 runtime metadata；不得覆盖历史 result，不得把 recovery 当作任务完成。",
+    "加入 crash/restart、dirty user change、snapshot failure、stale/active lock 的回归测试；测试不得破坏真实工作区。",
+    "不得让 Cline/DeepSeek决定是否丢弃现场或规划下一任务。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "TECH_DEBT.md", "PROGRESS_LOG.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", "src/**", "database/**"]
+  },
+  "constraints": [
+    "未知 dirty worktree 永远不得自动 reset/clean。",
+    "自动清理必须以成功、可验证的 recovery snapshot 为前置条件。",
+    "不得改变业务 Phase、数据资格 Gate 或交易安全开关。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ai_orchestrator_queue.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "同一 task 的可证明中断现场可 snapshot 后自动安全恢复；未知修改严格停线。",
+    "stale/active lock 判定有回归测试且不会误杀活动进程。",
+    "任何自动清理前均有可验证恢复副本；全量 pytest/ruff/mypy 通过。"
+  ]
+}
