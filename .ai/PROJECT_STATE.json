@@ -4,25 +4,40 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-016",
-  "last_completed_task": "GOLD-015",
-  "last_reviewed_task": "GOLD-015",
+  "current_task": "GOLD-017",
+  "last_completed_task": "GOLD-016",
+  "last_reviewed_task": "GOLD-016",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "GOLD-015 已完成并通过工程验收：L3 Evidence Qualification decision packet 已落地，pytest 2282 passed / 1 skipped，ruff 全通过，mypy 168 source files 全通过。真实库仍缺少足量合法授权且具有可信独立时间/availability/OOS 证据的 Author/News 数据；decision packet 只提供可复核人工 Gate 输入，不等于 data qualification PASS。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
+      "detail": "GOLD-016 已完成并通过工程验收：L3 Human Gate 决策记录与防伪审计闭环已落地；.ai/results/GOLD-016.json 实测 pytest 2490 passed / 1 skipped，ruff 全通过，mypy 170 source files 全通过。真实库仍缺少足量合法授权且具有可信独立时间/availability/OOS 证据的 Author/News 数据；human decision record 只证明人工决策可审计，不等于 data qualification PASS。当前只允许继续 blocker-facing tooling；模板、示例和 Mock 不计入资格。",
       "retryable": false
     }
   ],
   "resolved_blockers": [
-    {"code": "VALIDATION_PYTHON_ENV", "resolved_by": "project .venv validation confirmed: pytest runs successfully"},
-    {"code": "CLINE_MODEL_QUOTA_OR_CONFIG", "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"},
-    {"code": "CLINE_CLI_INSTALLATION", "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"}
+    {
+      "code": "VALIDATION_PYTHON_ENV",
+      "resolved_by": "project .venv validation confirmed: pytest runs successfully"
+    },
+    {
+      "code": "CLINE_MODEL_QUOTA_OR_CONFIG",
+      "resolved_by": "user confirmed active start_agent.bat and Cline headless/model are normal before GOLD-001-R2"
+    },
+    {
+      "code": "CLINE_CLI_INSTALLATION",
+      "resolved_by": "user confirmed active start_agent.bat and Cline CLI are normal before GOLD-001-R2"
+    }
   ],
-  "next_action": "Run GOLD-016 only as blocker-facing tooling: bind an explicit L3 human approve/reject/needs_changes decision to a verified GOLD-015 packet with deterministic redacted audit records. Do not fabricate approval, auto-pass data qualification, modify PROJECT_STATE from tooling, lower thresholds, treat operation times as evidence times, or create Phase 3.4/model tasks. Phase transition remains a separate L3 human-controlled action.",
+  "next_action": "Run GOLD-017 only as blocker-facing tooling: provide a deterministic local manifest builder so an operator can turn explicitly supplied real Author/News evidence files plus explicit authorization/time/availability metadata into a GOLD-011-compatible package. Do not infer authorization or evidence times, auto-intake, write the database, lower thresholds, auto-pass data qualification, modify PROJECT_STATE from tooling, or create Phase 3.4/model tasks.",
   "human_gates": [
-    {"code": "PHASE3_3_AUTHORIZED_EVIDENCE", "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."},
-    {"code": "PHASE3_3_L3_DECISION", "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."}
+    {
+      "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
+      "detail": "Business/operator must provide and verify legally authorized Author/News evidence with trustworthy independent time/availability semantics before qualification can pass."
+    },
+    {
+      "code": "PHASE3_3_L3_DECISION",
+      "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."
+    }
   ],
   "invariants": [
     "LIVE_TRADING=false",
