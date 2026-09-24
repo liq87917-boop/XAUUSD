@@ -915,6 +915,83 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   全树 / `PROJECT_STATE` / `GPT_REVIEW_LEDGER` / 裁决 store 前后字节一致、§2.8/§2.13
   fail-closed 暴露未弱化、Phase 3.3 与交易安全不变量不变）。
 
+## 2.17 有效 GPT 裁决接入 Review Binding 与连续性门禁（GOLD-044）
+
+- **为什么**：§2.15 给出历史矛盾的**裁决契约**，§2.16 给出**证据包**，但 review 层
+  （§2.8 binding / §2.9 ledger integrity / §2.11 backlog / §2.12 / refill 诊断）此前把
+  历史矛盾一律当作 `facts_complete=false` ⇒ 即使 GPT 已裁决，也无法把该项标为
+  「可实质 review」。§2.17 把**有效**裁决接入这条事实链：默认行为不变，只有合法裁决才恢复
+  事实可绑定性；任何越权 / 漂移 / 重复 / 冲突矛盾继续 fail-closed。
+- **唯一事实来源**：§2.15 `orchestrator.legacy_result_adjudication`
+  （`collect_store_index` / `evaluate_task`，只读、纯函数）+ §2.13
+  `orchestrator.result_terminal_consistency`（矛盾判定）。review 层**不另造**第二套裁决
+  身份 / 漂移 / 越权判定；`collect_store_index` 是 review 层共用的**唯一** store 读取入口。
+- **§2.8 `review_binding` 契约扩展**：manifest 新增 `adjudication` 段
+  （`store_present` / `state` / `valid` / `adjudicated` / `adjudication` / `reason_codes` /
+  `contract_source`）与 `binding.{facts_ready,adjudicated,facts_ready_source}`：
+  - **默认行为不变**：没有裁决 / 无该项目裁决 ⇒ `facts_complete=false` /
+    `facts_ready=false` / `facts_ready_source=blocked` / 退出码 `2`；
+  - **只有有效裁决才恢复**：`state=adjudicated`（schema 合法、`reviewer_role=GPT` 且 reviewer
+    命中 §2.5 planner 身份、result sha256/status + commit sha/branch + 原始 contradiction
+    codes 完全匹配、非重复 / 冲突 / 过期 / 漂移）**且** `binding` 不存在任何**非 legacy** 的
+    阻塞 reason code ⇒ `adjudicated=true` / `facts_ready=true` /
+    `facts_ready_source=adjudicated` / 退出码 `0`；
+  - **历史事实绝不隐藏**：原始 contradiction finding（§2.13 稳定 code）、原 result
+    `sha256` / `status`、completion commit 身份与裁决 identity
+    （`adjudication.adjudication`，含 reviewer / reviewer_role / bound_* / codes）全部原样保留；
+  - **fail-closed**：越权（`ADJUDICATION_EXECUTOR_FORBIDDEN`）/ 未知身份
+    （`ADJUDICATION_REVIEWER_NOT_AUTHORIZED`）/ 重复 / 冲突 / 过期 / 五种身份漂移 /
+    store 不可读（`ADJUDICATION_STORE_UNREADABLE`）/ schema 不支持
+    （`ADJUDICATION_STORE_SCHEMA_UNSUPPORTED`）等 §2.15 稳定 code 原样并入
+    `binding.reason_codes`；store 缺失是**中性事实**（尚无裁决），不产生额外 code；
+  - `reviewer` / `reviewer_role` 只作为**事实**嵌套在 `adjudication.adjudication` 内
+    （§2.16 同口径），顶层仍禁止任何 Review 结论字段。
+- **§2.9 `review_ledger_integrity`**：台账条目按 §2.8 `facts_ready` 核对客观身份；
+  `bindings[].{manifest_facts_ready,manifest_adjudicated,manifest_adjudication_state}` 与
+  `ledger.adjudicated_entry_count` 只报告事实。身份漂移检测（result hash / status /
+  finished_at / commit sha / branch 五类 mismatch）**一字未放宽**。
+- **§2.11 `review_backlog`**：逐项新增 `facts_ready` / `adjudicated` /
+  `facts_ready_source` / `adjudication`；`review_status` 词表不变
+  （`pending` / `bound` / `invalid`）。四态稳定区分：
+  - **未裁决矛盾** ⇒ `facts_ready=false` ⇒ `invalid` + `BACKLOG_ITEM_FACTS_INCOMPLETE`；
+  - **已裁决待实质 review** ⇒ `review_status=pending` + `adjudicated=true`；
+  - **已绑定** ⇒ `review_status=bound`（identity 逐项一致）；
+  - **身份漂移** ⇒ `invalid` + `BACKLOG_ITEM_*_DRIFT`。
+  新增 `BACKLOG_ITEM_ADJUDICATION_INVALID` 与 summary
+  `facts_ready_count` / `adjudicated_count` / `adjudicated_pending_count` /
+  `unresolved_contradiction_count`。
+- **§2.12 planner mutation precondition**：`review_backlog.pointer` 与 `summary` 透传同一
+  裁决计数（`adjudicated_count` / `adjudicated_pending_count` / `facts_ready_count` /
+  `unresolved_contradiction_count` / `review_adjudicated_count` 等）；**不**因此改变
+  `planner_mutation.allowed` 与 blocking 语义。
+- **refill 诊断（§2.10）**：`completed_but_unreviewed.adjudication` 只复用 §2.15 store 读取
+  入口报告 **presence** 事实（`store_present` / `declared_task_ids` / `declared_count` /
+  `undeclared_*` / `declared_implies_valid=false` / `validation_source`），
+  `summary.adjudication_declared_count` 同源；**presence ≠ 有效**，有效性 / 身份匹配只由
+  §2.8 / §2.15 判定，本层绝不重算、绝不改任何计数或门禁。
+- **职责边界（不可协商）**：以上各层仍 `read_only=true`，`writes_*` 全为 `false`，
+  `tool_can_sign_review=false` / `tool_can_sign_adjudication=false` /
+  `tool_can_write_adjudication=false` / `adjudication_implies_verdict=false` /
+  `adjudication_advances_review_pointer=false` / `adjudication_lifts_phase3_3_blocker=false`；
+  有效裁决**不**产生 PASS/FAIL、**不**写 `GPT_REVIEW_LEDGER`、**不**推进
+  `last_reviewed_task`、**不**解除 `PHASE3_3_DATA`、**不**决定 Phase。
+- **不破坏既有门禁**：§2.13 写入前门禁、§2.8~§2.12 事实链、ledger 连续性
+  （`LEDGER_CHAIN_GAP` / `LEDGER_ORDER_REGRESSION` / `LEDGER_REVIEW_TIME_REGRESSION`）、
+  `GIT_HISTORY_SHALLOW` / `COMPLETION_COMMIT_NOT_FOUND` fail-closed、rolling queue、
+  L1~L4 档位、Phase 3.3 data blocker、`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 全部不变。
+- **回归测试**：`tests/unit/test_review_closure_adjudication.py`（32 项：默认 fail-closed、
+  有效裁决 facts-ready、越权 / 未知身份 / 五类漂移 / 重复 / 冲突 / store 损坏 fail-closed、
+  backlog 三态 + 漂移、integrity 绑定与漂移、precondition / refill 计数同源、只读 API 守卫）
+  + `tests/integration/test_review_closure_adjudication_regression.py`（10 项：真实仓库
+  `GOLD-035` 身份由 raw `git` blob + `hashlib` 独立复算、有效裁决恢复 bindability、
+  越权 / 漂移 / 重复 fail-closed、`.ai/results` / tasks / `PROJECT_STATE` / `GPT_REVIEW_LEDGER`
+  前后字节一致、仓库不创建裁决 store、裁决不推进 `last_reviewed_task`、ledger 连续性仍以
+  `LEDGER_CHAIN_GAP` fail-closed、backlog 端到端分类）。
+
+
+
+
 
 
 

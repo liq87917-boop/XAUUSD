@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator import ai_orchestrator as orch
+from orchestrator import legacy_result_adjudication as adjudication
 from orchestrator import planner_snapshot as planner
 from orchestrator import review_binding as binding
 from orchestrator import review_ledger as ledger_mod
@@ -363,10 +364,20 @@ def binding_entry_view(
     manifest_binding = manifest.get("binding") if isinstance(manifest, dict) else None
     manifest_result = manifest.get("result") if isinstance(manifest, dict) else None
     manifest_commit = manifest.get("commit") if isinstance(manifest, dict) else None
+    manifest_adjudication = (
+        manifest.get("adjudication") if isinstance(manifest, dict) else None
+    )
 
-    facts_complete = bool((manifest_binding or {}).get("facts_complete"))
+    binding_facts = manifest_binding if isinstance(manifest_binding, dict) else {}
 
-    reason_codes = [str(code) for code in (manifest_binding or {}).get("reason_codes") or []]
+    facts_complete = bool(binding_facts.get("facts_complete"))
+
+    # GOLD-044：``facts_ready`` 兼容旧 manifest（缺字段时按 ``facts_complete`` 回落，绝不放宽）。
+    facts_ready = bool(binding_facts.get("facts_ready", facts_complete))
+
+    adjudicated = bool(binding_facts.get("adjudicated"))
+
+    reason_codes = [str(code) for code in binding_facts.get("reason_codes") or []]
 
     actual: dict[str, Any] = {
         "result_sha256": (manifest_result or {}).get("sha256"),
@@ -380,12 +391,13 @@ def binding_entry_view(
 
     matches: dict[str, bool | None] = {field: None for field in expected}
 
-    if not facts_complete:
+    if not facts_ready:
         issues.append(
             make_issue(
                 ISSUE_MANIFEST_FACTS_INCOMPLETE,
-                f"{task_id}: GOLD-031 manifest facts_complete=false"
-                f"（{', '.join(reason_codes) or 'unknown'}）：客观绑定事实不齐，"
+                f"{task_id}: GOLD-031 manifest facts_ready=false"
+                f"（facts_complete={facts_complete}, adjudicated={adjudicated}；"
+                f"{', '.join(reason_codes) or 'unknown'}）：客观绑定事实不齐，"
                 "台账条目不可信",
             )
         )
@@ -426,12 +438,21 @@ def binding_entry_view(
         "expected": expected,
         "actual": actual,
         "manifest_facts_complete": facts_complete,
+        # GOLD-044：台账条目的客观身份按 §2.8 ``facts_ready``（含 §2.15 有效裁决）核对；
+        # ``manifest_adjudicated`` 只是事实，不是 Review 结论。
+        "manifest_facts_ready": facts_ready,
+        "manifest_adjudicated": adjudicated,
+        "manifest_adjudication_state": (
+            manifest_adjudication.get("state")
+            if isinstance(manifest_adjudication, dict)
+            else None
+        ),
         "manifest_reason_codes": reason_codes,
         "manifest_facts_digest": (
             manifest.get("facts_digest") if isinstance(manifest, dict) else None
         ),
         "matches": matches,
-        "bound": facts_complete and not issues,
+        "bound": facts_ready and not issues,
     }
 
     return view, issues
@@ -466,6 +487,13 @@ def authority_section() -> dict[str, Any]:
         "review_authority": "gpt_only",
         "verdict_source": "echoed from GPT ledger; never created or modified by this tool",
         "manifest_source": binding.REVIEW_BINDING_SCHEMA,
+        "manifest_facts_ready_semantics": (
+            "台账条目按 §2.8 facts_ready 核对客观身份（facts_complete 或唯一 legacy 矛盾已有 "
+            "§2.15 有效 GPT 裁决）；仍然**不是** Review 结论，也绝不推进任何指针"
+        ),
+        "adjudication_source": adjudication.SCHEMA,
+        "tool_can_sign_adjudication": False,
+        "tool_can_write_adjudication": False,
         "ledger_schema": ledger_mod.REVIEW_LEDGER_SCHEMA,
         "blocking_human_gates": sorted(orch.BLOCKING_HUMAN_GATES),
     }
@@ -515,8 +543,13 @@ def default_manifest_builder(
     root: Path,
     tasks_dir: Path,
     results_dir: Path,
+    adjudication_store_path: Path,
 ) -> ManifestBuilder:
-    """默认 manifest 来源：``orchestrator.review_binding``（只读 Git 白名单）。"""
+    """默认 manifest 来源：``orchestrator.review_binding``（只读 Git 白名单）。
+
+    GOLD-044：把**同一** §2.15 裁决 store 路径透传给 §2.8 manifest，使台账条目与
+    §2.15 裁决事实（``facts_ready`` / ``adjudicated``）复用同一口径。
+    """
 
     def build(task_id: str) -> dict[str, Any]:
         return binding.build_review_binding_manifest(
@@ -524,6 +557,7 @@ def default_manifest_builder(
             root=root,
             tasks_dir=tasks_dir,
             results_dir=results_dir,
+            adjudication_store_path=adjudication_store_path,
         )
 
     return build
@@ -546,10 +580,16 @@ def build_integrity_report(
     tasks_dir: Path | None = None,
     results_dir: Path | None = None,
     ledger_path: Path | None = None,
+    adjudication_store_path: Path | None = None,
     generated_at: str | None = None,
     manifest_builder: ManifestBuilder | None = None,
 ) -> dict[str, Any]:
-    """构建只读 ledger 完整性 / 连续性报告（**只验证客观事实，绝不修复台账**）。"""
+    """构建只读 ledger 完整性 / 连续性报告（**只验证客观事实，绝不修复台账**）。
+
+    ``adjudication_store_path`` 指向 §2.15 历史矛盾裁决 store（默认
+    ``<root>/.ai/adjudications/legacy_result_adjudications.json``）；只在默认 builder 下生效，
+    且只**只读**读取（绝不创建 / 修复 / 改写 store）。
+    """
 
     resolved_root = Path(root) if root is not None else ROOT
 
@@ -563,10 +603,18 @@ def build_integrity_report(
         else resolved_root / ledger_mod.REVIEW_LEDGER_RELATIVE_PATH
     )
 
+    resolved_store = (
+        Path(adjudication_store_path)
+        if adjudication_store_path is not None
+        else resolved_root / binding.ADJUDICATION_STORE_RELATIVE_PATH
+    )
+
     builder = (
         manifest_builder
         if manifest_builder is not None
-        else default_manifest_builder(resolved_root, resolved_tasks, resolved_results)
+        else default_manifest_builder(
+            resolved_root, resolved_tasks, resolved_results, resolved_store
+        )
     )
 
     issues: list[dict[str, str]] = []
@@ -622,6 +670,7 @@ def build_integrity_report(
             "tasks_dir": str(resolved_tasks),
             "results_dir": str(resolved_results),
             "review_ledger": str(resolved_ledger),
+            "adjudication_store": str(resolved_store),
         },
         "ledger": {
             "available": ledger_view["available"],
@@ -636,6 +685,10 @@ def build_integrity_report(
             "coverage_floor": ledger_view["coverage_floor"],
             "coverage_floor_source": ledger_view["coverage_floor_source"],
             "duplicate_tasks": list(ledger_view["duplicate_tasks"]),
+            # GOLD-044：台账条目里有多少是按 §2.15 有效裁决恢复事实可绑定性的（客观事实）。
+            "adjudicated_entry_count": sum(
+                1 for view in bindings if view["manifest_adjudicated"]
+            ),
         },
         "chain": chain,
         "bindings": bindings,
@@ -709,6 +762,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--adjudication-store",
+        type=Path,
+        default=None,
+        help=(
+            "§2.15 历史矛盾裁决 store（默认 "
+            f"<root>/{binding.ADJUDICATION_STORE_RELATIVE_PATH}）；只读，绝不创建或改写"
+        ),
+    )
+
+    parser.add_argument(
         "--generated-at",
         default=None,
         help="固定 generated_at（便于审计与字节级复现；默认取当前时间）",
@@ -741,6 +804,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         tasks_dir=tasks_dir,
         results_dir=results_dir,
         ledger_path=ledger_path,
+        adjudication_store_path=(
+            Path(args.adjudication_store) if args.adjudication_store is not None else None
+        ),
         generated_at=args.generated_at,
     )
 

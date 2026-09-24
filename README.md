@@ -2030,6 +2030,51 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
   ```
 
 
+### 有效裁决接入 Review Binding / 连续性门禁（GOLD-044）
+
+> **合规红线**：本项**只读** —— 逐项 manifest 仍只产事实；工具绝不创建 / 修复 / 改写
+> `.ai/adjudications/**`、绝不写 `.ai/GPT_REVIEW_LEDGER.json` / `.ai/PROJECT_STATE.json` /
+> tasks / results，不签发 review 或裁决、不推进 `last_reviewed_task`、不解除
+> `PHASE3_3_DATA`；`LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
+
+- **一句话**：把 §2.15 的**有效** GPT 裁决作为独立补充事实接入 §2.8 `review_binding`、
+  §2.9 `review_ledger_integrity`、§2.11 `review_backlog`、§2.10 refill 诊断与
+  §2.12 planner mutation precondition，使已裁决的历史矛盾恢复「可被 GPT 实质 review」的
+  事实可绑定性，而**未裁决 / 无效**矛盾继续 fail-closed；
+- **默认行为不变**：legacy 终态矛盾没有裁决时仍是 `facts_complete=false` /
+  `facts_ready=false` / 退出码 `2`；`binding.reason_codes` 继续原样包含原始 contradiction
+  code，原 result `sha256` 与裁决 identity 一律**原样保留**（绝不删除 / 降级 / 伪装）；
+- **唯一的恢复条件**：存在 schema 合法、`reviewer_role=GPT` 且 reviewer 命中 planner 身份、
+  原 result `sha256`/`status` + completion commit `sha`/`branch` + 原始 contradiction codes
+  完全匹配、非重复 / 冲突 / 过期 / 漂移，**且没有其它阻塞 code** 的裁决时，
+  `binding.adjudicated=true` / `facts_ready=true` / `facts_ready_source=adjudicated`；
+- **越权 / 漂移 / 重复 / 冲突 / store 损坏一律 fail-closed**：§2.15 的稳定 reason code
+  （`ADJUDICATION_EXECUTOR_FORBIDDEN` / `..._RESULT_SHA256_DRIFT` /
+  `..._TASK_ID_DUPLICATE` / `..._STORE_SCHEMA_UNSUPPORTED` 等）原样并入 binding
+  `reason_codes`，绝不因此放行；
+- **裁决 ≠ review verdict**：`facts_ready=true` / 退出码 `0` 只表示「客观事实可绑定供 GPT
+  实质 review」，不产生 PASS/FAIL、不自动写 ledger、不推进指针、不解除 blocker；
+- **稳定的四态区分**：`review_backlog` 用 `review_status` + `adjudicated` + `facts_ready`
+  + 稳定 code 区分「未裁决矛盾（invalid）」/「已裁决待实质 review（pending +
+  `adjudicated=true`）」/「已绑定（bound）」/「身份漂移（invalid + drift code）」；refill
+  诊断只报告裁决 store 的 presence facts（`declared_implies_valid=false`，有效性仍归
+  §2.8 / §2.15）；
+- **用法**（只读；`--adjudication-store` 可指向临时 store 做演练）：
+
+  ```bash
+  .venv\Scripts\python.exe -m orchestrator.review_binding --task GOLD-035
+  .venv\Scripts\python.exe -m orchestrator.review_backlog
+  .venv\Scripts\python.exe -m orchestrator.review_ledger_integrity
+  .venv\Scripts\python.exe -m orchestrator.planner_mutation_precondition
+  ```
+
+- **回归测试**：`tests/unit/test_review_closure_adjudication.py`（32 项）+
+  `tests/integration/test_review_closure_adjudication_regression.py`（10 项：真实仓库
+  `GOLD-035` 身份由 raw `git` blob + `hashlib` 独立复算、有效裁决恢复 `facts_ready`、
+  越权 / 漂移 / 重复 fail-closed、`.ai` 全树与 ledger / state 前后字节一致、ledger 连续性
+  仍以 `LEDGER_CHAIN_GAP` fail-closed）。
+
+
 
 
 ## 8. 数据模型
@@ -2202,4 +2247,5 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 | **issue / blocking 集合必须同源** | `orchestrator/planner_mutation_precondition.py`：聚合门禁标记 `STATE_RESULT_DRIFT` 必须先是 `issues` 里的真实 `error` issue（`drift.aggregate_code`），`blocking_reason_codes` 只从 `issues` 的 gating ERROR 集合**投影** ⇒ 两者恒等；`warning` 只报告不 gate，review 指针滞后仍只报告（GOLD-041） |
 | **历史矛盾裁决必须 GPT-only 且内容身份绑定** | `orchestrator/legacy_result_adjudication.py`：裁决记录与 `.ai/results` 物理分离（`.ai/adjudications/legacy_result_adjudications.json`），必须绑定原 result sha256/status + completion commit sha/branch + 原始 contradiction codes + GPT reviewer 身份/理由/时间；Cline / DeepSeek / 未知身份、重复 / 冲突 / 过期 / 五种身份漂移一律 fail-closed，原 result 逐字节不变，裁决 ≠ Review PASS、不推进指针、不解除 `PHASE3_3_DATA`（GOLD-042） |
 | **历史矛盾证据必须只读且四态可复算** | `orchestrator/review_evidence_manifest.py`：逐项汇总 `last_reviewed_task` 之后的完整 backlog（与 §2.11 同一口径）的 result/commit sha256、changed paths、validation return codes、§2.13 终态矛盾、ledger/裁决状态与稳定 reason codes，分类为 `facts-ready` / `needs-gpt-adjudication` / `pending-substantive-review` / `invalid`；缺 commit、hash 漂移、事实不齐、裁决冲突一律 fail-closed，`exit_code=0` 绝不等于 GPT PASS，工具只读（`--output` 仅 `.ai/runtime/**` 或系统临时目录）（GOLD-043） |
+| **只有有效 GPT 裁决才恢复事实可绑定性** | `orchestrator/review_binding.py` + `review_backlog` / `review_ledger_integrity` / `planner_mutation_precondition` / `planner_refill_request`：默认 `facts_complete=false`，仅当存在 schema 合法、GPT 权威有效、原 result sha256/status + commit sha/branch + 原始 contradiction codes 完全匹配且不冲突的 §2.15 裁决、且无其它阻塞 code 时 `binding.facts_ready=true`；原始 contradiction finding / result sha256 / 裁决 identity 一律保留，越权 / 漂移 / 重复 / 冲突 / store 损坏 fail-closed，裁决 ≠ Review PASS、不写 ledger、不推进指针、不解除 `PHASE3_3_DATA`（GOLD-044） |
 

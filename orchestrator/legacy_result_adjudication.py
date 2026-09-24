@@ -1150,6 +1150,40 @@ def collect_store(
     return store_section, issues, indexed_entries
 
 
+def collect_store_index(store_path: Path) -> dict[str, Any]:
+    """**只读**收集 store 事实 + 按 task 归集的索引（供各 review 层复用同一口径）。
+
+    返回 ``store_section`` / ``issues`` / ``indexed_entries`` / ``entries_by_task`` /
+    ``consistency``。这是 :func:`build_adjudication_report` 与
+    :func:`orchestrator.review_evidence_manifest.collect_adjudication_store` /
+    :mod:`orchestrator.review_binding` 共用的**唯一** store 读取入口：绝不创建、修复或
+    改写 store，也绝不触碰 ``.ai/results`` 里任何历史 result。
+
+    ``store 不存在`` 由调用方按上下文处理（它是「尚无任何真实裁决」的中性事实，
+    不是 store 内容损坏）；本函数保留原始 issue，不替调用方做决定。
+    """
+
+    store_section, store_issues, indexed_entries = collect_store(store_path)
+
+    consistency = store_consistency_issues(indexed_entries)
+
+    entries_by_task: dict[str, list[int]] = {}
+
+    for index, entry in indexed_entries.items():
+        task_id = entry_task_id(entry)
+
+        if task_id is not None:
+            entries_by_task.setdefault(task_id, []).append(index)
+
+    return {
+        "store_section": store_section,
+        "issues": list(store_issues),
+        "indexed_entries": indexed_entries,
+        "entries_by_task": entries_by_task,
+        "consistency": consistency,
+    }
+
+
 def build_adjudication_report(
     task_ids: Sequence[str],
     *,

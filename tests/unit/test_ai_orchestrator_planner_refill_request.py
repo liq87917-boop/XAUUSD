@@ -979,6 +979,8 @@ def test_cli_option_contract_excludes_planning_flags() -> None:
         "--state",
         "--tasks-dir",
         "--results-dir",
+        # GOLD-044：只读裁决 store 路径（只读，不是规划 / 写入开关）。
+        "--adjudication-store",
         "--generated-at",
         "--lookahead-target",
         "--output",

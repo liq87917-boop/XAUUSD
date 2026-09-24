@@ -5645,6 +5645,71 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
 
 
+## GOLD-044：有效 GPT 裁决接入 Review Binding 与连续性门禁
+
+### 1. 背景 / 问题
+
+- §2.15（GOLD-042）给出历史矛盾的 GPT-only 裁决契约、§2.16（GOLD-043）给出单一证据包，
+  但 review 层（§2.8 binding / §2.9 ledger integrity / §2.11 backlog / refill 诊断 /
+  §2.12 precondition）仍把历史矛盾一律视为 `facts_complete=false` ⇒ 即使 GPT 已裁决，
+  该 backlog 项也永远无法进入「可实质 review」；反之，若放宽为「有 store 条目就算通过」，
+  越权 / 漂移 / 冲突裁决会被静默放行；
+- 关键风险：把「裁决」混淆成「Review verdict」会绕过 GPT-only Review 与连续性门禁。
+
+### 2. 变更（最小范围）
+
+- `orchestrator/legacy_result_adjudication.py`：新增 `collect_store_index()` —— review 层
+  共用的**唯一** store 读取入口（只读 + 按 task 归集 + 一致性索引）；§2.16
+  `review_evidence_manifest.collect_adjudication_store` 改为复用它（单一来源，零重复口径）。
+- `orchestrator/review_binding.py`（§2.8）：
+  - manifest 新增 `adjudication` 段（`store_present` / `state` / `valid` / `adjudicated` /
+    `adjudication` / `reason_codes` / `contract_source`）与
+    `binding.{facts_ready,adjudicated,facts_ready_source}`；
+  - 默认行为**不变**（无裁决 ⇒ `facts_complete=false` / `facts_ready=false` / exit `2`）；
+    只有 schema 合法、GPT 权威有效、原 result sha256/status + commit sha/branch + 原始
+    contradiction codes 完全匹配、非重复 / 冲突 / 过期 / 漂移且无其它阻塞 code 的裁决才
+    `adjudicated=true` / `facts_ready=true` / exit `0`；
+  - 原始 contradiction finding、原 result sha256、裁决 identity **原样保留**；越权 / 未知身份
+    / 四类身份漂移 / 重复 / 冲突 / store 不可读 / schema 不支持等 §2.15 稳定 code 原样并入
+    `binding.reason_codes`（fail-closed）；CLI 新增只读 `--adjudication-store`。
+- `orchestrator/review_backlog.py`（§2.11）：逐项新增 `facts_ready` / `adjudicated` /
+  `facts_ready_source` / `adjudication`，新增 `BACKLOG_ITEM_ADJUDICATION_INVALID` 与 summary
+  `facts_ready_count` / `adjudicated_count` / `adjudicated_pending_count` /
+  `unresolved_contradiction_count`；`review_status` 词表（`pending` / `bound` / `invalid`）
+  不变，用 `adjudicated` 稳定区分「未裁决矛盾 / 已裁决待实质 review / 已绑定 / 漂移」。
+- `orchestrator/review_ledger_integrity.py`（§2.9）：台账条目按 `facts_ready` 核对客观身份，
+  `bindings[].{manifest_facts_ready,manifest_adjudicated,manifest_adjudication_state}` 与
+  `ledger.adjudicated_entry_count` 只报告事实；五类身份漂移检测**未放宽**。
+- `orchestrator/planner_mutation_precondition.py`（§2.12）：把同一裁决计数透传到
+  `review_backlog` / `summary`（`adjudicated_count` / `adjudicated_pending_count` /
+  `facts_ready_count` / `unresolved_contradiction_count` / `review_*_count`），
+  绝不改变 `planner_mutation.allowed` 或 blocking 语义。
+- `orchestrator/planner_refill_request.py`（§2.10 refill 诊断）：
+  `completed_but_unreviewed.adjudication` 复用同一 store 读取入口报告 **presence** 事实
+  （`declared_implies_valid=false`、`validation_source=orchestrator.review_binding`），
+  `summary.adjudication_declared_count` 同源；presence ≠ 有效，绝不改任何门禁。
+- 文档：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.17；`README.md` 工具段 + 红线表同步。
+
+### 3. 验证
+
+- `pytest tests/unit/test_review_closure_adjudication.py -q` → 32 passed；
+- `pytest tests/integration/test_review_closure_adjudication_regression.py -q` → 10 passed；
+- `pytest tests -q` / `ruff check .` / `mypy config database src scripts` → 见本次收尾结果；
+- 真实仓库当前事实：没有任何真实裁决 store（Executor 未创建），`GOLD-035` 等 7 个已知矛盾
+  仍 `facts_ready=false` / `needs-gpt-adjudication` / exit `2`；临时演习 store 可让
+  `review_binding` 在**不改写历史**的前提下恢复 `facts_ready=true`，但
+  `last_reviewed_task` 仍为 `GOLD-027`，ledger 连续性仍以 `LEDGER_CHAIN_GAP` fail-closed。
+
+### 4. 遗留 / 建议下一步（由 GPT 决定）
+
+- 真正的历史矛盾裁决、随后的实质 review、`GPT_REVIEW_LEDGER` 追加与 `last_reviewed_task`
+  推进仍**只能由 GPT** 完成（GOLD-045 提供写入前原子预检）；
+- `PHASE3_3_DATA` 保持 BLOCKED；未进入 Phase 3.4，未跨 L3/L4；`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
+
+
+
+
 
 
 

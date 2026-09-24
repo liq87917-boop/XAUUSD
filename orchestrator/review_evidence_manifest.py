@@ -664,33 +664,27 @@ def default_manifest_builder(
 
 
 def collect_adjudication_store(store_path: Path) -> dict[str, Any]:
-    """只读收集 §2.15 裁决 store 事实（``missing`` 是中性事实，绝不创建 / 修复 store）。"""
+    """只读收集 §2.15 裁决 store 事实（``missing`` 是中性事实，绝不创建 / 修复 store）。
 
-    store_section, store_issues, indexed_entries = adjudication.collect_store(store_path)
+    **复用** :func:`orchestrator.legacy_result_adjudication.collect_store_index`
+    （唯一 store 读取入口），本模块不另造第二套 store 解析 / 归集口径。
+    """
 
-    consistency = adjudication.store_consistency_issues(indexed_entries)
-
-    entries_by_task: dict[str, list[int]] = {}
-
-    for index, entry in indexed_entries.items():
-        task_id = adjudication.entry_task_id(entry)
-
-        if task_id is not None:
-            entries_by_task.setdefault(task_id, []).append(index)
+    collected = adjudication.collect_store_index(store_path)
 
     # 「store 不存在」是正常初始状态（尚无真实裁决），不是 fail-closed；其余一律保留。
     issues = [
         issue
-        for issue in store_issues
+        for issue in collected["issues"]
         if str(issue.get("code")) != adjudication.ISSUE_STORE_MISSING
     ]
 
     return {
-        "store_section": store_section,
+        "store_section": collected["store_section"],
         "issues": issues,
-        "indexed_entries": indexed_entries,
-        "consistency": consistency,
-        "entries_by_task": entries_by_task,
+        "indexed_entries": collected["indexed_entries"],
+        "consistency": collected["consistency"],
+        "entries_by_task": collected["entries_by_task"],
     }
 
 

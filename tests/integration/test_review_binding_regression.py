@@ -100,11 +100,16 @@ def own_terminal_commit(task_id: str) -> str:
 
 
 def collect_keys(payload: object) -> set[str]:
+    """递归收集 key；``adjudication`` 子树是 §2.15 裁决事实，不参与结论字段断言（GOLD-044）。"""
+
     found: set[str] = set()
 
     if isinstance(payload, dict):
         for key, value in payload.items():
             found.add(str(key))
+
+            if str(key) == "adjudication":
+                continue
 
             found |= collect_keys(value)
 

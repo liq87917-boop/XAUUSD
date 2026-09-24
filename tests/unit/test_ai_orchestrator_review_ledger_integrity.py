@@ -718,6 +718,8 @@ def test_cli_option_contract_excludes_write_and_planning_flags() -> None:
         "--tasks-dir",
         "--results-dir",
         "--ledger",
+        # GOLD-044：只读裁决 store 路径（只读，不是写入 / repair 开关）。
+        "--adjudication-store",
         "--generated-at",
     }
 

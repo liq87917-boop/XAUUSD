@@ -76,6 +76,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator import ai_orchestrator as orch
+from orchestrator import legacy_result_adjudication as adjudication
 from orchestrator import planner_autopilot_contract as autopilot_contract
 from orchestrator import planner_snapshot as planner
 from orchestrator import planner_snapshot_output as snapshot_output
@@ -317,14 +318,55 @@ def resolve_lookahead_target(
     return raw, LOOKAHEAD_SOURCE_PROJECT_STATE
 
 
+def adjudication_diagnostics(
+    store_path: Path,
+    candidate_ids: Sequence[str],
+) -> dict[str, Any]:
+    """§2.15 裁决 store 的只读**presence** 诊断（不改任何门禁，不替 GPT 判定）。
+
+    GOLD-044：复用 §2.15 :func:`legacy_result_adjudication.collect_store_index` 这一
+    **唯一** store 读取入口，只报告「该未 review 任务在裁决 store 里是否已有声明条目」。
+    身份 / 越权 / 漂移 / 冲突的**有效性**判定属于 §2.15 契约与 §2.8 review binding；
+    本模块绝不在此重算，也绝不把「有条目」当成「已裁决有效」。
+    """
+
+    collected = adjudication.collect_store_index(store_path)
+
+    entries_by_task = collected["entries_by_task"]
+
+    declared = [task_id for task_id in candidate_ids if entries_by_task.get(task_id)]
+
+    undeclared = [task_id for task_id in candidate_ids if not entries_by_task.get(task_id)]
+
+    return {
+        "store_present": bool(collected["store_section"]["present"]),
+        "candidate_count": len(candidate_ids),
+        "declared_task_ids": declared,
+        "declared_count": len(declared),
+        "undeclared_count": len(undeclared),
+        "undeclared_task_ids": undeclared,
+        "declared_implies_valid": False,
+        "validation_source": "orchestrator.review_binding (facts_ready / adjudicated)",
+        "semantics": (
+            "只报告裁决 store 里是否已声明条目；有效性 / 身份匹配只由 §2.8 review binding "
+            "按 §2.15 契约判定，绝不在此重算或当作 Review 结论"
+        ),
+    }
+
+
 def completed_but_unreviewed(
     completed_ids: Sequence[str],
     last_reviewed: str | None,
+    *,
+    adjudication_presence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """终态 completed 中**还没有被 Review 覆盖**的任务（GPT-only Review 事实）。
 
     判定只使用 PROJECT_STATE 的 ``last_reviewed_task`` 指针与 results 终态，
     与 planner snapshot 的 ``is_newer`` 同源，绝不回写任何指针。
+
+    ``adjudication_presence`` 是 §2.15 裁决 store 的只读 presence 诊断（GOLD-044）；它只供
+    GPT 区分「未 review 的任务里哪些已有裁决声明」，**绝不**改变任何计数或门禁。
     """
 
     if last_reviewed is None:
@@ -343,6 +385,7 @@ def completed_but_unreviewed(
         "last_reviewed_pointer": last_reviewed,
         "reviewed_pointer_missing": pointer_missing,
         "review_authority": "gpt_only",
+        "adjudication": adjudication_presence,
     }
 
 
@@ -492,6 +535,12 @@ def authority_section() -> dict[str, Any]:
         "tool_can_write_results": False,
         "tool_can_write_project_state": False,
         "tool_can_write_review_ledger": False,
+        "tool_can_sign_review": False,
+        "tool_can_sign_adjudication": False,
+        "tool_can_write_adjudication": False,
+        "adjudication_source": adjudication.SCHEMA,
+        "adjudication_validation_source": "orchestrator.review_binding",
+        "adjudication_presence_implies_valid": False,
         "tool_can_qualify_data": False,
         "tool_can_transition_phase": False,
         "next_task_content_included": False,
@@ -635,6 +684,7 @@ def build_planner_refill_request(
     state_path: Path | None = None,
     tasks_dir: Path | None = None,
     results_dir: Path | None = None,
+    adjudication_store_path: Path | None = None,
     generated_at: str | None = None,
     lookahead_target: int | None = None,
     snapshot: dict[str, Any] | None = None,
@@ -643,6 +693,10 @@ def build_planner_refill_request(
 
     ``snapshot`` 允许注入已经构建好的 planner snapshot（便于测试与复用），
     否则按 ``root`` / ``state_path`` / ``tasks_dir`` / ``results_dir`` 只读构建一份。
+
+    GOLD-044：``adjudication_store_path``（默认
+    ``<root>/.ai/adjudications/legacy_result_adjudications.json``）只用于给 refill 诊断附带
+    §2.15 裁决 store 的只读 presence 事实；**只读**，绝不创建 / 修复 / 改写，也不改任何门禁。
     """
 
     resolved_root = Path(root) if root is not None else planner.ROOT
@@ -652,6 +706,12 @@ def build_planner_refill_request(
     resolved_tasks = Path(tasks_dir) if tasks_dir is not None else orch.TASK_DIR
 
     resolved_results = Path(results_dir) if results_dir is not None else orch.RESULT_DIR
+
+    resolved_store = (
+        Path(adjudication_store_path)
+        if adjudication_store_path is not None
+        else resolved_root / adjudication.ADJUDICATION_STORE_RELATIVE_PATH
+    )
 
     if snapshot is None:
         snapshot = planner.build_planner_snapshot(
@@ -701,6 +761,10 @@ def build_planner_refill_request(
     unreviewed = completed_but_unreviewed(
         completed_ids,
         planner.pointer_value(state, "last_reviewed_task"),
+    )
+
+    unreviewed["adjudication"] = adjudication_diagnostics(
+        resolved_store, unreviewed["task_ids"]
     )
 
     drift = drift_section(snapshot)
@@ -816,6 +880,10 @@ def build_planner_refill_request(
         # GOLD-036：补队列权只属于 GPT；Executor 永远不能补（只读事实）。
         "executor_can_refill": autopilot_contract.EXECUTOR_CAN_REFILL,
         "completed_but_unreviewed_count": int(unreviewed["count"]),
+        # GOLD-044：只报告裁决 store 的 presence 事实（绝不是有效性 / 不是 Review 结论）。
+        "adjudication_declared_count": int(
+            (unreviewed.get("adjudication") or {}).get("declared_count") or 0
+        ),
         "drift_detected": bool(drift["detected"]),
         "blocker_count": len(blocker_entries),
         "issue_count": len(issues),
@@ -916,6 +984,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--adjudication-store",
+        type=Path,
+        default=None,
+        help=(
+            "§2.15 历史矛盾裁决 store（默认 "
+            f"<root>/{adjudication.ADJUDICATION_STORE_RELATIVE_PATH}）；只读，绝不创建或改写"
+        ),
+    )
+
+    parser.add_argument(
         "--generated-at",
         default=None,
         help="固定 generated_at（便于审计与字节级复现；默认取当前时间）",
@@ -966,6 +1044,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         state_path=state_path,
         tasks_dir=tasks_dir,
         results_dir=results_dir,
+        adjudication_store_path=(
+            Path(args.adjudication_store) if args.adjudication_store is not None else None
+        ),
         generated_at=args.generated_at,
         lookahead_target=args.lookahead_target,
     )

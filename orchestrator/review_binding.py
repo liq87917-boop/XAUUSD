@@ -21,20 +21,28 @@ GOLD-025 已经把 Review 变成机器可审计的台账条目，但那条台账
    ``ai_orchestrator.commit_task_result`` 同源）解析，**绝不猜测、绝不编造**；
 4. task / result 在**该 commit 里的 blob** 与**当前工作树**的内容一致性（以 Git 自己的
    blob id 口径判定，``core.autocrlf`` 等换行转换不算漂移；真正不一致 ⇒ fail-closed）；
-5. 该 result 里**已经记录的** validation 摘要（命令 / 返回码 / 是否超时，**不重新执行**）。
+5. 该 result 里**已经记录的** validation 摘要（命令 / 返回码 / 是否超时，**不重新执行**）；
+6. **§2.15 历史矛盾裁决事实（GOLD-044）**：逐项给出 §2.15 store 状态与**有效 GPT 裁决
+   identity**（``adjudication`` 段）。默认行为不变——legacy 终态矛盾仍 ``facts_complete=
+   false``；只有当存在 schema 合法、GPT 权威有效、原 result / commit / contradiction 身份
+   完全匹配且不冲突的裁决、且**没有其它阻塞 code** 时，``binding.facts_ready`` 才为
+   ``true``（``facts_ready_source=adjudicated``）。原始 contradiction finding、原 result
+   ``sha256`` 与裁决 identity **原样保留**，绝不删除 / 降级 / 伪装历史事实。越权 / 未知
+   身份 / 重复 / 冲突 / 过期 / 漂移裁决一律 fail-closed。
 
 安全红线（与 ``.clinerules`` / ``.ai/DEVELOPMENT_PROTOCOL.md`` 一致）
 --------------------------------------------------------------------
 - 本模块**没有任何写入路径**：不写 review 台账 / 项目状态 / tasks / results，
   不 commit / push / reset / checkout（由源码守卫测试锁定）；
 - **绝不签发 verdict**：输出里不存在 ``verdict`` / ``acceptance_summary`` /
-  ``reviewed_at`` / ``reviewer``；``binding.facts_complete`` 只表示「事实是否齐全」，
-  **不是** Review 结论，也绝不推进任何 review 指针；
+  ``reviewed_at`` / ``reviewer``；``binding.facts_complete`` / ``binding.facts_ready`` 只表示
+  「事实是否齐全 / 是否可绑定」，**不是** Review 结论，也绝不推进任何 review 指针
+  （裁决记录里的 ``reviewer`` 是**事实**，只嵌套在 ``adjudication`` 段内供审计）；
 - 缺失 / 损坏 / 漂移（result 缺失、JSON 损坏、task 与 result 身份不一致、
   未知 status、Git identity 不可解析、工作树版本与目标 commit 不一致）一律
   **fail-closed**，并给出稳定 reason code；
 - 唯一外部进程调用是**只读** git（``log`` / ``ls-tree`` / ``cat-file blob`` 白名单），
-  零网络、零数据库、零业务证据写入、零模型调用。
+  零网络、零数据库、零业务证据写入、零模型调用；裁决 store 只**只读**读取。
 
 用法
 ----
@@ -56,11 +64,12 @@ import json
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from orchestrator import ai_orchestrator as orch
+from orchestrator import legacy_result_adjudication as adjudication
 from orchestrator import planner_snapshot as planner
 from orchestrator import result_terminal_consistency as terminal_consistency
 
@@ -151,6 +160,26 @@ DELEGATED_TERMINAL_CONSISTENCY_CODES = (
     terminal_consistency.REASON_RESULT_INVALID,
 )
 
+# GOLD-044：§2.15 legacy 终态矛盾是**唯一**有 GPT 裁决恢复路径的矛盾 code。只有该矛盾
+# 被有效裁决覆盖时 ``binding.facts_ready`` 才可恢复为 ``true``；其它矛盾 / 缺 commit /
+# 漂移 / 未知组合一律保持 fail-closed（裁决绝不掩盖第二类事实）。
+LEGACY_CONTRADICTION_CODE = terminal_consistency.REASON_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS
+
+# 裁决 store 默认位置（唯一定义在 §2.15 模块；此处只引用其相对路径）。
+ADJUDICATION_STORE_RELATIVE_PATH = adjudication.ADJUDICATION_STORE_RELATIVE_PATH
+
+# ``binding.facts_ready_source`` 的两类来源（机器可读；都不是 Review 结论）：
+# - ``facts``：result / commit / task 客观事实本身齐全；
+# - ``adjudicated``：唯一矛盾（legacy 终态矛盾）已有 §2.15 有效 GPT 裁决覆盖。
+FACTS_READY_SOURCE_FACTS = "facts"
+FACTS_READY_SOURCE_ADJUDICATED = "adjudicated"
+FACTS_READY_SOURCE_NONE = "blocked"
+FACTS_READY_SOURCES = (
+    FACTS_READY_SOURCE_FACTS,
+    FACTS_READY_SOURCE_ADJUDICATED,
+    FACTS_READY_SOURCE_NONE,
+)
+
 SEVERITY_ERROR = "error"
 
 EXIT_OK = 0
@@ -171,6 +200,7 @@ MANIFEST_FIELD_ORDER = (
     "commit",
     "validation",
     "binding",
+    "adjudication",
     "authority",
     "determinism",
     "issues",
@@ -245,13 +275,31 @@ VALIDATION_FIELD_ORDER = (
 
 BINDING_FIELD_ORDER = (
     "facts_complete",
+    "facts_ready",
+    "adjudicated",
+    "facts_ready_source",
     "reason_codes",
     "human_gate",
     "blocking_human_gate",
     "requires_human_approval",
 )
 
+# 裁决事实段（GOLD-044）：逐项给出 §2.15 store 状态与**有效裁决 identity**（事实），
+# 使「未裁决矛盾 / 已裁决待 review」可被机器稳定区分，同时绝不删除原始矛盾 finding。
+ADJUDICATION_FIELD_ORDER = (
+    "store_present",
+    "store_path",
+    "state",
+    "valid",
+    "adjudicated",
+    "adjudication",
+    "reason_codes",
+    "contract_source",
+)
+
 # 输出里**绝不允许**出现的 Review 结论字段（GPT-only Review 的机器可测边界）。
+# 注意：§2.15 裁决记录里的 ``reviewer`` / ``reviewer_role`` 是**事实**（只嵌套在
+# ``adjudication.adjudication`` 内，用于审计「谁签的裁决」），不是本工具产生的结论字段。
 FORBIDDEN_MANIFEST_KEYS = (
     "verdict",
     "acceptance_summary",
@@ -268,6 +316,7 @@ MANIFEST_ORDERING: dict[str, str] = {
     "commit": "COMMIT_FIELD_ORDER",
     "validation": "VALIDATION_FIELD_ORDER",
     "binding": "BINDING_FIELD_ORDER",
+    "adjudication": "ADJUDICATION_FIELD_ORDER",
     "validation.results": "result 文件 attempt 顺序 + 段内 validation 顺序",
     "validation.commands": "sorted unique",
     "issues": "sorted by (code, detail)",
@@ -591,6 +640,125 @@ def terminal_consistency_issues(payload: dict[str, Any]) -> list[dict[str, str]]
         for item in report["details"]
         if str(item["code"]) not in DELEGATED_TERMINAL_CONSISTENCY_CODES
     ]
+
+
+# ============================================================
+# §2.15 裁决事实段（GOLD-044）：唯一恢复路径 = 有效 GPT 裁决
+# ============================================================
+
+
+def empty_adjudication_section() -> dict[str, Any]:
+    """恒定的空裁决事实段（字段顺序稳定 = 输出可重复）。"""
+
+    return {
+        "store_present": False,
+        "store_path": None,
+        "state": None,
+        "valid": None,
+        "adjudicated": False,
+        "adjudication": None,
+        "reason_codes": [],
+        "contract_source": adjudication.SCHEMA,
+    }
+
+
+def live_facts_for_adjudication(
+    *,
+    result_section: Mapping[str, Any],
+    commit_section: Mapping[str, Any],
+    result_payload: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """本模块 manifest 事实 → §2.15 ``evaluate_task`` 需要的 live facts（**同一口径**）。"""
+
+    return {
+        "result_path": result_section.get("path"),
+        "result_sha256": result_section.get("sha256"),
+        "result_status": result_section.get("status"),
+        "result_payload": result_payload,
+        "commit_sha": commit_section.get("sha"),
+        "commit_branch": commit_section.get("branch"),
+        "commit_resolved": commit_section.get("resolved") is True,
+    }
+
+
+def adjudication_facts(
+    task_id: str | None,
+    *,
+    store_path: Path,
+    result_section: Mapping[str, Any],
+    commit_section: Mapping[str, Any],
+    result_payload: dict[str, Any] | None,
+    non_legacy_reason_codes: Sequence[str],
+) -> tuple[dict[str, Any], list[dict[str, str]], bool]:
+    """§2.15 裁决事实：``(section, issues, adjudicated)``（只读、fail-closed）。
+
+    - **唯一事实来源**：复用 §2.15 :func:`legacy_result_adjudication.collect_store_index` /
+      :func:`legacy_result_adjudication.evaluate_task`；本模块不另造第二套裁决 identity /
+      漂移 / 越权判定；
+    - **默认行为不变**：store 缺失 / 无该项目裁决 ⇒ ``adjudicated=False``，原始
+      contradiction finding 与 result sha256 原样保留（``facts_complete`` 仍为 ``false``）；
+    - **只有有效裁决才恢复事实可绑定性**：``state=adjudicated``（schema 合法、GPT 权威有效、
+      result/commit/contradiction 身份完全匹配、非重复 / 冲突 / 过期）**且** binding 不存在
+      任何**非 legacy** 的阻塞 reason code 时 ``adjudicated=True``；
+    - **越权 / 漂移 / 重复 / 冲突裁决 fail-closed**：§2.15 的稳定 issue code 原样并入
+      binding ``reason_codes``，绝不因此放行。
+    """
+
+    section = empty_adjudication_section()
+
+    section["store_path"] = str(store_path)
+
+    collected = adjudication.collect_store_index(store_path)
+
+    section["store_present"] = bool(collected["store_section"]["present"])
+
+    issues: list[dict[str, str]] = []
+
+    # store 层面的稳定性问题（schema 不支持 / entries 非法 / 条目缺 task_id 等）必须
+    # fail-closed 可见；「store 不存在」是中性事实（尚无裁决），不在此上报。
+    issues.extend(
+        dict(issue)
+        for issue in collected["issues"]
+        if str(issue.get("code")) != adjudication.ISSUE_STORE_MISSING
+    )
+
+    if task_id is None:
+        return section, issues, False
+
+    view = adjudication.evaluate_task(
+        task_id,
+        entries_by_task=collected["entries_by_task"],
+        indexed_entries=collected["indexed_entries"],
+        consistency=collected["consistency"],
+        live=live_facts_for_adjudication(
+            result_section=result_section,
+            commit_section=commit_section,
+            result_payload=result_payload,
+        ),
+        as_of=None,
+    )
+
+    state = view["state"]
+
+    section["state"] = state
+
+    section["valid"] = bool(view["valid"])
+
+    section["adjudication"] = view["adjudication"]
+
+    section["reason_codes"] = list(view["reason_codes"])
+
+    if state == adjudication.TASK_STATE_INVALID:
+        # 存在裁决记录但非法（越权 / 未知身份 / 重复 / 冲突 / 过期 / 身份漂移）⇒ fail-closed。
+        issues.extend(dict(issue) for issue in view["issues"])
+
+    adjudicated = (
+        state == adjudication.TASK_STATE_ADJUDICATED and not non_legacy_reason_codes
+    )
+
+    section["adjudicated"] = adjudicated
+
+    return section, issues, adjudicated
 
 
 def validation_section(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1086,6 +1254,21 @@ def authority_section() -> dict[str, Any]:
         "reader_agents": list(planner.EXECUTOR_AGENTS),
         "fact_scope": "content identity only: sha256 of raw file bytes + git identity",
         "facts_complete_semantics": "事实齐全供 GPT Review 使用，不是 Review 结论",
+        "facts_ready_semantics": (
+            "事实可绑定性：facts_complete 为真，或唯一阻塞（legacy 终态矛盾）已有 §2.15 "
+            "有效 GPT 裁决覆盖；仍然**不是** Review 结论，也不推进任何指针"
+        ),
+        "facts_ready_sources": list(FACTS_READY_SOURCES),
+        "adjudication_contract_source": adjudication.SCHEMA,
+        "adjudication_rule_source": (
+            "orchestrator.legacy_result_adjudication (只读；本模块不另造裁决身份算法)"
+        ),
+        "tool_can_sign_adjudication": False,
+        "tool_can_repair_result": False,
+        "writes_adjudications": False,
+        "adjudication_implies_verdict": False,
+        "adjudication_advances_review_pointer": False,
+        "adjudication_lifts_phase3_3_blocker": False,
         "blocking_human_gates": sorted(orch.BLOCKING_HUMAN_GATES),
     }
 
@@ -1131,19 +1314,31 @@ def build_review_binding_manifest(
     root: Path | None = None,
     tasks_dir: Path | None = None,
     results_dir: Path | None = None,
+    adjudication_store_path: Path | None = None,
     generated_at: str | None = None,
     commit_log_provider: CommitLogProvider | None = None,
     blob_id_reader: BlobIdReader | None = None,
     blob_bytes_reader: BlobBytesReader | None = None,
     worktree_blob_id_reader: WorktreeBlobIdReader | None = None,
 ) -> dict[str, Any]:
-    """构建只读 Review Binding Manifest（**只产事实，绝不签发 Review 结论**）。"""
+    """构建只读 Review Binding Manifest（**只产事实，绝不签发 Review 结论**）。
+
+    ``adjudication_store_path`` 指向 §2.15 历史矛盾裁决 store（默认
+    ``<root>/.ai/adjudications/legacy_result_adjudications.json``）；本模块只**只读**读取它，
+    绝不创建 / 修复 / 改写 store，也绝不改写任何历史 result。
+    """
 
     resolved_root = Path(root) if root is not None else ROOT
 
     resolved_tasks = Path(tasks_dir) if tasks_dir is not None else Path(orch.TASK_DIR)
 
     resolved_results = Path(results_dir) if results_dir is not None else Path(orch.RESULT_DIR)
+
+    resolved_store = (
+        Path(adjudication_store_path)
+        if adjudication_store_path is not None
+        else resolved_root / ADJUDICATION_STORE_RELATIVE_PATH
+    )
 
     log_provider = commit_log_provider if commit_log_provider is not None else git_commit_log
 
@@ -1219,7 +1414,44 @@ def build_review_binding_manifest(
 
     ordered_issues = sorted(issues, key=lambda item: (item["code"], item["detail"]))
 
+    raw_reason_codes = sorted({issue["code"] for issue in ordered_issues})
+
+    # §2.15 裁决事实：只有「唯一阻塞是 legacy 终态矛盾」时，有效裁决才可能恢复可绑定性。
+    non_legacy_reason_codes = [
+        code for code in raw_reason_codes if code != LEGACY_CONTRADICTION_CODE
+    ]
+
+    adjudication_section, adjudication_issues, adjudicated = adjudication_facts(
+        requested,
+        store_path=resolved_store,
+        result_section=result_section,
+        commit_section=commit_section,
+        result_payload=result_payload,
+        non_legacy_reason_codes=non_legacy_reason_codes,
+    )
+
+    if adjudication_issues:
+        issues.extend(adjudication_issues)
+
+        ordered_issues = sorted(issues, key=lambda item: (item["code"], item["detail"]))
+
     reason_codes = sorted({issue["code"] for issue in ordered_issues})
+
+    facts_complete = not reason_codes
+
+    facts_ready = facts_complete or adjudicated
+
+    facts_ready_source = (
+        FACTS_READY_SOURCE_FACTS
+        if facts_complete
+        else FACTS_READY_SOURCE_ADJUDICATED
+        if adjudicated
+        else FACTS_READY_SOURCE_NONE
+    )
+
+    # GOLD-044：`facts_ready` 只表达「客观事实可绑定供 GPT 实质 review」；无效 / 未裁决的
+    # 矛盾仍是 fail-closed（exit 2）。退出码 0 **不是** GPT PASS，也绝不推进任何指针。
+    exit_code = EXIT_OK if facts_ready else manifest_exit_code(ordered_issues)
 
     manifest: dict[str, Any] = {
         "schema": REVIEW_BINDING_SCHEMA,
@@ -1239,12 +1471,16 @@ def build_review_binding_manifest(
         "commit": commit_section,
         "validation": validation,
         "binding": {
-            "facts_complete": not reason_codes,
+            "facts_complete": facts_complete,
+            "facts_ready": facts_ready,
+            "adjudicated": adjudicated,
+            "facts_ready_source": facts_ready_source,
             "reason_codes": reason_codes,
             "human_gate": gate,
             "blocking_human_gate": bool(gate) and gate in orch.BLOCKING_HUMAN_GATES,
             "requires_human_approval": requires_approval,
         },
+        "adjudication": adjudication_section,
         "authority": authority_section(),
         "determinism": determinism_section(),
         "issues": ordered_issues,
@@ -1252,8 +1488,8 @@ def build_review_binding_manifest(
             "issue_count": len(ordered_issues),
             "error_count": len(ordered_issues),
             "warning_count": 0,
-            "facts_complete": not reason_codes,
-            "exit_code": manifest_exit_code(ordered_issues),
+            "facts_complete": facts_complete,
+            "exit_code": exit_code,
         },
     }
 
@@ -1312,6 +1548,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--adjudication-store",
+        type=Path,
+        default=None,
+        help=(
+            "§2.15 历史矛盾裁决 store（默认 "
+            f"<root>/{ADJUDICATION_STORE_RELATIVE_PATH}）；只读，绝不创建或改写"
+        ),
+    )
+
+    parser.add_argument(
         "--generated-at",
         default=None,
         help="固定 generated_at（便于审计与字节级复现；默认取当前时间）",
@@ -1333,11 +1579,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         Path(args.results_dir) if args.results_dir is not None else root / ".ai" / "results"
     )
 
+    store_path = (
+        Path(args.adjudication_store)
+        if args.adjudication_store is not None
+        else root / ADJUDICATION_STORE_RELATIVE_PATH
+    )
+
     manifest = build_review_binding_manifest(
         args.task,
         root=root,
         tasks_dir=tasks_dir,
         results_dir=results_dir,
+        adjudication_store_path=store_path,
         generated_at=args.generated_at,
     )
 
@@ -1349,9 +1602,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"[{issue['severity']}] {issue['code']}: {issue['detail']}", file=sys.stderr)
 
     if not manifest["binding"]["facts_complete"]:
-        codes = ", ".join(manifest["binding"]["reason_codes"])
+        binding_facts = manifest["binding"]
 
-        print(f"[binding] facts_complete=False | fail-closed: {codes}", file=sys.stderr)
+        codes = ", ".join(binding_facts["reason_codes"])
+
+        status = (
+            "facts_ready=True (adjudicated)"
+            if binding_facts["facts_ready"]
+            else "fail-closed"
+        )
+
+        print(
+            f"[binding] facts_complete=False | facts_ready={binding_facts['facts_ready']} | "
+            f"{status}: {codes}",
+            file=sys.stderr,
+        )
 
     return int(manifest["summary"]["exit_code"])
 

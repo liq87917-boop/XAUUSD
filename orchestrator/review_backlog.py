@@ -78,6 +78,7 @@ from pathlib import Path
 from typing import Any
 
 from orchestrator import ai_orchestrator as orch
+from orchestrator import legacy_result_adjudication as adjudication
 from orchestrator import planner_snapshot as planner
 from orchestrator import planner_snapshot_output as snapshot_output
 from orchestrator import review_binding as binding
@@ -126,6 +127,7 @@ ISSUE_PROJECT_STATE_UNREADABLE = "PROJECT_STATE_UNREADABLE"
 ISSUE_LAST_REVIEWED_POINTER_MISSING = "LAST_REVIEWED_TASK_POINTER_MISSING"
 ISSUE_BACKLOG_ITEM_MANIFEST_UNUSABLE = "BACKLOG_ITEM_MANIFEST_UNUSABLE"
 ISSUE_BACKLOG_ITEM_FACTS_INCOMPLETE = "BACKLOG_ITEM_FACTS_INCOMPLETE"
+ISSUE_BACKLOG_ITEM_ADJUDICATION_INVALID = "BACKLOG_ITEM_ADJUDICATION_INVALID"
 ISSUE_BACKLOG_ITEM_LEDGER_INVALID = "BACKLOG_ITEM_LEDGER_INVALID"
 ISSUE_BACKLOG_ITEM_RESULT_HASH_DRIFT = "BACKLOG_ITEM_RESULT_HASH_DRIFT"
 ISSUE_BACKLOG_ITEM_RESULT_STATUS_DRIFT = "BACKLOG_ITEM_RESULT_STATUS_DRIFT"
@@ -140,6 +142,7 @@ UNAVAILABLE_CODES = (ISSUE_PROJECT_STATE_UNREADABLE, *integrity.LEDGER_UNAVAILAB
 BACKLOG_ORDERING: dict[str, str] = {
     "backlog": "planner.task_rank（项目前缀最新排最后，再按 task_id_sort_key）",
     "backlog[].missing_reason_codes": "sorted unique（review_binding reason codes）",
+    "backlog[].adjudication.reason_codes": "sorted unique（§2.15 reason codes）",
     "backlog[].reason_codes": "sorted unique",
     "ledger.entry_task_ids": "ledger 文件原始顺序",
     "ledger.duplicate_tasks": "planner.task_id_sort_key",
@@ -176,8 +179,13 @@ def default_manifest_builder(
     root: Path,
     tasks_dir: Path,
     results_dir: Path,
+    adjudication_store_path: Path,
 ) -> ManifestBuilder:
-    """默认 manifest 来源：``orchestrator.review_binding``（只读 Git 白名单）。"""
+    """默认 manifest 来源：``orchestrator.review_binding``（只读 Git 白名单）。
+
+    GOLD-044：把**同一** §2.15 裁决 store 路径透传给 §2.8 manifest，使逐项
+    ``facts_ready`` / ``adjudicated`` 与本工具复用同一裁决事实（不另造第二套判定）。
+    """
 
     def build(task_id: str) -> dict[str, Any]:
         return binding.build_review_binding_manifest(
@@ -185,6 +193,7 @@ def default_manifest_builder(
             root=root,
             tasks_dir=tasks_dir,
             results_dir=results_dir,
+            adjudication_store_path=adjudication_store_path,
         )
 
     return build
@@ -242,14 +251,42 @@ def manifest_item_facts(manifest: dict[str, Any] | None, task_id: str) -> dict[s
     result = payload.get("result")
     commit = payload.get("commit")
     binding_section = payload.get("binding")
+    adjudication_section = payload.get("adjudication")
 
     result_section = result if isinstance(result, dict) else {}
     commit_section = commit if isinstance(commit, dict) else {}
     binding_facts = binding_section if isinstance(binding_section, dict) else {}
+    adjudication_facts = (
+        adjudication_section if isinstance(adjudication_section, dict) else {}
+    )
+
+    facts_complete = bool(binding_facts.get("facts_complete"))
+
+    adjudicated = bool(binding_facts.get("adjudicated"))
+
+    # GOLD-044：裁决事实（§2.15）只作为**引用**带出，不在此复制结论；缺段时安全回落。
+    adjudication_state = (
+        adjudication_facts.get("state") if adjudication_facts else None
+    )
 
     return {
         "task_id": task_id,
-        "facts_complete": bool(binding_facts.get("facts_complete")),
+        "facts_complete": facts_complete,
+        # ``facts_ready`` 兼容旧 manifest（缺字段时按 ``facts_complete`` 回落，绝不放宽）。
+        "facts_ready": bool(binding_facts.get("facts_ready", facts_complete)),
+        "adjudicated": adjudicated,
+        "facts_ready_source": binding_facts.get("facts_ready_source"),
+        "adjudication_state": adjudication_state,
+        "adjudication": {
+            "state": adjudication_state,
+            "valid": adjudication_facts.get("valid") if adjudication_facts else None,
+            "adjudication": (
+                adjudication_facts.get("adjudication") if adjudication_facts else None
+            ),
+            "reason_codes": sorted(
+                {str(code) for code in (adjudication_facts.get("reason_codes") or [])}
+            ),
+        },
         "missing_reason_codes": sorted(
             {str(code) for code in binding_facts.get("reason_codes") or []}
         ),
@@ -355,13 +392,27 @@ def backlog_item(
 
     facts_complete = bool(facts["facts_complete"]) and manifest_error is None
 
-    if manifest_error is None and not facts_complete:
+    facts_ready = bool(facts["facts_ready"]) and manifest_error is None
+
+    adjudicated = bool(facts["adjudicated"]) and manifest_error is None
+
+    if manifest_error is None and not facts_ready:
         issues.append(
             make_issue(
                 ISSUE_BACKLOG_ITEM_FACTS_INCOMPLETE,
-                f"{task_id}: review_binding facts_complete=false"
-                f"（{', '.join(facts['missing_reason_codes']) or 'unknown'}）："
-                "result / commit 身份不齐，禁止猜测 commit 或 hash",
+                f"{task_id}: review_binding facts_ready=false"
+                f"（facts_complete={facts['facts_complete']}, adjudicated={facts['adjudicated']}；"
+                f"{', '.join(facts['missing_reason_codes']) or 'unknown'}）："
+                "result / commit 身份不齐或矛盾未裁决，禁止猜测 commit 或 hash",
+            )
+        )
+
+    if manifest_error is None and facts["adjudication_state"] == adjudication.TASK_STATE_INVALID:
+        issues.append(
+            make_issue(
+                ISSUE_BACKLOG_ITEM_ADJUDICATION_INVALID,
+                f"{task_id}: 裁决记录存在但非法 / 冲突"
+                f"（{', '.join(facts['adjudication']['reason_codes']) or 'unknown'}）：fail-closed",
             )
         )
 
@@ -382,7 +433,7 @@ def backlog_item(
 
     declared: dict[str, Any] | None = None
 
-    if entry_valid and facts_complete:
+    if entry_valid and facts_ready:
         declared = entry_identity(valid_entries[0])
 
         issues.extend(
@@ -393,7 +444,7 @@ def backlog_item(
             )
         )
 
-    if not facts_complete or (entry_present and not entry_valid) or issues:
+    if not facts_ready or (entry_present and not entry_valid) or issues:
         review_status = REVIEW_STATUS_INVALID
     elif entry_valid:
         review_status = REVIEW_STATUS_BOUND
@@ -404,6 +455,12 @@ def backlog_item(
         "task_id": task_id,
         "review_status": review_status,
         "facts_complete": facts_complete,
+        # GOLD-044：``adjudicated=true`` 只表示「唯一矛盾已有 §2.15 有效 GPT 裁决」，
+        # 使「未裁决矛盾」与「已裁决待实质 review」可被机器稳定区分；不是 Review 结论。
+        "facts_ready": facts_ready,
+        "adjudicated": adjudicated,
+        "facts_ready_source": facts["facts_ready_source"] if manifest_error is None else None,
+        "adjudication": facts["adjudication"],
         "missing_reason_codes": (
             facts["missing_reason_codes"] if manifest_error is None else []
         ),
@@ -487,6 +544,17 @@ def authority_section() -> dict[str, Any]:
             "objective binding state only (pending/bound/invalid); never a review outcome"
         ),
         "review_status_values": list(REVIEW_STATUSES),
+        "facts_ready_semantics": (
+            "客观事实可绑定供 GPT 实质 review（facts_complete 或唯一 legacy 矛盾已有 §2.15 "
+            "有效 GPT 裁决）；仍然**不是** Review 结论，也不推进任何指针"
+        ),
+        "adjudication_source": adjudication.SCHEMA,
+        "adjudication_rule_source": (
+            "orchestrator.legacy_result_adjudication -> orchestrator.review_binding "
+            "(本工具不另造裁决 fact)"
+        ),
+        "tool_can_sign_adjudication": False,
+        "tool_can_write_adjudication": False,
         "backlog_scope_rule": (
             "completed results strictly newer than PROJECT_STATE.last_reviewed_task"
         ),
@@ -559,6 +627,7 @@ def build_review_backlog_manifest(
     results_dir: Path | None = None,
     state_path: Path | None = None,
     ledger_path: Path | None = None,
+    adjudication_store_path: Path | None = None,
     generated_at: str | None = None,
     manifest_builder: ManifestBuilder | None = None,
 ) -> dict[str, Any]:
@@ -566,6 +635,10 @@ def build_review_backlog_manifest(
 
     ``manifest_builder`` 允许注入已经构建好的 GOLD-031 manifest 来源（便于测试与复用）；
     默认逐项调用 :func:`orchestrator.review_binding.build_review_binding_manifest`。
+
+    ``adjudication_store_path`` 指向 §2.15 历史矛盾裁决 store（默认
+    ``<root>/.ai/adjudications/legacy_result_adjudications.json``）；只在默认 builder 下生效，
+    且只**只读**读取（绝不创建 / 修复 / 改写 store）。
     """
 
     resolved_root = Path(root) if root is not None else ROOT
@@ -582,10 +655,18 @@ def build_review_backlog_manifest(
         else resolved_root / ledger_mod.REVIEW_LEDGER_RELATIVE_PATH
     )
 
+    resolved_store = (
+        Path(adjudication_store_path)
+        if adjudication_store_path is not None
+        else resolved_root / binding.ADJUDICATION_STORE_RELATIVE_PATH
+    )
+
     builder = (
         manifest_builder
         if manifest_builder is not None
-        else default_manifest_builder(resolved_root, resolved_tasks, resolved_results)
+        else default_manifest_builder(
+            resolved_root, resolved_tasks, resolved_results, resolved_store
+        )
     )
 
     issues: list[dict[str, str]] = []
@@ -706,6 +787,7 @@ def build_review_backlog_manifest(
             "results_dir": str(resolved_results),
             "project_state": str(resolved_state),
             "review_ledger": str(resolved_ledger),
+            "adjudication_store": str(resolved_store),
         },
         "coverage": {
             "last_reviewed_task_pointer": last_reviewed,
@@ -755,6 +837,19 @@ def build_review_backlog_manifest(
             "invalid_count": status_counts[REVIEW_STATUS_INVALID],
             "status_counts": status_counts,
             "facts_incomplete_count": sum(1 for item in backlog if not item["facts_complete"]),
+            # GOLD-044：稳定区分「已裁决待实质 review」与「未裁决矛盾 / 事实不齐」。
+            "facts_ready_count": sum(1 for item in backlog if item["facts_ready"]),
+            "adjudicated_count": sum(1 for item in backlog if item["adjudicated"]),
+            "adjudicated_pending_count": sum(
+                1
+                for item in backlog
+                if item["adjudicated"] and item["review_status"] == REVIEW_STATUS_PENDING
+            ),
+            "unresolved_contradiction_count": sum(
+                1
+                for item in backlog
+                if not item["facts_ready"] and not item["adjudicated"]
+            ),
             "duplicate_task_count": len(ledger_view["duplicate_tasks"]),
             "chain_gap_count": len(chain.get("missing_in_window") or []),
             "issue_count": len(ordered_issues),
@@ -821,6 +916,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--adjudication-store",
+        type=Path,
+        default=None,
+        help=(
+            "§2.15 历史矛盾裁决 store（默认 "
+            f"<root>/{binding.ADJUDICATION_STORE_RELATIVE_PATH}）；只读，绝不创建或改写"
+        ),
+    )
+
+    parser.add_argument(
         "--generated-at",
         default=None,
         help="固定 generated_at（便于审计与字节级复现；默认取当前时间）",
@@ -868,6 +973,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         results_dir=results_dir,
         state_path=state_path,
         ledger_path=ledger_path,
+        adjudication_store_path=(
+            Path(args.adjudication_store) if args.adjudication_store is not None else None
+        ),
         generated_at=args.generated_at,
     )
 
@@ -895,12 +1003,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     print(
         "[backlog] last_reviewed={last_reviewed} count={count} bound={bound} "
-        "pending={pending} invalid={invalid} missing={missing} codes={codes}".format(
+        "pending={pending} invalid={invalid} adjudicated={adjudicated} missing={missing} "
+        "codes={codes}".format(
             last_reviewed=payload["coverage"]["last_reviewed_task_pointer"],
             count=payload["summary"]["backlog_count"],
             bound=payload["summary"]["bound_count"],
             pending=payload["summary"]["pending_count"],
             invalid=payload["summary"]["invalid_count"],
+            adjudicated=payload["summary"]["adjudicated_count"],
             missing=",".join(payload["missing_reason_codes"]),
             codes=",".join(payload["reason_codes"]),
         ),

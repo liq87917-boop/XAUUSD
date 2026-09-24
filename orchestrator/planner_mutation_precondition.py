@@ -84,6 +84,7 @@ from orchestrator import planner_refill_request as refill
 from orchestrator import planner_snapshot as planner
 from orchestrator import planner_snapshot_output as snapshot_output
 from orchestrator import review_backlog as backlog_mod
+from orchestrator import review_binding as binding
 from orchestrator import review_ledger as ledger_mod
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -584,13 +585,15 @@ def backlog_facts(
     results_dir: Path,
     state_path: Path,
     ledger_path: Path,
+    adjudication_store_path: Path,
     generated_at: str,
     backlog_builder: BacklogBuilder | None,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     """formal review backlog 指针（**复用** §2.11 manifest；绝不签发 review 结论）。
 
     返回 ``(section, issues)``。manifest 来源异常时 fail-closed（``available=false``），
-    **绝不猜测 backlog 或 review 指针**。
+    **绝不猜测 backlog 或 review 指针**。GOLD-044：``adjudication_store_path`` 透传给 §2.11
+    manifest，使 refill 诊断（``review_backlog`` / ``refill`` 子事实）复用**同一** §2.15 裁决事实。
     """
 
     try:
@@ -603,6 +606,7 @@ def backlog_facts(
                 results_dir=results_dir,
                 state_path=state_path,
                 ledger_path=ledger_path,
+                adjudication_store_path=adjudication_store_path,
                 generated_at=generated_at,
             )
         )
@@ -639,10 +643,13 @@ def backlog_facts(
             "available": True,
             "backlog_digest": manifest.get("backlog_digest"),
             "pointer": {
+                "adjudicated_count": summary.get("adjudicated_count"),
+                "adjudicated_pending_count": summary.get("adjudicated_pending_count"),
                 "backlog_count": summary.get("backlog_count"),
                 "backlog_first": coverage.get("backlog_first"),
                 "backlog_last": coverage.get("backlog_last"),
                 "bound_count": summary.get("bound_count"),
+                "facts_ready_count": summary.get("facts_ready_count"),
                 "invalid_count": summary.get("invalid_count"),
                 "last_reviewed_task": pointer.get("last_reviewed_task"),
                 "last_reviewed_task_has_valid_ledger_entry": pointer.get(
@@ -653,6 +660,9 @@ def backlog_facts(
                 ),
                 "newest_completed_result": pointer.get("newest_completed_result"),
                 "pending_count": summary.get("pending_count"),
+                "unresolved_contradiction_count": summary.get(
+                    "unresolved_contradiction_count"
+                ),
             },
             "reason_codes": sorted({str(code) for code in (manifest.get("reason_codes") or [])}),
             "review_status_semantics": (
@@ -661,10 +671,16 @@ def backlog_facts(
             "schema": manifest.get("schema"),
             "source": BACKLOG_SOURCE,
             "summary": {
+                "adjudicated_count": summary.get("adjudicated_count"),
+                "adjudicated_pending_count": summary.get("adjudicated_pending_count"),
                 "backlog_count": summary.get("backlog_count"),
                 "exit_code": summary.get("exit_code"),
                 "facts_incomplete_count": summary.get("facts_incomplete_count"),
+                "facts_ready_count": summary.get("facts_ready_count"),
                 "issue_count": summary.get("issue_count"),
+                "unresolved_contradiction_count": summary.get(
+                    "unresolved_contradiction_count"
+                ),
             },
             "tool_can_sign_review": False,
             "tool_can_write_review_ledger": False,
@@ -803,6 +819,9 @@ def authority_section() -> dict[str, Any]:
         "stale_recovery": (
             "re-read the latest remote HEAD and rebuild this fact package before any planner write"
         ),
+        "adjudication_source": binding.adjudication.SCHEMA,
+        "tool_can_sign_adjudication": False,
+        "tool_can_write_adjudication": False,
         "facts_sources": dict(FACTS_SOURCES),
     }
 
@@ -878,6 +897,7 @@ def build_planner_mutation_precondition(
     tasks_dir: Path | None = None,
     results_dir: Path | None = None,
     ledger_path: Path | None = None,
+    adjudication_store_path: Path | None = None,
     generated_at: str | None = None,
     expected_head_sha: object = None,
     snapshot: dict[str, Any] | None = None,
@@ -890,6 +910,11 @@ def build_planner_mutation_precondition(
     四个事实子包（planner snapshot / refill request / review backlog / HEAD）都允许注入已构建好
     的结果，便于测试与复用；默认逐项调用既有只读 builder，本模块自身的判定算法**为零**
     （只做稳定 code 归一化与比对）。
+
+    GOLD-044：``adjudication_store_path`` 指向 §2.15 历史矛盾裁决 store（默认
+    ``<root>/.ai/adjudications/legacy_result_adjudications.json``），透传给 §2.11 backlog
+    builder（只**只读**读取），使 review backlog 与 refill 诊断区分「未裁决矛盾 / 已裁决待
+    review / 已绑定 / 身份漂移」时复用**同一**裁决事实。
     """
 
     resolved_root = Path(root) if root is not None else ROOT
@@ -908,6 +933,12 @@ def build_planner_mutation_precondition(
         Path(ledger_path)
         if ledger_path is not None
         else resolved_root / ledger_mod.REVIEW_LEDGER_RELATIVE_PATH
+    )
+
+    resolved_store = (
+        Path(adjudication_store_path)
+        if adjudication_store_path is not None
+        else resolved_root / binding.ADJUDICATION_STORE_RELATIVE_PATH
     )
 
     resolved_generated_at = generated_at if generated_at is not None else orch.now_iso()
@@ -970,6 +1001,7 @@ def build_planner_mutation_precondition(
         results_dir=resolved_results,
         state_path=resolved_state,
         ledger_path=resolved_ledger,
+        adjudication_store_path=resolved_store,
         generated_at=resolved_generated_at,
         backlog_builder=backlog_builder,
     )
@@ -1013,6 +1045,7 @@ def build_planner_mutation_precondition(
         "generated_at": resolved_generated_at,
         "issues": issues,
         "paths": {
+            "adjudication_store": str(resolved_store),
             "project_state": str(resolved_state),
             "results_dir": str(resolved_results),
             "review_ledger": str(resolved_ledger),
@@ -1068,6 +1101,21 @@ def build_planner_mutation_precondition(
         "queue_head": payload["queue_head"],
         "queue_pending_count": payload["task_queue"]["pending_count"],
         "refill_required": refill_section.get("refill_required"),
+        "review_adjudicated_count": (
+            backlog_section.get("summary", {}).get("adjudicated_count")
+            if isinstance(backlog_section.get("summary"), dict)
+            else None
+        ),
+        "review_facts_ready_count": (
+            backlog_section.get("summary", {}).get("facts_ready_count")
+            if isinstance(backlog_section.get("summary"), dict)
+            else None
+        ),
+        "review_unresolved_contradiction_count": (
+            backlog_section.get("summary", {}).get("unresolved_contradiction_count")
+            if isinstance(backlog_section.get("summary"), dict)
+            else None
+        ),
         "stale_remote_head": bool(remote_head.get("stale")),
         "state_result_drift": bool(payload["drift"]["state_fact_codes"]),
         "warning_count": len(issues) - error_count,
@@ -1201,6 +1249,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--adjudication-store",
+        type=Path,
+        default=None,
+        help=(
+            "§2.15 历史矛盾裁决 store（默认 "
+            f"<root>/{binding.ADJUDICATION_STORE_RELATIVE_PATH}）；只读，绝不创建或改写"
+        ),
+    )
+
+    parser.add_argument(
         "--generated-at",
         default=None,
         help="固定 generated_at（便于审计与字节级复现；默认取当前时间）",
@@ -1243,6 +1301,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         tasks_dir=Path(args.tasks_dir) if args.tasks_dir is not None else None,
         results_dir=Path(args.results_dir) if args.results_dir is not None else None,
         ledger_path=Path(args.ledger) if args.ledger is not None else None,
+        adjudication_store_path=(
+            Path(args.adjudication_store) if args.adjudication_store is not None else None
+        ),
         generated_at=args.generated_at,
         expected_head_sha=args.expected_head_sha,
     )

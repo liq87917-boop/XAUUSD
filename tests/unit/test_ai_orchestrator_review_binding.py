@@ -200,13 +200,21 @@ def tree_digest(root: Path) -> dict[str, str]:
 
 
 def collect_keys(payload: object) -> set[str]:
-    """递归收集所有 dict key（用于断言 manifest 里没有任何 Review 结论字段）。"""
+    """递归收集所有 dict key（用于断言 manifest 里没有任何 Review 结论字段）。
+
+    GOLD-044：``adjudication`` 子树是 §2.15 裁决**事实**（``items[].adjudication`` 内的
+    ``reviewer`` / ``reviewer_role`` 是审计身份，不是本工具产生的结论），故只登记该 key、
+    不递归其内容；其余任何位置出现结论字段仍会被断言抓到。
+    """
 
     found: set[str] = set()
 
     if isinstance(payload, dict):
         for key, value in payload.items():
             found.add(str(key))
+
+            if str(key) == "adjudication":
+                continue
 
             found |= collect_keys(value)
 
@@ -1236,6 +1244,8 @@ def test_cli_option_contract_excludes_write_and_planning_flags() -> None:
         "--root",
         "--tasks-dir",
         "--results-dir",
+        # GOLD-044：只读裁决 store 路径（只读，不是写入 / planning 开关）。
+        "--adjudication-store",
         "--generated-at",
     }
 
