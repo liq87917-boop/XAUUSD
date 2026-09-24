@@ -25,7 +25,7 @@
     },
     {
       "code": "GOLD_047_REMOTE_CI_FAILURE",
-      "detail": "GitHub Actions CI runs 36026387906 for GOLD-047 commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b, 36027627116 for cc9213beb50907504e993af1f0e448369f6a16f3, and 36034679803 for reviewed remote HEAD 490c1decf1ba4b316019c7a272726d04601b8fab all completed with conclusion=failure. Job-level logs and failing assertions were not supplied, so GPT cannot safely infer or prescribe a code fix. GOLD-047 cannot be accepted until a subsequent matching remote HEAD has green Python 3.12, Python 3.13, and PostgreSQL jobs.",
+      "detail": "GitHub Actions CI runs 36026387906 for GOLD-047 commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b, 36027627116 for cc9213beb50907504e993af1f0e448369f6a16f3, 36034679803 for 490c1decf1ba4b316019c7a272726d04601b8fab, and 36048709353 for current remote HEAD 271f66c66a3f29d5019ce7c9a0c2d8baec04dee9 all completed with conclusion=failure. Job-level logs and failing assertions were not supplied, so GPT cannot safely infer or prescribe a code fix. GOLD-047 cannot be accepted until a subsequent matching remote HEAD has green Python 3.12, Python 3.13, and PostgreSQL jobs.",
       "retryable": true
     },
     {
@@ -60,7 +60,7 @@
       "resolved_by": "2026-09-24: GOLD-041 commit 0a9234b84f1dc7e39870c821c2a7db82a2f319c9 restored STATE_RESULT_DRIFT issue/blocking consistency; GitHub Actions CI #151 attempt 2 passed Python 3.12, Python 3.13, and PostgreSQL jobs."
     }
   ],
-  "next_action": "Pause automatic execution. Human/operator must stop the existing orchestrator/launcher, verify termination, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart it as a fresh process from a commit no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide fresh-process startup evidence plus job-level failure logs for GitHub Actions runs 36026387906, 36027627116, and 36034679803. GPT will then plan a narrowly scoped recovery task from those facts. Do not rewrite historical results, create Executor-signed adjudication, auto-sign review, advance last_reviewed_task, remove PHASE3_3_DATA, or enter Phase 3.4.",
+  "next_action": "Pause automatic execution. Human/operator must stop the existing orchestrator/launcher, verify termination, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart it as a fresh process from a commit no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide fresh-process startup evidence plus job-level failure logs for GitHub Actions runs 36026387906, 36027627116, 36034679803, and 36048709353. GPT will then plan a narrowly scoped recovery task from those facts. Do not rewrite historical results, create Executor-signed adjudication, auto-sign review, advance last_reviewed_task, remove PHASE3_3_DATA, or enter Phase 3.4.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -72,7 +72,7 @@
     },
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
-      "detail": "Human/operator must stop the current local orchestrator/launcher, verify the old process has terminated, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task is permitted. The restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs for CI runs 36026387906, 36027627116, and 36034679803 for the next GPT review cycle."
+      "detail": "Human/operator must stop the current local orchestrator/launcher, verify the old process has terminated, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task is permitted. The restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs for CI runs 36026387906, 36027627116, 36034679803, and 36048709353 for the next GPT review cycle."
     }
   ],
   "invariants": [
