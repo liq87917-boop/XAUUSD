@@ -1,0 +1,63 @@
+{
+  "task_id": "GOLD-040",
+  "type": "CONTROL_PLANE_CI_PORTABILITY_RECOVERY",
+  "title": "修复 GitHub CI 全历史绑定与跨平台控制面回归",
+  "max_attempts": 3,
+  "depends_on": [
+    "GOLD-039"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "修复 GOLD-039 后 GitHub Actions 在 Python 3.12/3.13 上稳定复现的控制面测试失败，使本地与 CI 对相同 Git 历史、runtime 输出路径、PID 存活探测和 terminal-consistency 事实得到一致结果；不得改变 Phase 3.3 数据资格、Planner/Executor 边界或交易安全开关。",
+  "requirements": [
+    "修复 CI checkout/history 契约：review_binding/review_ledger 需要追溯历史完成 commit 时，GitHub Actions 必须提供足够完整的可达历史，优先在 CI checkout 使用 fetch-depth: 0；不得通过放宽 COMPLETION_COMMIT_NOT_FOUND 来掩盖浅克隆。",
+    "修复 planner refill hint 的真实仓库断言差异，统一无 head 时的稳定机器可读表示，避免 head=None 与 head=- 在不同入口漂移。",
+    "修复默认 .ai/runtime 镜像/输出路径在干净 CI checkout 中父目录不存在的问题：仅对已批准 runtime 路径采用安全、确定性的目录准备策略；不得扩大写入白名单到 tasks/results/PROJECT_STATE/src/database。",
+    "修复 Windows/Linux PID liveness 探测兼容性：Windows tasklist 不可用与 POSIX 环境不得错误判定锁持有进程已死亡；探测失败必须 fail-safe。",
+    "修复 GOLD-039 新 terminal-consistency 诊断与历史 legacy raw finish_reason 兼容测试，使同一矛盾不产生互相冲突的重复 reason code，同时仍明确暴露 GOLD-035/GOLD-039 的历史 completed+aborted 事实，禁止改写历史 result。",
+    "保证 review backlog/binding/integrity 在完整 Git 历史下能独立重算 GOLD-025~027 的 ledger 绑定；篡改 hash/commit 的回归仍必须 fail-closed。",
+    "必须让 GitHub Actions 的 Python 3.12 与 3.13 pytest job 通过；PostgreSQL schema+seeds 既有成功行为不得回退。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      ".github/workflows/**",
+      "orchestrator/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行已批准任务。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4，不得跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "历史 result 与 GPT Review Ledger 默认只读；不得为了让测试通过而重写或删除既有审计事实。",
+    "不得弱化 secret/source authorization/robots/certificate/data-availability 等既有安全门禁。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GitHub Actions Python 3.12 与 3.13 的 pytest 均通过，ruff/mypy 保持通过，PostgreSQL schema+seeds job 保持通过。",
+    "GOLD-025~027 的 review binding/integrity 在完整历史中可重算，浅历史环境明确 fail-closed 而不是伪通过。",
+    ".ai/runtime、refill hint 与 PID liveness 在 Windows 与 Linux/CI 上行为一致且零越权写入。",
+    "GOLD-035/GOLD-039 历史 completed+aborted 矛盾仍被客观暴露，未来 result 写入保持 GOLD-039 建立的自洽终态契约。",
+    "Phase 3.3 blocker、L3/L4、GPT 独占规划权和交易安全开关全部不变。"
+  ]
+}
