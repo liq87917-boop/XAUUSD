@@ -4,7 +4,7 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-045",
+  "current_task": "GOLD-047",
   "last_completed_task": "GOLD-044",
   "last_reviewed_task": "GOLD-027",
   "blockers": [
@@ -15,12 +15,22 @@
     },
     {
       "code": "GPT_REVIEW_TERMINAL_HISTORY",
-      "detail": "Formal review remains continuous only through GOLD-027. GOLD-036 and GOLD-037 have individually complete review-binding facts, but cannot be appended past unresolved earlier gaps. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, and now GOLD-044 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GOLD-042 through GOLD-045 provide the GPT-only adjudication and atomic closure path; GOLD-046 and GOLD-047 repair and verify the newly demonstrated terminal-write recurrence before GPT performs adjudication and substantive continuous review.",
+      "detail": "Formal review remains continuous only through GOLD-027. GOLD-036 and GOLD-037 have individually complete review-binding facts, but cannot be appended past unresolved earlier gaps. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, GOLD-044, GOLD-046, and GOLD-047 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GPT-only content-bound adjudication and continuous substantive review remain pending until the actual completion path is demonstrably repaired and matching remote CI is green.",
       "retryable": true
     },
     {
       "code": "RESULT_TERMINAL_CONSISTENCY_RECURRENCE",
-      "detail": "The immutable GOLD-044 result at commit e6d4ad0f48057ef802447424e533a27379350692 records status=completed and normalized_finish_reason=completed while its final cline_finish_reason_raw=aborted. This demonstrates that the future-write prevention expected from GOLD-039 did not protect the actual GOLD-044 completion path. The result must remain unchanged; GOLD-046 must repair the writer/commit path and GOLD-047 must verify it at a fresh-process boundary.",
+      "detail": "The immutable GOLD-047 result at commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b records status=completed and normalized_finish_reason=completed while its final attempt records cline_finish_reason_raw=aborted. This is a second post-repair recurrence after GOLD-044 and occurred even though GOLD-047's isolated canary regression suite passed locally. The historical result must remain unchanged. No further executor task may run until the host orchestrator has been restarted from the current remote HEAD in a demonstrably fresh process and GPT has reviewed the actual failing path evidence.",
+      "retryable": true
+    },
+    {
+      "code": "GOLD_047_REMOTE_CI_FAILURE",
+      "detail": "GitHub Actions CI run 36026387906 for remote HEAD 3ea96d44058f65241fcf22c0ef917877f9b47b5b completed with conclusion=failure. Job-level logs and failing assertions were not supplied, so GPT cannot safely infer or prescribe a code fix. GOLD-047 cannot be accepted until a subsequent matching remote HEAD has green Python 3.12, Python 3.13, and PostgreSQL jobs.",
+      "retryable": true
+    },
+    {
+      "code": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
+      "detail": "Automatic task execution is paused to prevent additional immutable completed+raw-aborted results. A human/operator must stop the existing local orchestrator/launcher, verify the old process is no longer running, and restart from remote HEAD 3ea96d44058f65241fcf22c0ef917877f9b47b5b. This restart is an operational safety precondition and does not by itself prove root cause, repair terminal history, pass CI, or authorize review closure.",
       "retryable": true
     }
   ],
@@ -50,7 +60,7 @@
       "resolved_by": "2026-09-24: GOLD-041 commit 0a9234b84f1dc7e39870c821c2a7db82a2f319c9 restored STATE_RESULT_DRIFT issue/blocking consistency; GitHub Actions CI #151 attempt 2 passed Python 3.12, Python 3.13, and PostgreSQL jobs."
     }
   ],
-  "next_action": "Execute GOLD-045, GOLD-046, and GOLD-047 in order. GOLD-045 must remain a read-only atomic closure preflight. GOLD-046 must repair the actual result-writer/completion-commit path that allowed GOLD-044 completed+raw-aborted recurrence, and GOLD-047 must verify the repair across a fresh-process boundary. Do not rewrite any historical result, create Executor-signed adjudication, auto-sign review, or advance last_reviewed_task. After GOLD-047 is terminally self-consistent and matching remote CI is green, GPT must content-bind adjudications for all immutable contradictions, run GOLD-045 preflight, and substantively review the continuous backlog before writing ledger/state candidates.",
+  "next_action": "Pause automatic execution. Human/operator must stop the existing orchestrator/launcher, verify termination, restart it from remote HEAD 3ea96d44058f65241fcf22c0ef917877f9b47b5b as a fresh process, and provide fresh-process startup evidence plus the job-level failure logs for GitHub Actions run 36026387906. GPT will then plan a narrowly scoped recovery task from those facts. Do not rewrite historical results, create Executor-signed adjudication, auto-sign review, advance last_reviewed_task, remove PHASE3_3_DATA, or enter Phase 3.4.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -59,6 +69,10 @@
     {
       "code": "PHASE3_3_L3_DECISION",
       "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."
+    },
+    {
+      "code": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
+      "detail": "Human/operator must stop the current local orchestrator/launcher, verify the old process has terminated, and restart from remote HEAD 3ea96d44058f65241fcf22c0ef917877f9b47b5b before any further executor task is permitted. Provide startup/fresh-process evidence and CI run 36026387906 job logs for the next GPT review cycle."
     }
   ],
   "invariants": [
@@ -72,11 +86,7 @@
     "测试、CI、裁决或预检通过均不自动等于 GPT Review PASS"
   ],
   "queue_target_size": 3,
-  "task_queue": [
-    "GOLD-045",
-    "GOLD-046",
-    "GOLD-047"
-  ],
-  "queue_status": "ACTIVE",
+  "task_queue": [],
+  "queue_status": "BLOCKED",
   "planner_lookahead_size": 3
 }
