@@ -121,7 +121,8 @@ def test_orchestrator_facts_match_refill_cli_on_real_repo() -> None:
     )
 
     assert line.startswith(expected_code)
-    assert f"head={payload['queue_head']}" in line
+    assert f"head={refill.queue_head_token(payload['queue_head'])}" in line
+    assert "head=None" not in line
     assert f"follow_on_count={payload['follow_on_count']}" in line
     assert f"target={payload['lookahead_target']}" in line
     assert f"deficit={payload['deficit']}" in line

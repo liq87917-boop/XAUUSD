@@ -1519,7 +1519,8 @@ def test_snapshot_and_output_modules_expose_no_planning_authority() -> None:
     ):
         assert forbidden not in MODULE_SOURCE, forbidden
 
-    # 受控输出模块：唯一写操作是 write_snapshot_output，无进程 / 网络 / 目录创建
+    # 受控输出模块：唯一写操作是 write_snapshot_output；无进程 / 网络，
+    # 且目录准备**有且只有一处**（GOLD-040：只为 `<root>/.ai/runtime/**` 准备父目录）。
     for forbidden in (
         "import os",
         "import subprocess",
@@ -1531,17 +1532,21 @@ def test_snapshot_and_output_modules_expose_no_planning_authority() -> None:
         "os.replace",
         "os.remove",
         "rmtree",
-        "mkdir",
+        "os.makedirs",
+        "shutil.rmtree",
     ):
         assert forbidden not in OUTPUT_MODULE_SOURCE, forbidden
 
     assert OUTPUT_MODULE_SOURCE.count("write_text") == 1
+    assert OUTPUT_MODULE_SOURCE.count("mkdir(") == 1
+    assert "parent.mkdir(parents=True, exist_ok=True)" in OUTPUT_MODULE_SOURCE
     assert "def write_snapshot_output" in OUTPUT_MODULE_SOURCE
 
     guard = snapshot_output.guard_summary()
 
     assert guard["read_only_by_default"] is True
-    assert guard["creates_directories"] is False
+    assert guard["creates_directories"] is True
+    assert guard["creates_directories_scope"] == snapshot_output.RUNTIME_SUBPATH
     assert guard["runtime_subpath"] == ".ai/runtime"
     assert guard["rejection_code"] == snapshot_output.ISSUE_OUTPUT_PATH_REJECTED
     assert guard["rejection_exit_code"] == snapshot_output.EXIT_OUTPUT_REJECTED
@@ -1638,14 +1643,53 @@ def test_output_guard_accepts_runtime_and_temp_paths_only(
     assert outside_reason is not None
     assert "只允许写入 runtime / 临时路径" in outside_reason
 
-    missing_target, missing_reason = snapshot_output.resolve_output_target(
-        cli_root, cli_root / ".ai" / "runtime" / "nested" / "snapshot.json"
-    )
+    # GOLD-040：**已批准 runtime 路径**的缺失父目录会被确定性准备（干净 CI checkout
+    # 里 `.ai/runtime` 本就不存在），因此这里必须被接受，而不是 fail-closed 拒绝。
+    nested = cli_root / ".ai" / "runtime" / "nested" / "snapshot.json"
 
-    assert missing_target is None
-    assert missing_reason is not None
-    assert "父目录不存在" in missing_reason
-    assert not (cli_root / ".ai" / "runtime" / "nested").exists()
+    nested_target, nested_reason = snapshot_output.resolve_output_target(cli_root, nested)
+
+    assert nested_reason is None
+    assert nested_target == nested.resolve()
+    assert (cli_root / ".ai" / "runtime" / "nested").is_dir()
+
+
+def test_output_guard_never_prepares_directories_outside_runtime(
+    cli_root: Path,
+    fake_temp_root: Path,
+) -> None:
+    """目录准备只对 `<root>/.ai/runtime/**` 生效：临时目录与业务路径一律不创建。"""
+
+    before = tree_digest(cli_root)
+
+    temp_nested = fake_temp_root / "nested-temp" / "snapshot.json"
+
+    temp_target, temp_reason = snapshot_output.resolve_output_target(cli_root, temp_nested)
+
+    assert temp_target is None
+    assert temp_reason is not None
+    assert "父目录不存在" in temp_reason
+    assert not (fake_temp_root / "nested-temp").exists()
+
+    # 逃逸到 runtime 之外（tasks / results / src）依旧 fail-closed 且零创建
+    for relative in (
+        ".ai/tasks/GOLD-099.json",
+        ".ai/results/GOLD-099.json",
+        ".ai/PROJECT_STATE.json",
+        "src/planner_snapshot.json",
+        "database/snapshot.json",
+    ):
+        existed = (cli_root / relative).exists()
+
+        target, reason = snapshot_output.resolve_output_target(cli_root, cli_root / relative)
+
+        assert target is None, relative
+        assert reason is not None, relative
+
+        if not existed:
+            assert not (cli_root / relative).exists(), relative
+
+    assert tree_digest(cli_root) == before
 
 
 def test_cli_output_writes_to_runtime_path_and_keeps_stdout_empty(

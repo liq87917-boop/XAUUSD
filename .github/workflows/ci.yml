@@ -18,7 +18,13 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
+      # GOLD-040：控制面（review binding / ledger integrity / backlog）必须能**独立重算**
+      # GOLD-025~027 等历史完成 commit 的绑定，因此 checkout 必须提供完整可达历史。
+      # actions/checkout 默认 `fetch-depth: 1`（浅克隆）会让这些重算假失败为
+      # `COMPLETION_COMMIT_NOT_FOUND`；这里显式取全历史，且绝不放宽该 fail-closed 判定。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -64,7 +70,11 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://gold_ai:gold_ai@localhost:5432/gold_ai
     steps:
+      # GOLD-040：同上，PostgreSQL schema+seeds job 也在完整历史上运行，
+      # 保证两个 job 对同一 Git 历史给出同一结论。
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

@@ -134,6 +134,14 @@ ISSUE_RESULT_NOT_IN_COMMIT = "RESULT_NOT_IN_COMMIT"
 ISSUE_TASK_NOT_IN_COMMIT = "TASK_NOT_IN_COMMIT"
 ISSUE_WORKTREE_COMMIT_MISMATCH = "WORKTREE_COMMIT_MISMATCH"
 
+# GOLD-040：浅克隆（CI checkout 默认 ``fetch-depth: 1``）会让 ``git log`` 只含少量
+# 提交，完成 commit 可能**不在可达历史里**。此时必须把「历史被截断」这一事实单独报出，
+# 绝不让 ``COMPLETION_COMMIT_NOT_FOUND`` 被误读成「任务从未完成」。
+ISSUE_GIT_HISTORY_SHALLOW = "GIT_HISTORY_SHALLOW"
+
+# Git 自己写下的浅克隆标记文件名（位于 gitdir 内）。
+GIT_SHALLOW_MARKER_NAME = "shallow"
+
 # GOLD-039：终态一致性校验器里**已由本模块自己的 code 表达**的事实，避免重复上报。
 # - ``status`` 缺失 / 未知 ⇒ 本模块 ``RESULT_STATUS_UNKNOWN``；
 # - result 不是 JSON 对象 ⇒ 本模块 ``RESULT_UNREADABLE``。
@@ -413,6 +421,34 @@ def terminal_commit_subjects(task_id: str) -> tuple[str, ...]:
     return tuple(
         template.format(task_id=task_id) for template in TERMINAL_COMMIT_SUBJECT_TEMPLATES.values()
     )
+
+
+def git_history_is_shallow(root: Path) -> bool:
+    """**只读**判定仓库是否为浅克隆（Git 自己写下的 ``<gitdir>/shallow`` 标记）。
+
+    为什么需要它：``git log`` 只看得见**可达历史**。浅克隆里完成 commit 可能仅仅因为
+    历史被截断而不可见，此时若只报 ``COMPLETION_COMMIT_NOT_FOUND``，GPT / 人工会把它
+    误读成「该任务从未完成」。本函数只把「历史不完整」这一**事实**交给上层单独报出
+    （:data:`ISSUE_GIT_HISTORY_SHALLOW`），**绝不放宽**任何判定：找不到完成 commit
+    依旧 fail-closed。
+
+    与 :func:`orchestrator.planner_snapshot.resolve_git_dir` 同源：只读 gitdir 标记文件，
+    零子进程、零网络；gitdir 不可解析 / 标记不可读一律返回 ``False``（不猜测）。
+    """
+
+    directory = planner.resolve_git_dir(root)
+
+    if directory is None:
+
+        return False
+
+    try:
+
+        return (directory / GIT_SHALLOW_MARKER_NAME).is_file()
+
+    except OSError:
+
+        return False
 
 
 # ============================================================
@@ -959,6 +995,19 @@ def resolve_commit_binding(
 
     if code is not None or entry is None:
         issues.append(make_issue(code or ISSUE_COMMIT_NOT_FOUND, str(detail)))
+
+        if code == ISSUE_COMMIT_NOT_FOUND and git_history_is_shallow(root):
+            # 「找不到」与「历史被截断」是两件不同的事实：浅克隆必须显式说清楚，
+            # 否则 COMPLETION_COMMIT_NOT_FOUND 会被误读成「任务未完成」。
+            issues.append(
+                make_issue(
+                    ISSUE_GIT_HISTORY_SHALLOW,
+                    f"{requested}: 当前仓库是浅克隆（<gitdir>/{GIT_SHALLOW_MARKER_NAME}），"
+                    "HEAD 可达历史不完整；完成 commit 可能只因历史被截断而不可见。"
+                    "必须用完整历史重算（CI checkout 使用 fetch-depth: 0），"
+                    "绝不把浅历史当成「任务未完成」",
+                )
+            )
 
         section["reason_code"] = code or ISSUE_COMMIT_NOT_FOUND
 

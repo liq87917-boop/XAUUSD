@@ -5369,3 +5369,82 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
 - 建议下一步（由 GPT 决定）：基于 §2.13 的稳定 code 决定 GOLD-035 这类历史矛盾的处理口径，
   或继续补 control-plane 事实包。
 
+
+## GOLD-040：GitHub CI 全历史绑定与跨平台控制面回归修复（不做业务判定变更）
+
+### 1. 背景 / 问题
+
+- GOLD-039 之后 GitHub CI run 35869237769 在 Python 3.12 / 3.13 上稳定失败 **17 项控制面测试**。
+  本地 Windows 全绿，因此根因是**环境差异**而不是业务判定：
+  1. `actions/checkout@v4` 默认 `fetch-depth: 1`（浅克隆）⇒ `git log` 只含 1 个提交，
+     `orchestrator.review_binding` / `review_ledger_integrity` / `review_backlog` 无法重算
+     GOLD-025~027 的历史完成 commit 绑定（12 项）；
+  2. `.ai/runtime` 永不进 Git（`.gitignore`）⇒ 干净 checkout 里默认 runtime 镜像 / 输出路径
+     的父目录不存在，被受控输出守卫 fail-closed 拒绝（1 项）；
+  3. POSIX 上 `running_process_image()` 直接返回 `None`（"仅 Windows 可查"），而
+     `is_pid_running()` 在 POSIX 分支另走 `os.kill` ⇒ 一旦调用方用该函数判定「锁持有进程已死亡」，
+     Linux / CI 上会把**仍存活**的锁当成陈旧锁（1 项）；
+  4. `tests/integration/test_planner_mutation_precondition_regression.py` 仍按旧假设断言
+     「有 issue ⇒ 退出码必须是 2/3」，与 GOLD-038 的「review 指针落后只报告、不 gate」冲突
+     （1 项，本地同样失败）。
+- 目标：让**本地与 CI 对同一 Git 历史 / runtime 输出路径 / PID 存活探测 / terminal-consistency 事实
+  得到一致结果**；不放宽任何 fail-closed 判定，不改变 Phase 3.3 数据资格、Planner / Executor 边界
+  与交易安全开关。
+
+### 2. 变更（最小范围）
+
+- `.github/workflows/ci.yml`：quality（py3.12 / 3.13）与 postgres 两个 job 的
+  `actions/checkout@v4` 显式 `fetch-depth: 0`（带原因注释）——控制面必须能追溯完整可达历史；
+  **`COMPLETION_COMMIT_NOT_FOUND` 语义保持不变**（浅历史依旧 fail-closed）。
+- `orchestrator/review_binding.py`：
+  - 新增只读探测 `git_history_is_shallow()`（读 `<gitdir>/shallow`，复用
+    `planner_snapshot.resolve_git_dir`，零子进程、零网络）与稳定 code
+    `GIT_HISTORY_SHALLOW`：**仅当**完成 commit 找不到且仓库是浅克隆时追加该诊断
+    （`commit.reason_code` 仍是 `COMPLETION_COMMIT_NOT_FOUND`，退出码仍是 `2`），
+    使「历史被截断」与「任务从未完成」不再被混为一谈；
+  - `review_backlog` / `review_ledger_integrity` 沿用既有事实链自动获得同一诊断，无复制算法。
+- `orchestrator/planner_refill_request.py` + `orchestrator/ai_orchestrator.py`：
+  新增**唯一口径**的无 head 表示 `QUEUE_HEAD_ABSENT = "-"` 与 `queue_head_token()`；
+  GOLD-034 CLI stderr、Orchestrator 提示行、提示签名（节流签名）全部改为同一 token，
+  消除 `head=None` / `head=-` 的入口漂移（`ai_orchestrator` 侧复用只读模块的规则，
+  只读模块不可用时退化为同一常量）。
+- `orchestrator/planner_snapshot_output.py`：新增 `runtime_output_root()` /
+  `prepare_output_parent()`：**只对** `<root>/.ai/runtime/**` 做确定性父目录准备
+  （parents-only + `exist_ok=True`），其它位置（系统临时目录 / `.ai/tasks` / `.ai/results` /
+  `.ai/PROJECT_STATE.json` / `src` / `database` …）依旧 fail-closed 且**零创建**；
+  `guard_summary()` 机器可读声明 `creates_directories=true` + `creates_directories_scope=.ai/runtime`。
+- `orchestrator/ai_orchestrator.py`（PID 存活探测）：拆出 `windows_process_image()`（`tasklist`）与
+  `posix_process_image()`（`os.kill(pid, 0)` + `/proc/<pid>/comm`），`running_process_image()` 按
+  `os.name` 分派，`is_pid_running()` 统一走同一三态契约：**存在 ⇒ 映像名 / 确实不存在 ⇒ `None` /
+  探测失败 ⇒ `OSError` 且调用方按「存活」处理**（POSIX 上权限不足只说明查不到，绝不等于不存在）。
+- 测试：新增浅历史诊断（4 项）、无 head token 单一口径、runtime 目录准备与「runtime 之外零创建」、
+  POSIX 探活三态与平台分派（5 项）；更新 `planner_snapshot` / `refill_request` 的输出守卫断言到新契约；
+  修正 `test_planner_mutation_precondition_regression.py` 的退出码断言按 GOLD-038 语义（review 指针
+  落后只报告、不 gate、绝不进 `blocking_reason_codes`）。
+- 文档：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.14（CI 历史契约 / 无 head token / runtime 目录准备 /
+  跨平台 PID 三态 / 不改动的边界）。
+
+### 3. 验证
+
+- 浅克隆复现：`git clone --depth 1` 沙箱（无 `.ai/runtime`）在修复前稳定复现 12 项历史绑定失败 +
+  runtime 失败；修复后同一沙箱对 GOLD-028 输出的 `reason_codes` 为
+  `['COMPLETION_COMMIT_NOT_FOUND', 'GIT_HISTORY_SHALLOW', ...]`、退出码仍为 `2`（**明确 fail-closed，
+  不是伪通过**）；
+- 干净全历史 checkout（全量 `git clone` + 无 `.ai/runtime`）沙箱在修复后：review binding / backlog /
+  ledger integrity / refill hint / result terminal consistency / planner mutation precondition
+  全绿（含 `test_default_mirror_target_is_runtime_guard_approved` 与
+  `test_cli_is_idempotent_ascii_and_zero_write`），且该次运行**新建** `.ai/runtime` 而未改动任何
+  受版本控制的 `.ai/**` 文件；
+- 全量门禁：`.venv\Scripts\python.exe -m pytest tests -q`、`ruff check .`、
+  `mypy config database src scripts`；
+- 未修改 `.ai/tasks/**` / `.ai/results/**` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`、
+  `src/alpha/**`、`src/execution/**`、`database/**`、`data/**`；未新增依赖；Cline 未执行任何 Git 写操作。
+
+### 4. 遗留 / 下一步
+
+- GOLD-035 / GOLD-039 的 `completed` + 最终 attempt `raw aborted` **历史矛盾保持原样**（只读）：
+  仍由 §2.13 的稳定 code 客观暴露，不由本任务改写；
+- CI 历史契约从此由 `fetch-depth: 0` 保证；若未来需要浅克隆（性能），必须先让控制面显式消费
+  `GIT_HISTORY_SHALLOW` 并停线，绝不静默重算；
+- 建议下一步（由 GPT 决定）：CI 转绿后 review GOLD-036~040，再决定是否解除 `PHASE3_3_DATA` 相关阻塞。
+

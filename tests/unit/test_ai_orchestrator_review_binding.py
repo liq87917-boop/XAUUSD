@@ -812,6 +812,86 @@ def test_missing_completion_commit_is_fail_closed(
     assert manifest["binding"]["facts_complete"] is False
 
 
+def test_shallow_history_is_reported_explicitly_without_loosening_fail_closed(
+    binding_fs: BindingFS,
+) -> None:
+    """GOLD-040：浅克隆必须显式报 ``GIT_HISTORY_SHALLOW``，且依然 fail-closed。"""
+
+    seed_completed_task(binding_fs)
+
+    # 浅克隆标记：Git 自己写下的 ``<gitdir>/shallow``（CI ``fetch-depth: 1`` 的形态）
+    (binding_fs.root / ".git" / "shallow").write_text(f"{FAKE_HEAD}\n", encoding="utf-8")
+
+    manifest = build(binding_fs, fake=consistent_fake(binding_fs, entries=[]))
+
+    codes = issue_codes(manifest)
+
+    assert binding.ISSUE_GIT_HISTORY_SHALLOW in codes
+    assert binding.ISSUE_COMMIT_NOT_FOUND in codes
+    assert manifest["commit"]["resolved"] is False
+    assert manifest["commit"]["reason_code"] == binding.ISSUE_COMMIT_NOT_FOUND
+    assert manifest["binding"]["facts_complete"] is False
+    assert manifest["summary"]["exit_code"] == binding.EXIT_DRIFT
+    assert "fetch-depth: 0" in issue_details(manifest, binding.ISSUE_GIT_HISTORY_SHALLOW)
+
+
+def test_shallow_marker_never_fabricates_a_reason_code(binding_fs: BindingFS) -> None:
+    """浅标记只解释「找不到」：完成 commit 可达时绝不报历史不完整。"""
+
+    seed_completed_task(binding_fs)
+
+    (binding_fs.root / ".git" / "shallow").write_text(f"{FAKE_HEAD}\n", encoding="utf-8")
+
+    manifest = build(binding_fs)
+
+    assert binding.ISSUE_GIT_HISTORY_SHALLOW not in issue_codes(manifest)
+    assert manifest["commit"]["resolved"] is True
+    assert manifest["commit"]["sha"] == COMMIT_SHA
+    assert manifest["binding"]["facts_complete"] is True
+
+
+def test_git_history_shallow_probe_is_read_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """探测只读 Git 标记：无 ``.git`` / 标记缺失 ⇒ ``False``（绝不猜测）。"""
+
+    monkeypatch.setattr(binding, "ROOT", tmp_path)
+
+    assert binding.git_history_is_shallow(tmp_path) is False
+
+    (tmp_path / ".git").mkdir()
+
+    assert binding.git_history_is_shallow(tmp_path) is False
+
+    (tmp_path / ".git" / binding.GIT_SHALLOW_MARKER_NAME).write_text("x\n", encoding="utf-8")
+
+    assert binding.git_history_is_shallow(tmp_path) is True
+
+
+def test_shallow_history_diagnostic_is_not_wired_into_success_paths(
+    binding_fs: BindingFS,
+) -> None:
+    """`COMPLETION_COMMIT_NOT_FOUND` 语义未被放宽：浅克隆仍必须 fail-closed。"""
+
+    seed_completed_task(binding_fs)
+
+    (binding_fs.root / ".git" / "shallow").write_text(f"{FAKE_HEAD}\n", encoding="utf-8")
+
+    manifest = build(binding_fs, fake=consistent_fake(binding_fs, entries=[]))
+
+    assert manifest["commit"]["resolved"] is False
+    assert manifest["binding"]["facts_complete"] is False
+    assert manifest["summary"]["exit_code"] == binding.EXIT_DRIFT
+
+    shallow_issue = next(
+        issue for issue in manifest["issues"] if issue["code"] == binding.ISSUE_GIT_HISTORY_SHALLOW
+    )
+
+    assert shallow_issue["severity"] == binding.SEVERITY_ERROR
+    assert "浅克隆" in shallow_issue["detail"]
+
+
 def test_ambiguous_completion_commit_is_fail_closed(binding_fs: BindingFS) -> None:
     seed_completed_task(binding_fs)
 

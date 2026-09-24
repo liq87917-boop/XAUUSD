@@ -115,6 +115,27 @@ LOOKAHEAD_SOURCE_DEFAULTED_INVALID = "defaulted_invalid"
 
 LOOKAHEAD_SOURCE_EXPLICIT = "explicit"
 
+# ---------- 无 queue head 时的**稳定机器可读表示**（唯一口径，GOLD-040） ----------
+#
+# 背景：同一个「无 head」事实会在多个入口被渲染（本模块 CLI stderr、Orchestrator
+# 的 refill 提示行与提示签名），历史上分别渲染成 ``None`` 与 ``-``：
+# ``head=None`` / ``head=-`` 漂移会让日志、断言与节流签名对同一事实给出不同字符串。
+# 因此这里定义唯一口径，所有入口都必须复用 :func:`queue_head_token`。
+QUEUE_HEAD_ABSENT = "-"
+
+
+def queue_head_token(value: object) -> str:
+    """把（可能为空的）queue head 事实渲染成稳定的机器可读 token。
+
+    - 非空字符串 ⇒ 原样（strip 后）；
+    - ``None`` / 空串 / 其它类型 ⇒ ``QUEUE_HEAD_ABSENT``（``-``）。
+    """
+
+    text = value.strip() if isinstance(value, str) else None
+
+    return text if text else QUEUE_HEAD_ABSENT
+
+
 # ---------- 稳定 reason code 词表（供 GPT / 人工 grep 与测试断言） ----------
 
 REASON_REFILL_REQUIRED = "REFILL_REQUIRED"
@@ -975,7 +996,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         "[refill] head={head} follow_on={follow_on}/{target} deficit={deficit} "
         "refill_required={required} codes={codes}".format(
-            head=payload["queue_head"],
+            head=queue_head_token(payload["queue_head"]),
             follow_on=payload["follow_on_count"],
             target=payload["lookahead_target"],
             deficit=payload["deficit"],

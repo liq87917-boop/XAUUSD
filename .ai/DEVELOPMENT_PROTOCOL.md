@@ -729,3 +729,61 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
 
 
 
+## 2.14 CI 全历史契约、无 head 稳定 token、runtime 目录准备与跨平台 PID 三态（GOLD-040）
+
+- **为什么**：GOLD-039 之后 GitHub CI（run 35869237769，Python 3.12 / 3.13）在**干净 checkout** 上
+  稳定失败 17 项控制面测试，而本地全绿。根因全是**环境契约**问题：浅克隆历史不足、`.ai/runtime`
+  （永不进 Git）不存在、POSIX / Windows 的 PID 存活探测语义分叉、以及一条与 §2.12 冲突的旧断言。
+  §2.14 把这些契约**显式化**，让本地与 CI 对同一 Git 历史 / runtime 输出路径 / PID 探测 /
+  terminal-consistency 事实得到一致结果，**且不放宽任何 fail-closed 判定**。
+- **CI checkout 历史契约**：`.github/workflows/ci.yml` 的两个 job（quality 的 py3.12 / 3.13 与
+  postgres）都使用 `actions/checkout@v4` + `fetch-depth: 0`。理由：§2.8 review binding、§2.9
+  ledger 完整性、§2.11 backlog 需要**独立重算历史完成 commit 的绑定**（GOLD-025~027），
+  浅克隆必然假失败。**严禁**通过放宽 `COMPLETION_COMMIT_NOT_FOUND` 来「修」浅克隆。
+- **浅历史显式诊断（只报告，不放宽）**：`orchestrator.review_binding` 在「找不到完成 commit」且
+  仓库是浅克隆时，**追加**稳定 issue `GIT_HISTORY_SHALLOW`（探测方式：只读 `<gitdir>/shallow`，
+  复用 §2.5 的 gitdir 解析，零子进程 / 零网络）。此时 `commit.reason_code` 仍是
+  `COMPLETION_COMMIT_NOT_FOUND`、`binding.facts_complete=false`、退出码仍为 `2` ——
+  「历史被截断」与「任务从未完成」不再被混为一谈，浅历史**明确 fail-closed 而不是伪通过**。
+  `review_backlog` / `review_ledger_integrity` 沿用同一事实链自动获得该诊断。
+- **无 queue head 的稳定机器可读表示（唯一口径）**：`QUEUE_HEAD_ABSENT = "-"` +
+  `queue_head_token()`（**规则来源**：`orchestrator.planner_refill_request`）。§2.10 的 refill 事实
+  在多个入口渲染同一「无 head」事实：CLI stderr（`[refill] head=...`）、Orchestrator 提示行
+  （`GPT_PLANNER_REFILL_REQUIRED ... head=...`）与提示节流签名（`|head=...`）**必须**输出同一个
+  `-`；`ai_orchestrator` 侧复用该函数（只读模块不可用时退化为同一常量），**绝不**出现
+  `head=None` / 空串 / `-` 的入口漂移。
+- **runtime 输出目录准备（只对已批准 runtime 路径）**：干净 CI checkout 里 `.ai/runtime` 不存在
+  （`.gitignore`），但默认镜像 / 输出路径（§2.6 受控 `--output`）本就落在那里。
+  `orchestrator.planner_snapshot_output` 因此新增 `runtime_output_root()` /
+  `prepare_output_parent()`：
+  - **允许**：只为 `<root>/.ai/runtime/**` 之内的目标创建**缺失的父目录链**
+    （parents-only + `exist_ok=True`，已存在目录零副作用）；
+  - **禁止**：绝不扩大到系统临时目录（仍要求父目录已存在）、`.ai/tasks` / `.ai/results` /
+    `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json` / `.git` / `src` / `database` /
+    `config` / `data` / `logs` / `scripts` / `tests` / `docs` 等；
+  - `guard_summary()` 机器可读声明 `creates_directories=true` +
+    `creates_directories_scope=".ai/runtime"`；源码守卫断言全模块**只有一处** `mkdir(`。
+- **跨平台 PID 存活探测（三态契约恒定）**：`running_process_image()` 按 `os.name` 分派到
+  `windows_process_image()`（`tasklist`）或 `posix_process_image()`（`os.kill(pid, 0)` +
+  尽力读 `/proc/<pid>/comm`），`is_pid_running()` 统一消费同一三态语义：
+  - **存在** ⇒ 返回映像名（POSIX 取不到名字时返回稳定占位名 `unknown-process`，
+    `PermissionError` / `EPERM` 只说明「查不到」，**绝不**等于不存在）；
+  - **确实不存在** ⇒ 返回 `None`（POSIX 仅 `ProcessLookupError`）；
+  - **探测失败**（`tasklist` 缺失 / 超时 / 非 0 退出；其它 `OSError`）⇒ 抛 `OSError`，
+    调用方（单实例锁）必须 **fail-safe 按「存活」处理**，绝不放行清理。
+  Windows 的 `tasklist` 不可用与 POSIX 环境**都不得**把锁持有进程误判为已死亡。
+- **退出码 / 边界不变**：本次只改上述契约，`COMPLETION_COMMIT_NOT_FOUND`、§2.12 的
+  `state/pointer/digest` gate、§2.13 的终态一致性稳定 code、ledger schema、rolling queue、
+  Git 恢复状态机、L1~L4 档位、Phase 3.3 data blocker、Phase 3.4 边界与
+  `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 全部不变。
+- **回归测试**：`tests/unit/test_ai_orchestrator_review_binding.py`（浅历史诊断 /
+  浅标记不臆造 code / 探测只读）、`tests/unit/test_ai_orchestrator_recovery_state_machine.py`
+  （POSIX 探活三态 + 平台分派）、`tests/unit/test_ai_orchestrator_planner_refill_request.py`
+  （无 head token 单一口径，含 CLI stderr）、
+  `tests/unit/test_ai_orchestrator_planner_snapshot.py`（runtime 目录准备 + runtime 之外零创建）、
+  `tests/integration/test_planner_refill_hint_regression.py`（真实仓库默认 runtime 镜像目标被守卫接受）、
+  `tests/integration/test_planner_mutation_precondition_regression.py`（按 §2.12 语义断言
+  「review 指针落后只报告、不 gate」）。
+
+
+

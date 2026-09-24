@@ -347,6 +347,52 @@ def test_empty_queue_has_no_head_and_reports_full_deficit(refill_fs: RefillFS) -
     assert payload["summary"]["exit_code"] == refill.EXIT_REFILL_REQUIRED
 
 
+def test_no_queue_head_token_is_stable_across_all_entry_points(
+    refill_fs: RefillFS,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """GOLD-040：无 head 的机器可读表示只有一个口径（``-``），绝不 ``head=None`` 漂移。"""
+
+    assert refill.QUEUE_HEAD_ABSENT == "-"
+    assert refill.queue_head_token(None) == "-"
+    assert refill.queue_head_token("") == "-"
+    assert refill.queue_head_token("   ") == "-"
+    assert refill.queue_head_token(0) == "-"
+    assert refill.queue_head_token("  GOLD-260  ") == "GOLD-260"
+
+    # Orchestrator 侧与只读模块必须同源（同一个常量、同一个函数结果）
+    assert orch.QUEUE_HEAD_ABSENT == refill.QUEUE_HEAD_ABSENT
+    assert orch.queue_head_token(None) == refill.QUEUE_HEAD_ABSENT
+
+    empty_payload: dict[str, Any] = {
+        "queue_head": None,
+        "follow_on_count": 0,
+        "lookahead_target": 3,
+        "deficit": 3,
+        "refill_required": True,
+        "hard_gate_tail_allowed": False,
+        "reason_codes": ["QUEUE_EMPTY", "REFILL_REQUIRED"],
+        "facts_digest": "0" * 64,
+    }
+
+    line = orch.planner_refill_hint_line(empty_payload, context=orch.REFILL_HINT_CONTEXT_IDLE)
+
+    assert " head=- " in line
+    assert "head=None" not in line
+    assert "|head=-" in orch.planner_refill_hint_signature(empty_payload)
+
+    # GOLD-034 CLI 的 stderr 同一口径：空队列 ⇒ `head=-`
+    write_state(refill_fs, queue_state([], queue_status=None, status="ACTIVE"))
+
+    exit_code = refill.main(cli_args(refill_fs))
+
+    captured = capsys.readouterr()
+
+    assert exit_code == refill.EXIT_REFILL_REQUIRED
+    assert "[refill] head=- follow_on=0/3 deficit=3" in captured.err
+    assert "head=None" not in captured.err
+
+
 def test_queue_head_follows_deterministic_task_order(refill_fs: RefillFS) -> None:
     seed_queue(refill_fs, ["GOLD-101", "GOLD-009", "GOLD-010"])
 
@@ -1086,13 +1132,47 @@ def test_cli_output_rejects_forbidden_targets_with_exit_code_4(
     assert tree_digest(refill_fs.root) == before
 
 
-def test_cli_output_rejects_path_without_parent_directory(
+def test_cli_output_prepares_runtime_parent_directory(
     refill_fs: RefillFS,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """GOLD-040：已批准 runtime 路径的缺失父目录被确定性准备（干净 CI 也能镜像）。"""
+
     seed_queue(refill_fs, ["GOLD-230"])
 
     target = refill_fs.root / ".ai" / "runtime" / "missing-dir" / "refill.json"
+
+    assert not target.parent.is_dir()
+
+    exit_code = refill.main([*cli_args(refill_fs), "--output", str(target)])
+
+    captured = capsys.readouterr()
+
+    assert exit_code in {refill.EXIT_OK, refill.EXIT_REFILL_REQUIRED}
+    assert "[info] refill request 已写入受控路径" in captured.err
+    assert target.is_file()
+
+    payload = json.loads(target.read_text(encoding="utf-8"))
+
+    assert payload["read_only"] is True
+    assert payload["queue_head"] == "GOLD-230"
+
+    # tasks / results / state 依旧零写入，且绝不创建 runtime 之外的目录
+    assert not (refill_fs.root / ".ai" / "tasks" / "missing-dir").exists()
+    assert not (refill_fs.root / ".ai" / "missing-dir").exists()
+
+
+def test_cli_output_rejects_path_outside_runtime_without_parent_directory(
+    refill_fs: RefillFS,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """目录准备**只**对 `<root>/.ai/runtime/**` 生效：其它位置依旧 fail-closed。"""
+
+    seed_queue(refill_fs, ["GOLD-231"])
+
+    before = tree_digest(refill_fs.root)
+
+    target = refill_fs.root / ".ai" / "logs" / "missing-dir" / "refill.json"
 
     exit_code = refill.main([*cli_args(refill_fs), "--output", str(target)])
 
@@ -1100,7 +1180,9 @@ def test_cli_output_rejects_path_without_parent_directory(
 
     assert exit_code == snapshot_output.EXIT_OUTPUT_REJECTED
     assert not target.exists()
-    assert "父目录不存在" in captured.err
+    assert not target.parent.exists()
+    assert snapshot_output.ISSUE_OUTPUT_PATH_REJECTED in captured.err
+    assert tree_digest(refill_fs.root) == before
 
 
 def test_cli_default_run_writes_nothing(

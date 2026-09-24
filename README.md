@@ -2102,3 +2102,7 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 | 静态类型检查 | `python -m mypy`（config / database / src / scripts）+ CI |
 | **测试禁止访问外部网络** | 双层守卫（`tests/conftest.py` autouse）：① socket 层拦非本机地址（aiohttp/裸 socket）；② **httpcore 后端层拦截真实 httpx 建连**（防本机代理 127.0.0.1 绕过第一层）；Mock 传输层不受影响 |
 | 实盘门禁 | `LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false`（配置层硬拒绝） |
+| **CI 必须提供完整可达历史** | `.github/workflows/ci.yml` 的 quality（py3.12 / 3.13）与 postgres 两个 job 均 `actions/checkout@v4` + `fetch-depth: 0`：§2.8 review binding / §2.9 ledger integrity / §2.11 backlog 必须独立重算历史完成 commit 的绑定；浅克隆由 `GIT_HISTORY_SHALLOW` 显式 fail-closed，绝不放宽 `COMPLETION_COMMIT_NOT_FOUND`（GOLD-040） |
+| **受控输出只写 runtime / 临时路径** | `orchestrator/planner_snapshot_output.py` 守卫：只允许 `<root>/.ai/runtime/**` 与系统临时目录；**只对** `<root>/.ai/runtime/**` 做确定性父目录准备（parents-only），`.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `src` / `database` 一律拒绝且零创建（GOLD-040） |
+| **跨平台 PID 探活 fail-safe** | `orchestrator.ai_orchestrator.running_process_image` / `is_pid_running`：Windows `tasklist` 与 POSIX `os.kill(pid, 0)` 共用同一三态契约，**探测失败一律按「存活」处理**（绝不放行清理仍存活的锁）（GOLD-040） |
+

@@ -1,5 +1,6 @@
 import atexit
 import contextlib
+import errno
 import hashlib
 import importlib
 import json
@@ -2116,6 +2117,49 @@ REFILL_HINT_SECONDS = max(
     )
 )
 
+# 无 queue head 时的**稳定机器可读表示**的 fail-safe 本地副本。
+# 唯一规则来源是 ``orchestrator.planner_refill_request.QUEUE_HEAD_ABSENT`` /
+# ``queue_head_token``（见那里的说明）；这里保留同一常量，保证脚本直跑
+# （只读模块不可用）时也绝不出现 ``head=None`` 与 ``head=-`` 的入口漂移。
+QUEUE_HEAD_ABSENT = "-"
+
+
+def queue_head_token(
+    value: Any
+) -> str:
+    """把 queue head 事实渲染成稳定 token（无 head ⇒ ``QUEUE_HEAD_ABSENT``）。
+
+    只读模块 ``orchestrator.planner_refill_request`` 可用时**复用**它的唯一口径；
+    不可用时退化为同一常量与同一规则，绝不出现 ``None`` / 空串漂移。
+    """
+
+    refill = repo_scoped_import(
+        "orchestrator.planner_refill_request"
+    )
+
+    helper = getattr(
+        refill,
+        "queue_head_token",
+        None
+    )
+
+    if callable(helper):
+
+        token = helper(value)
+
+        if isinstance(token, str) and token:
+
+            return token
+
+    text = (
+        value.strip()
+        if isinstance(value, str)
+        else None
+    )
+
+    return text if text else QUEUE_HEAD_ABSENT
+
+
 # 按需加载过的 orchestrator.* 只读模块（只导入一次，绝不重复执行模块级代码）。
 _REPO_SCOPED_MODULES: dict[str, Any] = {}
 
@@ -2314,7 +2358,7 @@ def planner_refill_hint_signature(
 
     return (
         f"digest={payload.get('facts_digest')}"
-        f"|head={payload.get('queue_head')}"
+        f"|head={queue_head_token(payload.get('queue_head'))}"
         f"|follow_on={payload.get('follow_on_count')}"
         f"|target={payload.get('lookahead_target')}"
         f"|deficit={payload.get('deficit')}"
@@ -2358,7 +2402,7 @@ def planner_refill_hint_line(
     return (
         f"{code}"
         f" context={context}"
-        f" head={payload.get('queue_head') or '-'}"
+        f" head={queue_head_token(payload.get('queue_head'))}"
         f" follow_on_count={payload.get('follow_on_count')}"
         f" target={payload.get('lookahead_target')}"
         f" deficit={payload.get('deficit')}"
@@ -6446,20 +6490,18 @@ def process_task(
 # 单实例锁
 # ============================================================
 
-def running_process_image(
+# POSIX 探测不到映像名时的**稳定占位名**：绝不返回 None，因为 None 的语义是
+# 「确实不存在该 PID」（见 running_process_image 的三态契约）。
+POSIX_IMAGE_UNKNOWN = "unknown-process"
+
+# Linux 的进程名伪文件（macOS 等没有 /proc 的平台读不到 ⇒ 退回占位名）。
+PROC_COMM_PATH = "/proc/{pid}/comm"
+
+
+def windows_process_image(
     pid: int
 ) -> str | None:
-    """返回 PID 对应进程的映像名（仅 Windows 可查）。
-
-    - 探测成功且命中 ⇒ 返回映像名；
-    - 探测成功但没有该 PID ⇒ 返回 None（**确实不存在**）；
-    - 探测本身失败（tasklist 缺失 / 超时 / 非 0 退出）⇒ 抛 `OSError`，
-      调用方必须 fail-closed，绝不把它当成「进程不存在」。
-    """
-
-    if os.name != "nt":
-
-        return None
+    """Windows：用 ``tasklist`` 只读探测 PID 的映像名（“不存在” ⇒ None）。"""
 
     try:
 
@@ -6518,6 +6560,84 @@ def running_process_image(
     return None
 
 
+def posix_process_image(
+    pid: int
+) -> str | None:
+    """POSIX（Linux / macOS）：只读探测 PID 是否存活，并尽力取回映像名。
+
+    三态契约与 Windows 分支**完全一致**：
+
+    - ``os.kill(pid, 0)`` 成功 ⇒ 进程存在（取不到名字时返回 ``POSIX_IMAGE_UNKNOWN``）；
+    - ``ProcessLookupError`` ⇒ 进程确实不存在 ⇒ ``None``；
+    - 权限不足（``PermissionError`` / ``EPERM``）⇒ 进程存在但查不到名字 ⇒ 占位名；
+    - 其它 ``OSError``（探测本身失败）⇒ 抛 ``OSError``，调用方必须 fail-safe
+      按「存活」处理，绝不把探测失败当成「进程已死亡」。
+    """
+
+    try:
+
+        os.kill(
+            pid,
+            0
+        )
+
+    except ProcessLookupError:
+
+        return None
+
+    except OSError as exc:
+
+        if (
+            isinstance(exc, PermissionError)
+            or
+            getattr(exc, "errno", None) == errno.EPERM
+        ):
+
+            # 权限不足只能说明「查不到」，不能说明「不存在」。
+            return POSIX_IMAGE_UNKNOWN
+
+        raise OSError(f"os.kill 存活探测失败: {exc}") from exc
+
+    try:
+
+        name = Path(
+            PROC_COMM_PATH.format(pid=pid)
+        ).read_text(
+            encoding="utf-8",
+            errors="replace"
+        ).strip()
+
+    except OSError:
+
+        name = ""
+
+    return name or POSIX_IMAGE_UNKNOWN
+
+
+def running_process_image(
+    pid: int
+) -> str | None:
+    """返回 PID 对应进程的映像名（跨平台只读探测，三态契约恒定）。
+
+    - 探测成功且命中 ⇒ 返回映像名（POSIX 取不到名字时返回 ``POSIX_IMAGE_UNKNOWN``）；
+    - 探测成功但没有该 PID ⇒ 返回 None（**确实不存在**）；
+    - 探测本身失败（Windows ``tasklist`` 缺失 / 超时 / 非 0 退出；POSIX
+      ``os.kill`` 异常）⇒ 抛 `OSError`，调用方必须 fail-closed，绝不把它当成
+      「进程不存在」。
+
+    为什么两个平台都在这里探测：``is_pid_running`` / ``classify_lock_state``
+    必须共用**同一套**「存活 / 确实不存在 / 探测失败」语义。此前 POSIX 分支直接
+    ``return None``，一旦调用方据此判定「锁持有进程已死亡」，就会在 Linux / CI 上
+    错误清理仍存活的锁（GOLD-040）。
+    """
+
+    if os.name == "nt":
+
+        return windows_process_image(pid)
+
+    return posix_process_image(pid)
+
+
 def is_pid_running(
     pid
 ) -> bool:
@@ -6539,57 +6659,25 @@ def is_pid_running(
 
         return True
 
-    # ========================================================
-    # Windows
-    # ========================================================
-
-    if os.name == "nt":
-
-        try:
-
-            if (
-                running_process_image(
-                    pid
-                )
-                is not None
-            ):
-
-                return True
-
-        except OSError as exc:
-
-            # 无法证明 owner 不存在 ⇒ 必须按存活处理（绝不放行清理）。
-            _logger.warning(
-                "无法确认 PID %s 是否存活（%s）：按存活处理。",
-                pid,
-                exc
-            )
-
-            return True
-
-        return False
-
-    # ========================================================
-    # Linux / macOS
-    # ========================================================
-
     try:
 
-        os.kill(
-            pid,
-            0
+        return (
+            running_process_image(
+                pid
+            )
+            is not None
         )
 
-    except ProcessLookupError:
+    except OSError as exc:
 
-        return False
+        # 无法证明 owner 不存在 ⇒ 必须按存活处理（绝不放行清理）。
+        _logger.warning(
+            "无法确认 PID %s 是否存活（%s）：按存活处理。",
+            pid,
+            exc
+        )
 
-    except OSError:
-
-        # 权限不足 / 其它异常同样无法证明进程不存在 ⇒ 按存活处理。
         return True
-
-    return True
 
 
 def read_lock_evidence() -> tuple[dict[str, Any] | None, str]:

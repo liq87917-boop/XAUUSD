@@ -317,13 +317,35 @@ def test_cli_is_idempotent_ascii_and_zero_write(head_sha: str) -> None:
     assert payload["remote_head"]["observed_head_sha"] == head_sha
     assert run_first.returncode == payload["summary"]["exit_code"]
 
-    if payload["issues"]:
+    # 退出码由**门禁事实**决定（GOLD-038）：`review 指针落后`属于 backlog 事实，
+    # 只被报告、绝不 gate（见 test_review_pointer_lag_alone_does_not_block_planner_mutation）。
+    gating_error_codes = sorted(
+        {
+            str(issue["code"])
+            for issue in payload["issues"]
+            if issue["severity"] == planner.SEVERITY_ERROR
+            and not precondition.is_review_pointer_fact(issue)
+        }
+    )
+
+    if gating_error_codes:
         assert run_first.returncode in (
             precondition.EXIT_FAIL_CLOSED,
             precondition.EXIT_STATE_UNREADABLE,
         )
     else:
         assert run_first.returncode == precondition.EXIT_OK
+
+    # 被报告的 review 指针事实就是不 gate 的那一类：它们只能出现在 issues 里，
+    # 绝不出现在 blocking_reason_codes（否则会阻塞 GPT planner 的合法写入）。
+    assert set(payload["planner_mutation"]["blocking_reason_codes"]) <= set(gating_error_codes)
+
+    for code in payload["planner_mutation"]["blocking_reason_codes"]:
+        assert code not in {
+            str(issue["code"])
+            for issue in payload["issues"]
+            if precondition.is_review_pointer_fact(issue)
+        }, code
 
     # 库 API 与 CLI 必须给出同一份事实包（同一 digest）
     assert (

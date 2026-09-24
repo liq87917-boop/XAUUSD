@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -1026,6 +1027,128 @@ def test_is_pid_running_treats_unusable_pid_as_not_running() -> None:
     assert orch.is_pid_running(-1) is False
     assert orch.is_pid_running(None) is False
     assert orch.is_pid_running(os.getpid()) is True
+
+
+# ============================================================
+# GOLD-040：跨平台 PID 存活探测（Windows tasklist / POSIX os.kill 同一三态语义）
+# ============================================================
+
+
+def posix_os_shim(kill: object) -> object:
+    """构造「POSIX 形态」的 ``os`` 替身：只改 ``name`` 与 ``kill``，其余转发真实 os。
+
+    这样在 Windows 上也能验证 POSIX 分支的语义，且不触碰真实进程。
+    """
+
+    class PosixOS:
+        name = "posix"
+
+        def __init__(self, kill_callable: object) -> None:
+            self.kill = kill_callable
+
+        def __getattr__(self, item: str) -> object:
+            return getattr(os, item)
+
+    return PosixOS(kill)
+
+
+def test_posix_liveness_probe_sees_missing_process_as_dead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POSIX：``ProcessLookupError`` 才算「确实不存在」（不是探测失败）。"""
+
+    def kill(pid: int, sig: int) -> None:
+        del pid, sig
+        raise ProcessLookupError(errno.ESRCH, "No such process")
+
+    monkeypatch.setattr(orch, "os", posix_os_shim(kill))
+
+    assert orch.posix_process_image(919191) is None
+    assert orch.is_pid_running(919191) is False
+
+
+def test_posix_liveness_probe_failure_is_treated_as_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POSIX：``os.kill`` 异常（无法证明不存在）必须 fail-safe 按存活处理。"""
+
+    def kill(pid: int, sig: int) -> None:
+        del pid, sig
+        raise OSError(errno.EINVAL, "invalid probe")
+
+    monkeypatch.setattr(orch, "os", posix_os_shim(kill))
+
+    assert orch.is_pid_running(919191) is True
+
+
+def test_posix_liveness_probe_permission_error_is_treated_as_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POSIX：``EPERM`` 只能说明「查不到」，不能说明「不存在」。"""
+
+    def kill(pid: int, sig: int) -> None:
+        del pid, sig
+        raise PermissionError(errno.EPERM, "not permitted")
+
+    monkeypatch.setattr(orch, "os", posix_os_shim(kill))
+
+    assert orch.posix_process_image(919191) == orch.POSIX_IMAGE_UNKNOWN
+    assert orch.is_pid_running(919191) is True
+
+
+def test_posix_liveness_probe_returns_stable_placeholder_for_live_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POSIX：探测成功（签名 0）⇒ 绝不返回 None（None 语义是「确实不存在」）。"""
+
+    calls: list[tuple[int, int]] = []
+
+    def kill(pid: int, sig: int) -> None:
+        calls.append((pid, sig))
+
+    monkeypatch.setattr(orch, "os", posix_os_shim(kill))
+
+    image = orch.posix_process_image(4242)
+
+    assert calls == [(4242, 0)]
+    assert image is not None
+    assert image != ""
+    assert orch.is_pid_running(4242) is True
+
+
+def test_running_process_image_dispatches_by_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """两个平台共用同一三态契约：分派按 ``os.name``，绝不互相吞掉探测失败。"""
+
+    seen: list[tuple[str, int]] = []
+
+    def windows_probe(pid: int) -> str | None:
+        seen.append(("windows", pid))
+        return "python.exe"
+
+    def posix_probe(pid: int) -> str | None:
+        seen.append(("posix", pid))
+        return None
+
+    monkeypatch.setattr(orch, "windows_process_image", windows_probe)
+    monkeypatch.setattr(orch, "posix_process_image", posix_probe)
+
+    class PosixOS:
+        name = "posix"
+
+    class WindowsOS:
+        name = "nt"
+
+    monkeypatch.setattr(orch, "os", PosixOS())
+
+    assert orch.running_process_image(4321) is None
+    assert seen[-1] == ("posix", 4321)
+
+    monkeypatch.setattr(orch, "os", WindowsOS())
+
+    assert orch.running_process_image(4321) == "python.exe"
+    assert seen[-1] == ("windows", 4321)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="tasklist 只在 Windows 上存在")
