@@ -1240,7 +1240,7 @@ def test_run_iteration_recovers_interrupted_scene_then_reruns_same_task(
             "stdout": "",
             "stderr": "",
             "timed_out": False,
-            "summary": {"finish_reason": "aborted", "model": "deepseek-flash"},
+            "summary": {"finish_reason": "completed", "model": "deepseek-flash"},
         }
 
     monkeypatch.setattr(orch, "run_cline", fake_run_cline)
@@ -1264,7 +1264,7 @@ def test_run_iteration_recovers_interrupted_scene_then_reruns_same_task(
     )
     assert result["status"] == "completed"
     assert result["attempt_count"] == 1
-    assert result["attempts"][0]["cline_finish_reason_raw"] == "aborted"
+    assert result["attempts"][0]["cline_finish_reason_raw"] == "completed"
 
 
 def test_run_iteration_stops_on_unknown_dirty_worktree(

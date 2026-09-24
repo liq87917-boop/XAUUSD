@@ -102,6 +102,12 @@ ALLOWED_FINAL_OUTCOMES: dict[str, tuple[str, ...]] = {
 # 归一化格式里唯一合法的成功 finish reason。
 SUCCESS_FINISH_REASON = OUTCOME_COMPLETED
 
+# ---------- 权威终态来源（GOLD-046）----------
+# Cline CLI 自报的 raw 终态事件是**唯一权威终态来源**。「成功收尾」只认原样保留的
+# ``completed``：任何其它 raw 值（``aborted`` / ``error`` / 未知值）以及缺失的 raw 终态
+# 都**不能**被 exit code 0 或 validation 全通过改写成 ``completed``。
+CLINE_RAW_SUCCESS_FINISH_REASONS = ("completed",)
+
 # 归一化字段名（出现任一即视为 GOLD-020 之后的「归一化格式」）。
 NORMALIZED_MARKER_KEYS = (
     "execution_outcome",
@@ -155,6 +161,10 @@ REASON_FAILURE_EVIDENCE_MISSING = "RESULT_TERMINAL_FAILURE_EVIDENCE_MISSING"
 REASON_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS = (
     "RESULT_TERMINAL_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS"
 )
+# GOLD-046：权威最终 raw 终态不是成功收尾（例如 ``aborted``），却被归一成 ``completed``。
+REASON_RAW_TERMINAL_CONTRADICTS_COMPLETED = (
+    "RESULT_TERMINAL_RAW_TERMINAL_CONTRADICTS_COMPLETED"
+)
 
 REASON_CODES = (
     REASON_RESULT_INVALID,
@@ -175,6 +185,7 @@ REASON_CODES = (
     REASON_FINAL_VALIDATION_CONTRADICTS_STATUS,
     REASON_FAILURE_EVIDENCE_MISSING,
     REASON_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS,
+    REASON_RAW_TERMINAL_CONTRADICTS_COMPLETED,
 )
 
 
@@ -271,6 +282,19 @@ def failure_evidence(attempt: dict[str, Any]) -> list[str]:
         evidence.append("validations")
 
     return evidence
+
+
+def raw_terminal_is_success(raw_reason: object) -> bool:
+    """权威 raw 终态是否证明 CLI 正常收尾（只认原样保留的 ``completed``）。
+
+    - ``completed`` ⇒ ``True``；
+    - 其它任何值（``aborted`` / ``error`` / 未知）或缺失 ⇒ ``False``（fail-closed：
+      没有权威成功终态就不允许把任务判定为成功）。
+    """
+
+    value = normalized_token(raw_reason)
+
+    return value is not None and value in CLINE_RAW_SUCCESS_FINISH_REASONS
 
 
 def has_terminal_evidence(attempt: dict[str, Any]) -> bool:
@@ -579,6 +603,18 @@ def collect_normalized_findings(
             REASON_FINISH_REASON_MISMATCH,
             f"最终 attempt execution_outcome={final_outcome!r} 与 finish_reason="
             f"{final_reason!r} 不一致",
+        )
+
+    # GOLD-046：权威最终 raw 终态是唯一来源。``status=completed`` 时，
+    # 原样保留的 ``cline_finish_reason_raw`` 必须是成功收尾；``aborted`` / ``error`` /
+    # 未知值 / 缺失一律 fail-closed，绝不因 exit code 0 或 validation 通过而放行。
+    if status == STATUS_COMPLETED and not raw_terminal_is_success(raw_reason):
+        flag(
+            REASON_RAW_TERMINAL_CONTRADICTS_COMPLETED,
+            "status=completed 但最终 attempt 的权威 raw 终态 cline_finish_reason_raw="
+            f"{raw_reason!r} 不是成功收尾（只允许 "
+            f"{'/'.join(CLINE_RAW_SUCCESS_FINISH_REASONS)}）：fail-closed，"
+            "绝不把非成功 raw 终态归一为 completed",
         )
 
     effective = final_outcome if final_outcome is not None else final_reason

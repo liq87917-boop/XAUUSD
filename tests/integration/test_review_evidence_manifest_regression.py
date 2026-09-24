@@ -214,7 +214,7 @@ def test_normal_completed_items_are_pending_substantive_review() -> None:
         assert item["facts_complete"] is True
         assert item["terminal_consistency"]["contradiction"] is False
 
-    assert payload["summary"]["invalid_count"] == 0
+    assert payload["summary"]["invalid_count"] == 1
     assert payload["summary"]["facts_ready_count"] == 0
     assert payload["summary"]["adjudicated_count"] == 0
     assert payload["summary"]["exit_code"] == evidence.EXIT_FAIL_CLOSED

@@ -237,6 +237,13 @@ INTERRUPTED_FAILURE_CLASS = "interrupted_previous_process"
 
 INTERRUPTED_FAILURE_CODE = "OLD_PROCESS_INTERRUPTED"
 
+# GOLD-046：权威 raw 终态不是成功收尾（exit code 0 但 raw=aborted / 缺失）时的
+# 稳定 failure_class / failure_code。它与 timeout（retryable_external）和 provider
+# fatal（non_retryable_external）**分开表达**，既不折叠成同一状态，也仍然可重试。
+TERMINAL_FAILURE_CLASS = "terminal_not_completed"
+
+TERMINAL_FAILURE_CODE = "CLINE_TERMINAL_NOT_COMPLETED"
+
 # 恢复动作结果词表。
 RECOVERY_OUTCOME_CLEAN = "no_recovery_needed"
 
@@ -2984,6 +2991,19 @@ def classify_cline_failure(
         0
     ):
 
+        # GOLD-046：exit code 0 不再自动等于成功。权威最终 raw 终态必须是
+        # ``completed``；``aborted`` / 其它非成功 raw 值 / 缺失 ⇒ 可重试的
+        # terminal_not_completed 失败（带稳定 failure_code 证据），
+        # 绝不折叠成 timeout 或 provider fatal。
+        if not cline_terminal_is_success(
+            cline_result
+        ):
+
+            return (
+                TERMINAL_FAILURE_CLASS,
+                TERMINAL_FAILURE_CODE
+            )
+
         return (
             "none",
             None
@@ -4754,18 +4774,18 @@ def parse_cline_json_output(
                         ""
                     )
 
-                if (
-                    summary[
-                        "finish_reason"
-                    ]
-                    is None
-                ):
+                # GOLD-046：``run_result`` 与 ``agent_event.done`` 都是终态事件，
+                # **流中最后一个携带 reason 的终态事件**才是权威终态（后覆盖先）。
+                # 一个不带 reason 的 done 事件绝不擦掉已捕获的权威 reason。
+                done_reason = inner.get(
+                    "reason"
+                )
+
+                if done_reason is not None:
 
                     summary[
                         "finish_reason"
-                    ] = inner.get(
-                        "reason"
-                    )
+                    ] = done_reason
 
                 if (
                     summary[
@@ -5232,14 +5252,61 @@ def cline_finish_reason_raw(
     )
 
 
+def authoritative_cline_terminal(
+    cline_result
+):
+    """真实最终 Cline 终态事件的 raw finish reason（唯一权威终态来源，GOLD-046）。
+
+    ``parse_cline_json_output`` 已把**最后一个终态事件**（``run_result`` 或
+    ``agent_event.done``）的 reason 写入 ``summary['finish_reason']``；这里只读取
+    该原样值，绝不改名、绝不做空值替换、绝不根据 exit code / validation 猜测。
+
+    缺失（``None``）表示**没有权威成功终态**，属于 fail-closed，绝不当成 ``completed``。
+    """
+
+    return cline_finish_reason_raw(
+        cline_result
+    )
+
+
+def cline_terminal_is_success(
+    cline_result
+):
+    """权威 raw 终态是否证明 Cline 正常收尾（复用 §2.13 唯一词表）。
+
+    规则来源唯一：``orchestrator.result_terminal_consistency`` 的
+    ``raw_terminal_is_success``；模块不可用 ⇒ fail-closed（无法证明成功就不算成功）。
+    """
+
+    module = repo_scoped_import(
+        "orchestrator.result_terminal_consistency"
+    )
+
+    if module is None:
+
+        return False
+
+    return bool(
+        module.raw_terminal_is_success(
+            authoritative_cline_terminal(
+                cline_result
+            )
+        )
+    )
+
+
 def attempt_outcome(
     cline_result,
     validations
 ):
-    """attempt 级 Orchestrator 判定，与最终 success 判定同源。
+    """attempt 级 Orchestrator 判定（GOLD-046：权威 raw 终态是唯一来源）。
 
-    成功条件与旧实现完全一致：
-    Cline returncode == 0 且全部 validation returncode == 0。
+    成功条件：
+    ``cline_exit_code == 0`` **且** 全部 validation ``returncode == 0``
+    **且** 权威最终 raw 终态为 ``completed``。
+
+    ``aborted`` / 其它非成功 raw 值 / 缺失 raw 终态一律 ⇒ ``failed``：
+    绝不因 exit code 0 或 validation 通过把非成功 raw 终态推断成 ``completed``。
     """
 
     if (
@@ -5248,6 +5315,12 @@ def attempt_outcome(
         )
         !=
         0
+    ):
+
+        return EXECUTION_OUTCOME_FAILED
+
+    if not cline_terminal_is_success(
+        cline_result
     ):
 
         return EXECUTION_OUTCOME_FAILED
@@ -5442,7 +5515,7 @@ def ensure_result_terminal_consistency(
     return report
 
 
-def write_final_result(
+def build_final_result(
     task,
     status,
     attempts,
@@ -5451,6 +5524,7 @@ def write_final_result(
     note=None,
     execution_outcome=None
 ):
+    """构建终态 result 载荷（**不落盘**；写入门禁与持久化共用同一形状）。"""
 
     task_id = (
         task["task_id"]
@@ -5520,9 +5594,62 @@ def write_final_result(
             "note"
         ] = note
 
-    # GOLD-039：写入前门禁（fail-closed）。
+    return result
+
+
+def ensure_completion_terminal_consistency(
+    task,
+    status,
+    attempts,
+    changed_files=None,
+    diff_stat="",
+    execution_outcome=None
+):
+    """状态推进 / completion commit **之前**的同一 terminal-consistency 门禁（GOLD-046）。
+
+    复用 §2.13 唯一判定（``ensure_result_terminal_consistency``）：先构建将写入的
+    终态 result 并 fail-closed 校验，绝不把门禁延后到 write_task_state / commit 之后。
+    """
+
+    return ensure_result_terminal_consistency(
+        build_final_result(
+            task,
+            status,
+            attempts,
+            changed_files=changed_files,
+            diff_stat=diff_stat,
+            execution_outcome=execution_outcome
+        )
+    )
+
+
+def write_final_result(
+    task,
+    status,
+    attempts,
+    changed_files=None,
+    diff_stat="",
+    note=None,
+    execution_outcome=None
+):
+
+    task_id = (
+        task["task_id"]
+    )
+
+    result = build_final_result(
+        task,
+        status,
+        attempts,
+        changed_files=changed_files,
+        diff_stat=diff_stat,
+        note=note,
+        execution_outcome=execution_outcome
+    )
+
+    # GOLD-039 / GOLD-046：写入前门禁（fail-closed）。
     # 自相矛盾 / 未知组合的终态 result 一律拒绝落盘，
-    # 绝不让「completed + aborted」这类事实再次进入仓库。
+    # 绝不让「completed + raw aborted / 缺失」这类事实再次进入仓库。
     ensure_result_terminal_consistency(
         result
     )
@@ -6144,6 +6271,28 @@ def process_task(
         # ====================================================
 
         if success:
+
+            # GOLD-046：同一 terminal-consistency 门禁必须在**状态推进 /
+            # completion commit 之前**执行（而不只是写 result 时）。
+            # 权威最终 raw 终态不为成功收尾时，attempt_outcome 已经判 failed，
+            # 这里再做一次 belt-and-suspenders 的 fail-closed 校验。
+            ensure_completion_terminal_consistency(
+
+                task,
+
+                "completed",
+
+                attempts,
+
+                changed_files=
+                    changed_files,
+
+                diff_stat=
+                    diff_stat,
+
+                execution_outcome=
+                    EXECUTION_OUTCOME_COMPLETED
+            )
 
             write_task_state(
 

@@ -78,8 +78,10 @@ Cline raw metadata 与 Orchestrator 判定必须**分开保存**，避免「任�
 | `finish_reason` | attempt | **兼容旧键**；新结果写入归一化值，成功任务不再显示 `aborted` |
 | `cline_finish_reason_raw` | attempt | Cline CLI 自报的原始 finish reason（例如 `aborted`），只读审计 |
 
-- 成功判定唯一来源：`cline_exit_code == 0` 且全部 validation `returncode == 0`；
-  `execution_outcome` 与该判定**同源**，绝不被 raw finish reason 覆盖。
+- 成功判定唯一来源（GOLD-046 收紧）：`cline_exit_code == 0`、全部 validation
+  `returncode == 0`，**且**权威最终 raw 终态为 `completed`；`execution_outcome` 与该判定
+  **同源**。Cline 自报的 raw finish reason 是**唯一权威终态来源**：`aborted` 等非成功
+  raw 值（含缺失）绝不被 exit code 0 / validation 通过覆盖成成功。
 - 历史 result **不回写**：只有新生成的 result 带新字段；解析旧 result（无新字段）保持兼容。
 
 ### push pending / Git 恢复状态机
@@ -1077,6 +1079,57 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   指针漂移 / 删除 `PHASE3_3_DATA` / ledger 链断裂 fail-closed、CLI 显式临时文件端到端零写入，
   且 `.ai/results` / `.ai/tasks` / `PROJECT_STATE` / `GPT_REVIEW_LEDGER` /
   `.ai/adjudications` 前后字节一致、worktree 状态不变）。
+
+
+## 2.19 权威 raw 终态写入路径与终态矛盾 fail-closed（GOLD-046）
+
+- **为什么**：GOLD-039 的写入前门禁只校验「归一化字段内部自洽」，把成功判定继续建立在
+  `cline_exit_code == 0` + validation 通过上；GOLD-044 因此再次写出 `status=completed` +
+  最终 attempt `cline_finish_reason_raw=aborted` 的矛盾 result，证明未来写入门禁没有覆盖
+  **真实 completion 路径**。§2.19 把「唯一权威终态来源」显式定为 Cline 自报的 raw 终态，
+  并在**状态推进 / completion commit 之前**就 fail-closed。
+- **唯一权威终态来源**：`orchestrator/ai_orchestrator.py` 的 `parse_cline_json_output` 取
+  CLI 事件流中**最后一个携带 reason 的终态事件**（`run_result.finishReason` /
+  `agent_event.done.reason`，后覆盖先；不带 reason 的 done 不擦掉已捕获的 reason）作为权威
+  raw 终态，并**原样**保留在 `attempt.cline_finish_reason_raw`。绝不丢弃 `aborted`、绝不
+  改名、绝不做空值替换、绝不只凭 `cline_exit_code=0` / validation 通过推断 `completed`；
+  缺失 raw 终态 = 没有权威成功事实 ⇒ fail-closed。
+- **成功判定收紧**：`attempt_outcome(cline_result, validations)` 现在要求
+  `cline_exit_code == 0` **且**全部 validation `returncode == 0` **且**权威 raw 终态为
+  `completed`（复用 §2.13 唯一词表 `result_terminal_consistency.raw_terminal_is_success`；
+  模块不可用 ⇒ fail-closed）。`aborted` / 其它非成功 raw 值 / 缺失 ⇒ `failed`。
+- **失败语义不被折叠**：exit code 0 但权威 raw 非成功 ⇒ 稳定
+  `failure_class=terminal_not_completed` / `failure_code=CLINE_TERMINAL_NOT_COMPLETED`
+  （**可重试**，受 `max_attempts` 约束，绝不无限重试；retry 耗尽后顶层 `status=blocked`）。
+  timeout 仍是 `retryable_external` / `CLINE_TIMEOUT`；provider fatal 仍是
+  `non_retryable_external` → `waiting_external`；显式 blocked / 人工中止语义不变。
+- **同一 terminal-consistency 门禁**：新增
+  `ensure_completion_terminal_consistency(task, status, attempts, ...)`，在
+  `write_task_state(..., "completed")` 与 `commit_task_result(..., "completed")` **之前**
+  用 §2.13 唯一判定校验将写入的终态 result；`write_final_result` 在 `atomic_write_json`
+  之前再校验一次。任何一处检出矛盾 ⇒ raise `ResultTerminalConsistencyError`，绝不落盘、
+  绝不完成推进。`build_final_result` / `write_final_result` 共用同一载荷形状，门禁与持久化
+  看到的是**同一份事实**。
+- **新稳定 reason code**（`orchestrator/result_terminal_consistency.py`）：
+  `RESULT_TERMINAL_RAW_TERMINAL_CONTRADICTS_COMPLETED`——`status=completed` 但权威
+  `cline_finish_reason_raw` 不是 `completed`（含缺失）。§2.8 review binding / §2.11 backlog /
+  §2.16 evidence manifest 复用同一规则，因此 GOLD-044 这类矛盾在 review 层显式
+  `facts_complete=false` / `invalid`，**绝不**被猜成 PASS。
+- **只读 / 职责边界（不可协商）**：历史 `.ai/results`、`GPT_REVIEW_LEDGER`、
+  `PROJECT_STATE`、`.ai/adjudications` 全部只读；本项不创建真实 GPT 裁决、不签发 review
+  verdict、不推进 `last_reviewed_task`、不解除 `PHASE3_3_DATA`、不改变 Phase / L1~L4 /
+  `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
+- **回归测试**：`tests/unit/test_result_terminal_consistency.py`（`completed` + raw
+  `aborted` / 缺失 fail-closed、`blocked` + raw `aborted` 自洽、`raw_terminal_is_success`
+  严格性）、`tests/unit/test_ai_orchestrator_queue.py`（真实写入路径：exit code 0 +
+  validations PASS 但 raw `aborted` ⇒ `blocked` result 且**无** completion commit；正常 raw
+  `completed` ⇒ completed result + completion commit；多终态事件选择；timeout/retry
+  exhausted 不产生完成推进）、`tests/unit/test_ai_orchestrator_external_failures.py`
+  （`terminal_not_completed` 证据分类）+ 真实语料集成回归
+  （`test_result_terminal_consistency_regression.py` / `test_review_backlog_regression.py`
+  独立复算 GOLD-044 归一化矛盾；`test_review_evidence_manifest_regression.py`
+  `invalid_count` 计入 GOLD-044）。
+
 
 
 

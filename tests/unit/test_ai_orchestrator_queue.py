@@ -943,8 +943,8 @@ def test_push_pending_recovery_never_reruns_cline_and_gates_next_task(
             "stdout": "",
             "stderr": "",
             "timed_out": False,
-            # GOLD-016 真实出现过的 raw finish reason：aborted
-            "summary": {"finish_reason": "aborted", "model": "deepseek-flash"},
+            # GOLD-046：权威 raw 终态必须是 completed 才能算成功。
+            "summary": {"finish_reason": "completed", "model": "deepseek-flash"},
         }
 
     def refuse_real_command(*args: object, **kwargs: object) -> object:
@@ -971,7 +971,7 @@ def test_push_pending_recovery_never_reruns_cline_and_gates_next_task(
     assert local_result["normalized_finish_reason"] == "completed"
 
     attempt = local_result["attempts"][0]
-    assert attempt["cline_finish_reason_raw"] == "aborted"
+    assert attempt["cline_finish_reason_raw"] == "completed"
     assert attempt["execution_outcome"] == "completed"
     assert attempt["normalized_finish_reason"] == "completed"
     assert attempt["finish_reason"] == "completed"
@@ -1028,33 +1028,42 @@ def test_attempt_record_keeps_raw_finish_reason_separate_from_outcome() -> None:
         validations=[{"command": "pytest", "returncode": 0}],
         changed_files=[" M a.py"],
         diff_stat="a.py | 1 +",
-        execution_outcome=orch.EXECUTION_OUTCOME_COMPLETED,
+        execution_outcome=orch.EXECUTION_OUTCOME_FAILED,
     )
 
     assert record["cline_finish_reason_raw"] == "aborted"
-    assert record["execution_outcome"] == "completed"
-    assert record["normalized_finish_reason"] == "completed"
-    assert record["finish_reason"] == "completed"
+    assert record["execution_outcome"] == "failed"
+    assert record["normalized_finish_reason"] == "failed"
+    assert record["finish_reason"] == "failed"
 
 
 @pytest.mark.parametrize(
-    ("returncode", "validations", "expected"),
+    ("returncode", "raw", "validations", "expected"),
     [
-        (0, [{"returncode": 0}], "completed"),
-        (0, [{"returncode": 1}], "failed"),
-        (0, [], "completed"),
-        (1, [], "failed"),
-        (124, [{"returncode": 0}], "failed"),
+        (0, "completed", [{"returncode": 0}], "completed"),
+        (0, "completed", [{"returncode": 1}], "failed"),
+        (0, "completed", [], "completed"),
+        # GOLD-046：权威 raw 终态不是成功收尾（aborted / 缺失）⇒ 绝不 completed。
+        (0, "aborted", [{"returncode": 0}], "failed"),
+        (0, None, [{"returncode": 0}], "failed"),
+        (1, "completed", [], "failed"),
+        (124, "completed", [{"returncode": 0}], "failed"),
     ],
 )
 def test_attempt_outcome_matches_orchestrator_success_decision(
     returncode: int,
+    raw: str | None,
     validations: list[dict[str, int]],
     expected: str,
 ) -> None:
+    cline_result: dict[str, object] = {"returncode": returncode}
+
+    if raw is not None:
+        cline_result["summary"] = {"finish_reason": raw}
+
     assert (
         orch.attempt_outcome(
-            {"returncode": returncode},
+            cline_result,
             validations,
         )
         == expected
@@ -1114,3 +1123,207 @@ def test_legacy_result_without_new_fields_is_still_readable(
     assert orch.task_result_status("GOLD-101") == "completed"
     assert orch.task_result_status("GOLD-999") == "pending"
     assert json.loads(path.read_text(encoding="utf-8")) == legacy
+
+
+# ============================================================
+# GOLD-046：权威 raw 终态写入路径回归
+# ============================================================
+
+
+def _refuse_real_command(*args: object, **kwargs: object) -> object:
+    raise AssertionError("test must not run a real subprocess")
+
+
+def test_parse_cline_json_output_uses_last_terminal_event() -> None:
+    """多终态事件：流中最后一个携带 reason 的终态事件才是权威终态。"""
+
+    run_result_completed = json.dumps(
+        {"type": "run_result", "finishReason": "completed", "iterations": 3}
+    )
+    done_aborted = json.dumps(
+        {"type": "agent_event", "event": {"type": "done", "reason": "aborted"}}
+    )
+    done_without_reason = json.dumps({"type": "agent_event", "event": {"type": "done"}})
+
+    # 后出现的 done 覆盖先出现的 run_result。
+    assert (
+        orch.parse_cline_json_output(f"{run_result_completed}\n{done_aborted}")["finish_reason"]
+        == "aborted"
+    )
+
+    # 后出现的 run_result 覆盖先出现的 done。
+    assert (
+        orch.parse_cline_json_output(f"{done_aborted}\n{run_result_completed}")["finish_reason"]
+        == "completed"
+    )
+
+    # 不带 reason 的 done 绝不擦掉已捕获的权威 reason。
+    assert (
+        orch.parse_cline_json_output(f"{run_result_completed}\n{done_without_reason}")[
+            "finish_reason"
+        ]
+        == "completed"
+    )
+
+
+def test_aborted_raw_terminal_never_produces_completed_result_or_completion_commit(
+    queue_fs: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """exit code 0 + validations PASS 但权威 raw=aborted ⇒ 绝不落 completed / 完成推进。"""
+
+    tasks, results = queue_fs
+    write_task(tasks, "GOLD-101", max_attempts=1)
+
+    monkeypatch.setattr(orch, "TASK_STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(orch, "REMOTE_NAME", "origin")
+    monkeypatch.setattr(orch, "REQUIRED_BRANCH", "cline-agent")
+
+    fake = FakeGit()
+    monkeypatch.setattr(orch, "git", fake)
+
+    calls: list[Path] = []
+
+    def fake_run_cline(task_file: Path) -> dict[str, object]:
+        calls.append(task_file)
+        return {
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": False,
+            "summary": {"finish_reason": "aborted", "model": "deepseek-flash"},
+        }
+
+    monkeypatch.setattr(orch, "run_cline", fake_run_cline)
+    monkeypatch.setattr(orch, "run_command", _refuse_real_command)
+    monkeypatch.setattr(orch, "run_validations", lambda task: _passing_validation())
+    monkeypatch.setattr(orch, "get_changed_files", lambda: [" M a.py"])
+    monkeypatch.setattr(orch, "get_diff_stat", lambda: "a.py | 1 +")
+
+    step = orch.run_iteration(None)
+
+    assert calls == [tasks / "GOLD-101.json"]
+    assert step["outcome"] != "completed"
+
+    result = json.loads((results / "GOLD-101.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "blocked"
+    assert result["execution_outcome"] == "blocked"
+    assert result["normalized_finish_reason"] == "blocked"
+
+    attempt = result["attempts"][0]
+    assert attempt["cline_exit_code"] == 0
+    assert attempt["cline_finish_reason_raw"] == "aborted"
+    assert attempt["execution_outcome"] == "failed"
+    assert attempt["finish_reason"] == "failed"
+    assert attempt["failure_class"] == orch.TERMINAL_FAILURE_CLASS
+    assert attempt["failure_code"] == orch.TERMINAL_FAILURE_CODE
+
+    commits = [command for command in fake.commands if command.startswith("commit ")]
+    assert not any("complete GOLD-101" in command for command in commits)
+    assert any("blocked GOLD-101" in command for command in commits)
+
+
+
+def test_completed_raw_terminal_produces_completed_result_and_completion_commit(
+    queue_fs: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """正常 raw completed 仍按原契约完成（result=completed + completion commit）。"""
+
+    tasks, results = queue_fs
+    write_task(tasks, "GOLD-101", max_attempts=1)
+
+    monkeypatch.setattr(orch, "TASK_STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(orch, "REMOTE_NAME", "origin")
+    monkeypatch.setattr(orch, "REQUIRED_BRANCH", "cline-agent")
+
+    fake = FakeGit()
+    monkeypatch.setattr(orch, "git", fake)
+
+    def fake_run_cline(task_file: Path) -> dict[str, object]:
+        del task_file
+        return {
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": False,
+            "summary": {"finish_reason": "completed", "model": "deepseek-flash"},
+        }
+
+    monkeypatch.setattr(orch, "run_cline", fake_run_cline)
+    monkeypatch.setattr(orch, "run_command", _refuse_real_command)
+    monkeypatch.setattr(orch, "run_validations", lambda task: _passing_validation())
+    monkeypatch.setattr(orch, "get_changed_files", lambda: [" M a.py"])
+    monkeypatch.setattr(orch, "get_diff_stat", lambda: "a.py | 1 +")
+
+    step = orch.run_iteration(None)
+
+    assert step["outcome"] == "completed"
+
+    result = json.loads((results / "GOLD-101.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "completed"
+    assert result["execution_outcome"] == "completed"
+    assert result["attempts"][0]["cline_finish_reason_raw"] == "completed"
+
+    commits = [command for command in fake.commands if command.startswith("commit ")]
+    assert any("complete GOLD-101" in command for command in commits)
+
+
+def test_timeout_exhausted_never_produces_completion_commit(
+    queue_fs: tuple[Path, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """timeout / retry exhausted：保持 retryable 失败语义，绝不产生完成推进。"""
+
+    tasks, results = queue_fs
+    write_task(tasks, "GOLD-101", max_attempts=1)
+
+    monkeypatch.setattr(orch, "TASK_STATE_DIR", tmp_path / "state")
+    monkeypatch.setattr(orch, "REMOTE_NAME", "origin")
+    monkeypatch.setattr(orch, "REQUIRED_BRANCH", "cline-agent")
+
+    fake = FakeGit()
+    monkeypatch.setattr(orch, "git", fake)
+
+    def fake_run_cline(task_file: Path) -> dict[str, object]:
+        del task_file
+        return {
+            "returncode": 124,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": True,
+            "summary": {},
+        }
+
+    def validation_must_not_run(task: object) -> object:
+        del task
+        raise AssertionError("timeout attempt must not run validation")
+
+    monkeypatch.setattr(orch, "run_cline", fake_run_cline)
+    monkeypatch.setattr(orch, "run_command", _refuse_real_command)
+    monkeypatch.setattr(orch, "run_validations", validation_must_not_run)
+    monkeypatch.setattr(orch, "get_changed_files", lambda: [])
+    monkeypatch.setattr(orch, "get_diff_stat", lambda: "")
+
+    step = orch.run_iteration(None)
+
+    assert step["outcome"] != "completed"
+
+    result = json.loads((results / "GOLD-101.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "blocked"
+
+    attempt = result["attempts"][0]
+    assert attempt["cline_timed_out"] is True
+    assert attempt["execution_outcome"] == "failed"
+    assert attempt["failure_class"] == "retryable_external"
+    assert attempt["failure_code"] == "CLINE_TIMEOUT"
+
+    commits = [command for command in fake.commands if command.startswith("commit ")]
+    assert not any("complete GOLD-101" in command for command in commits)
+

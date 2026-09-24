@@ -78,8 +78,36 @@ def test_success_has_no_failure_class() -> None:
             "stdout": "",
             "stderr": "",
             "timed_out": False,
+            "summary": {"finish_reason": "completed"},
         }
     ) == ("none", None)
+
+
+def test_zero_exit_with_raw_aborted_terminal_is_a_retryable_failure() -> None:
+    """GOLD-046：exit code 0 但权威 raw 终态 ``aborted`` ⇒ 明确失败（带证据）。"""
+
+    assert orch.classify_cline_failure(
+        {
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": False,
+            "summary": {"finish_reason": "aborted"},
+        }
+    ) == (orch.TERMINAL_FAILURE_CLASS, orch.TERMINAL_FAILURE_CODE)
+
+
+def test_zero_exit_without_raw_terminal_is_a_retryable_failure() -> None:
+    """缺失权威 raw 终态 ⇒ fail-closed（绝不从 exit code 0 推断成功）。"""
+
+    assert orch.classify_cline_failure(
+        {
+            "returncode": 0,
+            "stdout": "",
+            "stderr": "",
+            "timed_out": False,
+        }
+    ) == (orch.TERMINAL_FAILURE_CLASS, orch.TERMINAL_FAILURE_CODE)
 
 
 def test_provider_fatal_stderr_wins_even_with_zero_exit_code() -> None:

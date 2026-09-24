@@ -99,6 +99,30 @@ def independent_legacy_contradiction(payload: dict[str, Any]) -> bool:
     return isinstance(raw, str) and raw.strip() not in ("", "completed")
 
 
+def independent_normalized_raw_contradiction(payload: dict[str, Any]) -> bool:
+    """测试自己按 GOLD-046 口径复算「归一化格式的权威 raw 终态矛盾」。"""
+
+    if not any(key in payload for key in NORMALIZED_MARKER_KEYS):
+        return False
+
+    attempts = payload.get("attempts")
+
+    if not isinstance(attempts, list) or not attempts:
+        return False
+
+    final = attempts[-1]
+
+    if not isinstance(final, dict) or not any(key in final for key in NORMALIZED_MARKER_KEYS):
+        return False
+
+    if str(payload.get("status", "")).strip().lower() != "completed":
+        return False
+
+    raw = final.get("cline_finish_reason_raw")
+
+    return not (isinstance(raw, str) and raw.strip().lower() == "completed")
+
+
 def ledger_task_ids() -> list[str]:
     ledger = json.loads(REVIEW_LEDGER.read_text(encoding="utf-8"))
 
@@ -121,24 +145,34 @@ def test_corpus_flags_match_independent_recomputation() -> None:
 
     flagged: list[str] = []
 
+    normalized_flagged: list[str] = []
+
     for task_id, payload in payloads.items():
         report = terminal.analyze_result_terminal_consistency(payload)
 
         module_flag = LEGACY_CONTRADICTION_CODE in report["reason_codes"]
 
-        assert module_flag is (report["consistent"] is False)
+        raw_flag = terminal.REASON_RAW_TERMINAL_CONTRADICTS_COMPLETED in report["reason_codes"]
 
-        # 模块判定 == 测试自己按协议口径复算
+        # 模块判定 == 测试自己按协议口径复算（两类矛盾各自独立复算）。
         assert module_flag is independent_legacy_contradiction(payload), task_id
+        assert raw_flag is independent_normalized_raw_contradiction(payload), task_id
+        assert report["consistent"] is (not (module_flag or raw_flag)), task_id
 
         if module_flag:
             flagged.append(task_id)
+
+        if raw_flag:
+            normalized_flagged.append(task_id)
 
     # GOLD-035 的真实矛盾必须被暴露（本任务的直接验收对象）
     assert "GOLD-035" in flagged
 
     # 仍未漏掉其它同类历史矛盾（GOLD-028 / GOLD-031 / GOLD-038）
     assert {"GOLD-028", "GOLD-031", "GOLD-038"} <= set(flagged)
+
+    # GOLD-046：GOLD-044 的归一化矛盾（completed + raw aborted）必须被暴露。
+    assert "GOLD-044" in normalized_flagged
 
 
 def test_corpus_check_is_read_only_and_deterministic() -> None:

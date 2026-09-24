@@ -44,6 +44,9 @@ AUDIT_TIME = "2026-09-23T00:00:00+08:00"
 # 测试**自己**复算这个结论，绝不 import 被测模块的判定。
 LEGACY_CONTRADICTION_CODE = "RESULT_TERMINAL_LEGACY_RAW_FINISH_REASON_CONTRADICTS_STATUS"
 
+# GOLD-046：归一化格式里权威 raw 终态不是成功收尾的稳定矛盾 code。
+RAW_TERMINAL_CONTRADICTION_CODE = "RESULT_TERMINAL_RAW_TERMINAL_CONTRADICTS_COMPLETED"
+
 NORMALIZED_MARKER_KEYS = (
     "execution_outcome",
     "normalized_finish_reason",
@@ -157,6 +160,38 @@ def independent_legacy_contradiction(payload: dict[str, Any]) -> bool:
     raw = final.get("finish_reason")
 
     return isinstance(raw, str) and raw.strip() not in ("", "completed")
+
+
+def independent_normalized_raw_contradiction(payload: dict[str, Any]) -> bool:
+    """测试自己按 GOLD-046 口径复算「归一化格式的权威 raw 终态矛盾」。
+
+    规则（只覆盖本仓库真实存在的形状，故意不复用被测模块）：
+
+    - 顶层带 GOLD-020 归一化字段（归一化格式）；
+    - 最终 attempt 也带归一化字段；
+    - ``status=completed``；
+    - 权威 ``cline_finish_reason_raw`` 不是 ``completed``（含 ``aborted`` / 缺失）。
+    """
+
+    if not any(key in payload for key in NORMALIZED_MARKER_KEYS):
+        return False
+
+    attempts = payload.get("attempts")
+
+    if not isinstance(attempts, list) or not attempts:
+        return False
+
+    final = attempts[-1]
+
+    if not isinstance(final, dict) or not any(key in final for key in NORMALIZED_MARKER_KEYS):
+        return False
+
+    if str(payload.get("status", "")).strip().lower() != "completed":
+        return False
+
+    raw = final.get("cline_finish_reason_raw")
+
+    return not (isinstance(raw, str) and raw.strip().lower() == "completed")
 
 
 def expected_backlog_ids() -> list[str]:
@@ -291,16 +326,22 @@ def test_backlog_item_identity_is_independently_recomputable_with_git() -> None:
         assert item["result"]["sha256"] == hashlib.sha256(blob).hexdigest()
         assert item["result"]["status"] == "completed"
 
-        # GOLD-039：测试自己按协议口径复算「历史终态矛盾」，
+        # GOLD-039 / GOLD-046：测试自己按协议口径复算「终态矛盾」，
         # 不信任被测模块的结论。
-        contradicted = independent_legacy_contradiction(
-            json.loads((RESULTS_DIR / f"{task_id}.json").read_text(encoding="utf-8"))
+        raw_payload = json.loads(
+            (RESULTS_DIR / f"{task_id}.json").read_text(encoding="utf-8")
         )
 
-        assert item["facts_complete"] is (not contradicted)
+        legacy_contradicted = independent_legacy_contradiction(raw_payload)
 
-        if contradicted:
+        raw_contradicted = independent_normalized_raw_contradiction(raw_payload)
+
+        assert item["facts_complete"] is (not (legacy_contradicted or raw_contradicted))
+
+        if legacy_contradicted:
             assert item["missing_reason_codes"] == [LEGACY_CONTRADICTION_CODE]
+        elif raw_contradicted:
+            assert item["missing_reason_codes"] == [RAW_TERMINAL_CONTRADICTION_CODE]
         else:
             assert item["missing_reason_codes"] == []
 

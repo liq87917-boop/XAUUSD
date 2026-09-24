@@ -2120,6 +2120,49 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 
 
 
+### 权威 raw 终态写入路径与终态矛盾 fail-closed（GOLD-046）
+
+> **合规红线**：Cline CLI 自报的**最终 raw finish reason** 是唯一权威终态来源；`aborted`
+> 等非成功 raw 值**绝不**能因 `exit code 0` 或 validation 全通过被归一成 `completed`。
+> 权威 raw 不为成功收尾时一律 fail-closed：不写 `status=completed`、不产生 completion
+> commit、不推进 rolling queue。历史 result 永久只读。
+
+- **一句话**：GOLD-044 暴露了「`cline_finish_reason_raw=aborted` 但仍写出
+  `status=completed`」的写入路径回归。GOLD-046 把「成功判定」与「终态一致性门禁」统一
+  到同一个权威事实源上，堵住这条路径；
+- **唯一权威终态来源**：`parse_cline_json_output` 取 CLI 事件流中**最后一个携带 reason
+  的终态事件**（`run_result` 或 `agent_event.done`，后覆盖先）作为权威 raw 终态并原样
+  保留在 `attempt.cline_finish_reason_raw`；绝不丢弃 / 改名 / 空值替换 / 由 exit code 推断；
+- **成功判定收紧**（`orchestrator/ai_orchestrator.py`）：`attempt_outcome` 现在要求
+  `cline_exit_code == 0` **且** 全部 validation 通过 **且** 权威 raw 终态为 `completed`；
+  `aborted` / 其它非成功 raw 值 / 缺失 raw 终态一律判 `failed`（可重试，`failure_class=
+  terminal_not_completed` / `failure_code=CLINE_TERMINAL_NOT_COMPLETED`），retry 耗尽后
+  落 `status=blocked`；
+- **同一 terminal-consistency 门禁**：`ensure_completion_terminal_consistency` 在
+  **状态推进 / completion commit 之前**执行 §2.13 唯一判定；`write_final_result` 落盘前
+  再执行一次，杜绝「completed + 权威 raw 非成功」再次进入仓库；
+- **新稳定 reason code**：`RESULT_TERMINAL_RAW_TERMINAL_CONTRADICTS_COMPLETED`
+  （`status=completed` 但权威 `cline_finish_reason_raw` 不是 `completed`，含缺失）；
+  唯一规则来源仍是 `orchestrator/result_terminal_consistency.py`（纯函数 + 纯标准库）；
+- **语义不被折叠**：`aborted`（retryable `terminal_not_completed`）、timeout
+  （`retryable_external` / `CLINE_TIMEOUT`）、provider fatal
+  （`non_retryable_external` → `waiting_external`）、显式 blocked、人工中止各自保持既有
+  语义；重试有界（受 `max_attempts` 约束），绝不无限重试；
+- **只读边界**：历史 `.ai/results`、`GPT_REVIEW_LEDGER`、`PROJECT_STATE`、`adjudications`
+  全部只读；不创建真实 GPT 裁决、不签发 review verdict、不推进 `last_reviewed_task`、
+  不解除 `PHASE3_3_DATA`；
+- **回归测试**：`tests/unit/test_result_terminal_consistency.py`（新增 raw 终态矛盾 /
+  缺失 fail-closed、`raw_terminal_is_success` 严格性）、
+  `tests/unit/test_ai_orchestrator_queue.py`（`GOLD-046` 写入路径：exit 0 + validations
+  PASS 但 raw `aborted` 不落 completed / 不产生 completion commit；成功 raw `completed`
+  正常完成；多终态事件选择；timeout/retry exhausted 不产生完成推进）、
+  `tests/unit/test_ai_orchestrator_external_failures.py`（`terminal_not_completed` 证据）
+  + 真实语料集成回归（`test_result_terminal_consistency_regression.py` /
+  `test_review_backlog_regression.py` 独立复算 GOLD-044 归一化矛盾；
+  `test_review_evidence_manifest_regression.py` `invalid_count` 计入 GOLD-044）。
+
+
+
 ## 8. 数据模型
 
 
@@ -2292,4 +2335,6 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 | **历史矛盾证据必须只读且四态可复算** | `orchestrator/review_evidence_manifest.py`：逐项汇总 `last_reviewed_task` 之后的完整 backlog（与 §2.11 同一口径）的 result/commit sha256、changed paths、validation return codes、§2.13 终态矛盾、ledger/裁决状态与稳定 reason codes，分类为 `facts-ready` / `needs-gpt-adjudication` / `pending-substantive-review` / `invalid`；缺 commit、hash 漂移、事实不齐、裁决冲突一律 fail-closed，`exit_code=0` 绝不等于 GPT PASS，工具只读（`--output` 仅 `.ai/runtime/**` 或系统临时目录）（GOLD-043） |
 | **Review 收口写入必须原子一致且零写入预检** | `orchestrator/review_closure_precondition.py`：GPT 写入历史裁决 / `GPT_REVIEW_LEDGER` / `PROJECT_STATE` 前，把候选写集（只允许来自显式临时文件或 stdin）与已提交 HEAD、tasks/results/state/ledger/store 摘要、§2.15 裁决校验、§2.8 binding、§2.11 backlog、§2.9 integrity 一次性比对；stale HEAD / 摘要漂移 / ledger 链断裂 / PASS 越过未裁决矛盾 / 非 GPT 裁决 / 身份漂移 / 删除条目 / `last_reviewed_task` 倒退或超前 / 删除 `PHASE3_3_DATA` / 提前进入 Phase 3.4 / 交易安全不变量变化一律 fail-closed；无 `--apply` / `--fix` / `--advance` / `--sign`，`candidate_ready` ≠ review 完成、不触发 Executor 写入或自动 push（GOLD-045） |
 | **只有有效 GPT 裁决才恢复事实可绑定性** | `orchestrator/review_binding.py` + `review_backlog` / `review_ledger_integrity` / `planner_mutation_precondition` / `planner_refill_request`：默认 `facts_complete=false`，仅当存在 schema 合法、GPT 权威有效、原 result sha256/status + commit sha/branch + 原始 contradiction codes 完全匹配且不冲突的 §2.15 裁决、且无其它阻塞 code 时 `binding.facts_ready=true`；原始 contradiction finding / result sha256 / 裁决 identity 一律保留，越权 / 漂移 / 重复 / 冲突 / store 损坏 fail-closed，裁决 ≠ Review PASS、不写 ledger、不推进指针、不解除 `PHASE3_3_DATA`（GOLD-044） |
+| **权威 raw 终态是成功判定与 completion 的唯一来源** | `orchestrator/result_terminal_consistency.py` + `ai_orchestrator.py`：Cline 自报的**最终 raw finish reason**（流中最后一个携带 reason 的终态事件）是唯一权威终态；`attempt_outcome` 要求 `exit code 0` + validation 全通过 + raw `completed`，`aborted` / 非成功 raw / 缺失一律判 `failed`（`terminal_not_completed` / `CLINE_TERMINAL_NOT_COMPLETED`，可重试、retry 耗尽落 `blocked`）；`ensure_completion_terminal_consistency` 在状态推进 / completion commit **之前**执行 §2.13 唯一门禁，新 code `RESULT_TERMINAL_RAW_TERMINAL_CONTRADICTS_COMPLETED`；timeout / provider fatal / blocked / 人工中止语义不折叠、重试有界，历史 result / ledger / state / adjudications 只读（GOLD-046） |
+
 

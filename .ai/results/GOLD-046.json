@@ -1,0 +1,109 @@
+{
+  "task_id": "GOLD-046",
+  "title": "修复 completed 与最终 raw aborted 再次并存的结果写入路径",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "completed",
+  "finished_at": "2026-09-24T22:48:05+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M README.md",
+    " M orchestrator/ai_orchestrator.py",
+    " M orchestrator/result_terminal_consistency.py",
+    " M tests/integration/test_result_terminal_consistency_regression.py",
+    " M tests/integration/test_review_backlog_regression.py",
+    " M tests/integration/test_review_closure_adjudication_regression.py",
+    " M tests/integration/test_review_evidence_manifest_regression.py",
+    " M tests/unit/test_ai_orchestrator_external_failures.py",
+    " M tests/unit/test_ai_orchestrator_queue.py",
+    " M tests/unit/test_ai_orchestrator_recovery_state_machine.py",
+    " M tests/unit/test_legacy_result_adjudication.py",
+    " M tests/unit/test_result_terminal_consistency.py",
+    " M tests/unit/test_review_closure_precondition.py",
+    " M tests/unit/test_review_evidence_manifest.py",
+    "?? pytest_baseline.err",
+    "?? pytest_baseline.log",
+    "?? pytest_final.err",
+    "?? pytest_final.log",
+    "?? pytest_int.err",
+    "?? pytest_int.log"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md                        |  57 ++++-\n README.md                                          |  45 ++++\n orchestrator/ai_orchestrator.py                    | 179 +++++++++++++--\n orchestrator/result_terminal_consistency.py        |  36 +++\n .../test_result_terminal_consistency_regression.py |  38 +++-\n .../integration/test_review_backlog_regression.py  |  51 ++++-\n .../test_review_closure_adjudication_regression.py |   2 +-\n .../test_review_evidence_manifest_regression.py    |   2 +-\n .../unit/test_ai_orchestrator_external_failures.py |  28 +++\n tests/unit/test_ai_orchestrator_queue.py           | 241 +++++++++++++++++++--\n .../test_ai_orchestrator_recovery_state_machine.py |   4 +-\n tests/unit/test_legacy_result_adjudication.py      |   2 +-\n tests/unit/test_result_terminal_consistency.py     |  78 ++++++-\n tests/unit/test_review_closure_precondition.py     |   2 +-\n tests/unit/test_review_evidence_manifest.py        |   2 +-\n 15 files changed, 718 insertions(+), 49 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-24T22:23:38+08:00",
+      "finished_at": "2026-09-24T22:48:05+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "completed",
+      "normalized_finish_reason": "completed",
+      "finish_reason": "completed",
+      "cline_finish_reason_raw": "aborted",
+      "model": "deepseek-flash",
+      "iterations": 144,
+      "duration_ms": 864377,
+      "usage": {
+        "inputTokens": 24207968,
+        "outputTokens": 83918,
+        "cacheReadTokens": 24027008,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.14957582400000002
+      },
+      "cline_final_text": "",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M README.md",
+        " M orchestrator/ai_orchestrator.py",
+        " M orchestrator/result_terminal_consistency.py",
+        " M tests/integration/test_result_terminal_consistency_regression.py",
+        " M tests/integration/test_review_backlog_regression.py",
+        " M tests/integration/test_review_closure_adjudication_regression.py",
+        " M tests/integration/test_review_evidence_manifest_regression.py",
+        " M tests/unit/test_ai_orchestrator_external_failures.py",
+        " M tests/unit/test_ai_orchestrator_queue.py",
+        " M tests/unit/test_ai_orchestrator_recovery_state_machine.py",
+        " M tests/unit/test_legacy_result_adjudication.py",
+        " M tests/unit/test_result_terminal_consistency.py",
+        " M tests/unit/test_review_closure_precondition.py",
+        " M tests/unit/test_review_evidence_manifest.py",
+        "?? pytest_baseline.err",
+        "?? pytest_baseline.log",
+        "?? pytest_final.err",
+        "?? pytest_final.log",
+        "?? pytest_int.err",
+        "?? pytest_int.log"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md                        |  57 ++++-\n README.md                                          |  45 ++++\n orchestrator/ai_orchestrator.py                    | 179 +++++++++++++--\n orchestrator/result_terminal_consistency.py        |  36 +++\n .../test_result_terminal_consistency_regression.py |  38 +++-\n .../integration/test_review_backlog_regression.py  |  51 ++++-\n .../test_review_closure_adjudication_regression.py |   2 +-\n .../test_review_evidence_manifest_regression.py    |   2 +-\n .../unit/test_ai_orchestrator_external_failures.py |  28 +++\n tests/unit/test_ai_orchestrator_queue.py           | 241 +++++++++++++++++++--\n .../test_ai_orchestrator_recovery_state_machine.py |   4 +-\n tests/unit/test_legacy_result_adjudication.py      |   2 +-\n tests/unit/test_result_terminal_consistency.py     |  78 ++++++-\n tests/unit/test_review_closure_precondition.py     |   2 +-\n tests/unit/test_review_evidence_manifest.py        |   2 +-\n 15 files changed, 718 insertions(+), 49 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  1%]\n........................................................................ [  3%]\n........................................................................ [  5%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 13%]\n........................................................................ [ 15%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 28%]\n........................................................................ [ 30%]\n........................................................................ [ 32%]\n........................................................................ [ 33%]\n........................................................................ [ 35%]\n........................................................................ [ 37%]\n........................................................................ [ 39%]\n........................................................................ [ 41%]\n........................................................................ [ 43%]\n........................................................................ [ 45%]\n........................................................................ [ 47%]\n........................................................................ [ 48%]\n........................................................................ [ 50%]\n........................................................................ [ 52%]\n........................................................................ [ 54%]\n........................................................................ [ 56%]\n........................................................................ [ 58%]\n........................................................................ [ 60%]\n........................................................................ [ 62%]\n........................................................................ [ 64%]\n........................................................................ [ 65%]\n........................................................................ [ 67%]\n........................................................................ [ 69%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 75%]\n........................................................................ [ 77%]\n........................................................................ [ 79%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 94%]\n........................................................................ [ 96%]\n........................................................................ [ 97%]\n..................................s..................................... [ 99%]\n.......                                                                  [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3822 passed, 1 skipped in 597.07s (0:09:57)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

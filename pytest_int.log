@@ -1,0 +1,62 @@
+.....................F.................................................. [ 86%]
+...........                                                              [100%]
+================================== FAILURES ===================================
+__________ test_backlog_is_deterministic_and_cli_is_zero_side_effect __________
+
+    def test_backlog_is_deterministic_and_cli_is_zero_side_effect() -> None:
+        first = fresh_manifest()
+    
+        second = fresh_manifest()
+    
+        assert first["backlog_digest"] == second["backlog_digest"]
+    
+        assert backlog.render_review_backlog_manifest(first) == backlog.render_review_backlog_manifest(
+            second
+        )
+    
+        command = [
+            sys.executable,
+            "-m",
+            "orchestrator.review_backlog",
+            "--generated-at",
+            AUDIT_TIME,
+        ]
+    
+        before_status = worktree_status()
+    
+        before_ledger = REVIEW_LEDGER.read_bytes()
+    
+        run_first = subprocess.run(command, capture_output=True, cwd=str(REPO_ROOT), check=False)
+    
+        run_second = subprocess.run(command, capture_output=True, cwd=str(REPO_ROOT), check=False)
+    
+        assert run_first.stdout == run_second.stdout
+        assert run_first.stdout.isascii()
+    
+        payload = json.loads(run_first.stdout.decode("ascii"))
+    
+        assert payload["backlog_digest"] == first["backlog_digest"]
+        assert run_first.returncode == payload["summary"]["exit_code"]
+    
+        if payload["issues"]:
+            assert run_first.returncode in (backlog.EXIT_FAIL_CLOSED, backlog.EXIT_UNAVAILABLE)
+        else:
+            assert run_first.returncode == backlog.EXIT_OK
+    
+        assert REVIEW_LEDGER.read_bytes() == before_ledger
+>       assert worktree_status() == before_status
+E       AssertionError: assert ' M .ai/DEVEL...est_int.log\n' == ' M orchestra...est_int.log\n'
+E         
+E         +  M .ai/DEVELOPMENT_PROTOCOL.md
+E         +  M README.md
+E            M orchestrator/ai_orchestrator.py
+E            M orchestrator/result_terminal_consistency.py
+E            M tests/integration/test_result_terminal_consistency_regression.py
+E            M tests/integration/test_review_backlog_regression.py...
+E         
+E         ...Full output truncated (13 lines hidden), use '-vv' to show
+
+tests\integration\test_review_backlog_regression.py:445: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_review_backlog_regression.py::test_backlog_is_deterministic_and_cli_is_zero_side_effect
+1 failed, 82 passed in 145.75s (0:02:25)

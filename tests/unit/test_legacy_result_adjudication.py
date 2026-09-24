@@ -122,7 +122,7 @@ def consistent_result(task_id: str) -> dict[str, Any]:
                 "execution_outcome": "completed",
                 "normalized_finish_reason": "completed",
                 "finish_reason": "completed",
-                "cline_finish_reason_raw": "aborted",
+                "cline_finish_reason_raw": "completed",
                 "validations": [{"command": "pytest", "returncode": 0, "timed_out": False}],
             }
         ],

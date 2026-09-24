@@ -481,7 +481,7 @@ def test_backlog_classifies_adjudicated_contradiction_end_to_end(
 
     assert payload["summary"]["adjudicated_count"] == 1
     assert payload["summary"]["adjudicated_pending_count"] == 1
-    assert payload["summary"]["unresolved_contradiction_count"] == 6
+    assert payload["summary"]["unresolved_contradiction_count"] == 7
 
     assert_repo_unchanged(before_repo)
 

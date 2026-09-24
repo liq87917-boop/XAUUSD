@@ -99,7 +99,7 @@ def completed_result(**extra: Any) -> dict[str, Any]:
         "execution_outcome": "completed",
         "normalized_finish_reason": "completed",
         "finish_reason": "completed",
-        "cline_finish_reason_raw": "aborted",
+        "cline_finish_reason_raw": "completed",
         "validations": [passing_validation()],
     }
 
@@ -126,7 +126,7 @@ def codes(payload: object) -> list[str]:
 
 
 def test_normalized_completed_result_is_consistent() -> None:
-    """成功任务：``finish_reason=completed`` + raw ``aborted`` 必须完全自洽。"""
+    """成功任务：``finish_reason=completed`` + 权威 raw ``completed`` 必须完全自洽。"""
 
     report = terminal.analyze_result_terminal_consistency(completed_result())
 
@@ -137,7 +137,74 @@ def test_normalized_completed_result_is_consistent() -> None:
     assert report["format"] == terminal.FORMAT_NORMALIZED
     assert report["status_terminal"] is True
     assert report["final_attempt"] == 1
+    assert report["final_cline_finish_reason_raw"] == "completed"
+
+
+def test_completed_with_raw_aborted_terminal_is_fail_closed() -> None:
+    """GOLD-046：权威最终 raw 终态 ``aborted`` 绝不能被归一成 ``completed``。"""
+
+    payload = completed_result()
+
+    payload["attempts"][0]["cline_finish_reason_raw"] = "aborted"
+
+    result_codes = codes(payload)
+
+    assert terminal.REASON_RAW_TERMINAL_CONTRADICTS_COMPLETED in result_codes
+    assert terminal.is_inconsistent(payload) is True
+
+    with pytest.raises(terminal.TerminalConsistencyError) as excinfo:
+        terminal.assert_result_terminal_consistency(payload)
+
+    assert terminal.REASON_RAW_TERMINAL_CONTRADICTS_COMPLETED in str(excinfo.value)
+
+
+def test_completed_with_missing_raw_terminal_is_fail_closed() -> None:
+    """权威 raw 终态缺失 ⇒ 无法证明成功收尾 ⇒ fail-closed（绝不推断 completed）。"""
+
+    payload = completed_result()
+
+    payload["attempts"][0].pop("cline_finish_reason_raw")
+
+    assert terminal.REASON_RAW_TERMINAL_CONTRADICTS_COMPLETED in codes(payload)
+
+
+def test_blocked_with_raw_aborted_terminal_stays_consistent() -> None:
+    """失败终态里保留 raw ``aborted`` 作审计值自洽（blocked + failed + 失败证据）。"""
+
+    payload = completed_result(
+        status="blocked",
+        execution_outcome="blocked",
+        normalized_finish_reason="blocked",
+        attempts=[
+            {
+                "attempt": 1,
+                "cline_exit_code": 0,
+                "cline_timed_out": False,
+                "failure_class": "terminal_not_completed",
+                "failure_code": "CLINE_TERMINAL_NOT_COMPLETED",
+                "execution_outcome": "failed",
+                "normalized_finish_reason": "failed",
+                "finish_reason": "failed",
+                "cline_finish_reason_raw": "aborted",
+                "validations": [passing_validation()],
+            }
+        ],
+    )
+
+    report = terminal.analyze_result_terminal_consistency(payload)
+
+    assert report["consistent"] is True
+    assert report["reason_codes"] == []
     assert report["final_cline_finish_reason_raw"] == "aborted"
+
+
+def test_raw_terminal_success_helper_is_strict() -> None:
+    assert terminal.raw_terminal_is_success("completed") is True
+    assert terminal.raw_terminal_is_success("Completed") is True
+    assert terminal.raw_terminal_is_success("aborted") is False
+    assert terminal.raw_terminal_is_success("error") is False
+    assert terminal.raw_terminal_is_success(None) is False
+    assert terminal.raw_terminal_is_success("") is False
 
 
 def test_blocked_after_retry_exhaustion_is_consistent() -> None:
@@ -259,11 +326,14 @@ def test_completed_with_raw_aborted_in_normalized_key_is_fail_closed() -> None:
 
     payload["attempts"][0]["normalized_finish_reason"] = "aborted"
 
+    payload["attempts"][0]["cline_finish_reason_raw"] = "aborted"
+
     result_codes = codes(payload)
 
     assert terminal.REASON_FINISH_REASON_INVALID in result_codes
     assert terminal.REASON_FINISH_REASON_MISMATCH in result_codes
     assert terminal.REASON_RAW_FINISH_REASON_MISPLACED in result_codes
+    assert terminal.REASON_RAW_TERMINAL_CONTRADICTS_COMPLETED in result_codes
     assert terminal.is_inconsistent(payload) is True
 
     with pytest.raises(terminal.TerminalConsistencyError) as excinfo:
@@ -558,7 +628,7 @@ def test_write_final_result_accepts_consistent_results(
         "execution_outcome": "completed",
         "normalized_finish_reason": "completed",
         "finish_reason": "completed",
-        "cline_finish_reason_raw": "aborted",
+        "cline_finish_reason_raw": "completed",
         "validations": [passing_validation()],
     }
 
@@ -574,7 +644,7 @@ def test_write_final_result_accepts_consistent_results(
     assert on_disk == written
     assert on_disk["status"] == "completed"
     assert on_disk["attempts"][0]["finish_reason"] == "completed"
-    assert on_disk["attempts"][0]["cline_finish_reason_raw"] == "aborted"
+    assert on_disk["attempts"][0]["cline_finish_reason_raw"] == "completed"
 
 
 def test_write_final_result_without_attempt_evidence_still_writes(
