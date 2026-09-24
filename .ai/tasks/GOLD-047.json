@@ -1,0 +1,60 @@
+{
+  "task_id": "GOLD-047",
+  "type": "CONTROL_PLANE_RESULT_TERMINAL_FRESH_PROCESS_CANARY",
+  "title": "建立结果终态修复的新进程端到端 canary",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-046"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "在 GOLD-046 后以新 Python 进程和真实 runner 边界验证终态选择、result 持久化、completion commit 与队列推进使用已修复契约，避免仅有纯函数测试通过但长驻进程或旧模块仍写出 completed+aborted。",
+  "requirements": [
+    "增加或完善独立子进程级 canary，必须经过与实际任务收尾相同的终态解析、归一化、terminal-consistency、result 持久化决策和 completion commit 决策入口；不得只直接调用 validator 纯函数。",
+    "canary 必须证明 raw completed 可以形成自洽 completed 候选，而 raw aborted 即使 exit code 0、validations 全通过、工作树有变更也不能形成 completed result 或 completion commit。",
+    "覆盖新进程加载边界，证明测试不是复用测试进程内 monkeypatch 后的旧模块状态；Windows 与 Linux 路径、编码和退出码必须得到相同机器语义。",
+    "若发现 GOLD-046 修复在新进程边界未生效，必须 fail-closed 并报告稳定 reason code；不得通过跳过 canary、放宽断言、篡改 fixture 终态或重写 GOLD-044/GOLD-046 历史结果获得通过。",
+    "本任务只验证并补足终态控制面回归，不得创建真实 GPT adjudication、写 GPT_REVIEW_LEDGER、推进 PROJECT_STATE review pointer、改变 Phase 或触发任何发布部署。",
+    "全量 pytest、ruff、mypy 必须通过；提交后的 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL jobs 不得回退。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Executor 不得把 canary PASS 当作 GPT Review PASS。",
+    "历史 result 永久只读；新进程验证不得修改或修补 GOLD-044、GOLD-046 及更早结果。",
+    "任何新进程加载、终态或 commit 决策不确定性必须 fail-closed。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "新进程端到端 canary 证明 raw aborted 无法产生 completed result、completion commit 或完成推进，raw completed 路径保持可用。",
+    "Windows/Linux 使用相同稳定终态语义，且 canary 未依赖进程内旧模块、宽松 mock 或历史文件改写。",
+    "GOLD-047 自身远端候选结果仍须由 GPT 核对终态自洽；测试通过不自动形成 Review verdict。",
+    "全量 pytest、ruff、mypy 与相关最新远端 HEAD 的 CI 通过，Phase 3.3、L3/L4 和交易安全边界不变。"
+  ]
+}

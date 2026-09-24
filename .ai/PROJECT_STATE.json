@@ -4,8 +4,8 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-042",
-  "last_completed_task": "GOLD-041",
+  "current_task": "GOLD-045",
+  "last_completed_task": "GOLD-044",
   "last_reviewed_task": "GOLD-027",
   "blockers": [
     {
@@ -15,7 +15,12 @@
     },
     {
       "code": "GPT_REVIEW_TERMINAL_HISTORY",
-      "detail": "Formal review remains continuous only through GOLD-027. GOLD-036 and GOLD-037 have individually complete review-binding facts, but cannot be appended past unresolved earlier gaps. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, and GOLD-041 are fail-closed because their immutable legacy results record status=completed while the final raw finish_reason=aborted. No historical result or ledger entry was rewritten. GOLD-042..045 provide the approved recovery path: GPT-only adjudication contract, deterministic evidence manifest, strict binding/integrity integration, then atomic closure preflight.",
+      "detail": "Formal review remains continuous only through GOLD-027. GOLD-036 and GOLD-037 have individually complete review-binding facts, but cannot be appended past unresolved earlier gaps. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, and now GOLD-044 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GOLD-042 through GOLD-045 provide the GPT-only adjudication and atomic closure path; GOLD-046 and GOLD-047 repair and verify the newly demonstrated terminal-write recurrence before GPT performs adjudication and substantive continuous review.",
+      "retryable": true
+    },
+    {
+      "code": "RESULT_TERMINAL_CONSISTENCY_RECURRENCE",
+      "detail": "The immutable GOLD-044 result at commit e6d4ad0f48057ef802447424e533a27379350692 records status=completed and normalized_finish_reason=completed while its final cline_finish_reason_raw=aborted. This demonstrates that the future-write prevention expected from GOLD-039 did not protect the actual GOLD-044 completion path. The result must remain unchanged; GOLD-046 must repair the writer/commit path and GOLD-047 must verify it at a fresh-process boundary.",
       "retryable": true
     }
   ],
@@ -45,7 +50,7 @@
       "resolved_by": "2026-09-24: GOLD-041 commit 0a9234b84f1dc7e39870c821c2a7db82a2f319c9 restored STATE_RESULT_DRIFT issue/blocking consistency; GitHub Actions CI #151 attempt 2 passed Python 3.12, Python 3.13, and PostgreSQL jobs."
     }
   ],
-  "next_action": "Execute GPT-approved GOLD-042 through GOLD-045 in order. Build a GPT-only, content-bound recovery path for immutable legacy completed+aborted results, produce deterministic adjudication evidence, integrate only valid GPT adjudications into review binding/integrity, and add an atomic closure preflight. Do not rewrite history or auto-sign review. After GOLD-045 is complete and CI is green, GPT must adjudicate the historical contradictions and substantively review the continuous backlog before advancing last_reviewed_task.",
+  "next_action": "Execute GOLD-045, GOLD-046, and GOLD-047 in order. GOLD-045 must remain a read-only atomic closure preflight. GOLD-046 must repair the actual result-writer/completion-commit path that allowed GOLD-044 completed+raw-aborted recurrence, and GOLD-047 must verify the repair across a fresh-process boundary. Do not rewrite any historical result, create Executor-signed adjudication, auto-sign review, or advance last_reviewed_task. After GOLD-047 is terminally self-consistent and matching remote CI is green, GPT must content-bind adjudications for all immutable contradictions, run GOLD-045 preflight, and substantively review the continuous backlog before writing ledger/state candidates.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -63,10 +68,15 @@
     "不得绕过来源授权或 robots/证书安全限制",
     "不得用 Mock/模板/示例数据宣称真实数据资格",
     "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行已批准任务，不得生成后续任务或决定 Phase",
-    "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
+    "Phase 3.3 数据资格未解除前不得进入 Phase 3.4",
+    "测试、CI、裁决或预检通过均不自动等于 GPT Review PASS"
   ],
   "queue_target_size": 3,
-  "task_queue": ["GOLD-042", "GOLD-043", "GOLD-044", "GOLD-045"],
+  "task_queue": [
+    "GOLD-045",
+    "GOLD-046",
+    "GOLD-047"
+  ],
   "queue_status": "ACTIVE",
   "planner_lookahead_size": 3
 }

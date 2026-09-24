@@ -1,0 +1,61 @@
+{
+  "task_id": "GOLD-046",
+  "type": "CONTROL_PLANE_RESULT_TERMINAL_RECURRENCE_RECOVERY",
+  "title": "修复 completed 与最终 raw aborted 再次并存的结果写入路径",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-045"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "修复 GOLD-044 再次暴露的结果终态矛盾：最终权威 raw finish reason 为 aborted 时，Orchestrator 不得生成 status=completed、normalized_finish_reason=completed 或 completion commit；同时保持历史结果不可改写和既有 rolling queue、provider failure、重试语义不变。",
+  "requirements": [
+    "以不可变的 GOLD-044 result 和实际 result 持久化调用链为复现依据，定位 cline_finish_reason_raw=aborted 为什么仍被归一为 completed；不得修改 GOLD-044 或任何既有 result 来消除复现。",
+    "建立单一权威终态来源：必须选择真实最终 Cline 终态事件并原样保留 raw 值；不得通过丢弃 aborted、改名、空值替换或只看 cline_exit_code=0、验证通过来推断 completed。",
+    "在 result 持久化、状态推进和 completion commit 之前执行同一 terminal-consistency 门禁；如果权威最终 raw 仍为 aborted，则顶层 status、execution_outcome、normalized_finish_reason 和 commit 行为必须按既有 failed、blocked 或 retry 语义自洽并 fail-closed。",
+    "正常 raw completed、provider fatal、timeout、retry exhausted、显式 blocked 与人工中止路径必须保持各自既有语义；不得把所有非成功路径折叠成同一状态，也不得造成无限重试。",
+    "补充真实写入路径级回归，至少覆盖 exit code 0 加 validations PASS 但 raw aborted、成功 raw completed、多终态事件选择、provider fatal、timeout/retry exhausted，以及矛盾结果不得产生 completion commit 或队列完成推进。",
+    "历史 .ai/results、GPT Review Ledger 和 PROJECT_STATE 均只读；本任务不得创建真实 GPT adjudication、签发 Review verdict、推进 last_reviewed_task 或解除 PHASE3_3_DATA。",
+    "全量 pytest、ruff、mypy 必须通过；提交后的 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL jobs 不得回退。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行本任务，不得改变终态产品规则或自行签发裁决。",
+    "所有历史 result 永久只读；禁止用迁移、格式化、兼容或测试修复名义重写历史。",
+    "终态矛盾必须 fail-closed；测试成功、exit code 0 或代码已提交均不得替代权威原始终态。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "权威最终 raw aborted 无法再生成 completed result、completion commit 或队列完成推进；正常 raw completed 仍可按原契约完成。",
+    "终态选择、归一化、结果持久化与 commit 门禁使用同一事实源，provider fatal、timeout、blocked 和 retry exhausted 语义无回退。",
+    "所有历史 result、ledger、state 与 adjudication store 未被改写，且没有自动 verdict、指针推进或 Phase 变化。",
+    "全量 pytest、ruff、mypy 通过；相关最新远端 HEAD 的 CI 通过后方可由 GPT 复审。"
+  ]
+}
