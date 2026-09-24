@@ -5576,6 +5576,75 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
 - 建议下一步（由 GPT 决定）：按 §2.15 用真实 `result.sha256` + `completion commit sha/branch` +
   原始 contradiction codes 手写（或由 GPT 工具生成）裁决记录，再由 GPT 做实质 review；
   历史矛盾在裁决无效 / 缺失时继续 fail-closed。
+## GOLD-043：历史矛盾裁决的确定性证据包（只读 manifest + CLI）
+
+### 1. 背景 / 问题
+
+- §2.13（GOLD-039）把历史矛盾 fail-closed 暴露、§2.15（GOLD-042）给出 GPT-only 裁决契约，
+  但 GPT 仍要逐项手跑 `review_binding` / `legacy_result_adjudication` / `review_backlog`
+  才能看清 `last_reviewed_task` 之后的完整 backlog 里每项到底「可直接实质 review / 必须先裁决 /
+  事实不齐」；缺少**单一确定性证据视图**，也无法一次性证明每项身份可独立复算；
+- 关键风险：任何把「测试通过 / `exit_code=0`」当成 GPT PASS 的口径，都会让 GPT-only Review
+  名存实亡；证据工具必须只产事实、绝不产 verdict。
+
+### 2. 变更（最小范围）
+
+- 新增 `orchestrator/review_evidence_manifest.py`（**只读、纯标准库、零外部进程**）：
+  - 版本化契约 `gold-ai/review-evidence-manifest/v1` + `schema_version=1`；CLI
+    `python -m orchestrator.review_evidence_manifest`，默认 stdout 只读，显式 `--output`
+    复用 §2.6 fail-closed 路径守卫（只允许 `<root>/.ai/runtime/**` 或系统临时目录）；
+  - **唯一口径复用**：result / commit / validation 事实来自 §2.8 `review_binding`（只读 Git
+    白名单）；终态矛盾来自 §2.13 `result_terminal_consistency`；裁决状态来自 §2.15
+    `legacy_result_adjudication`；backlog 边界与 ledger identity 来自 §2.11 `review_backlog`
+    + §2.9 `review_ledger_integrity`（**不存在第二套身份算法**）；
+  - 逐项输出：`task` / `result` canonical sha256、completion
+    `commit.{sha,branch,subject,committed_at}` + `changed_paths`（只读
+    `git log -1 --name-only`）、`validation.commands/return_codes`、
+    `terminal_consistency.{contradiction,format,reason_codes,details}`、
+    `ledger.{entry_present,entry_count,entry_valid,identity_consistent,status}`、
+    `adjudication.{state,valid,adjudication,reason_codes}` 与稳定 `reason_codes`；
+  - 四态 `items[].classification`：`facts-ready` / `needs-gpt-adjudication` /
+    `pending-substantive-review` / `invalid`；只有 §2.15 可恢复的 **legacy** 矛盾才进裁决路径，
+    归一化（非 legacy）矛盾、缺 commit、hash 漂移、事实不齐、ledger 非法、裁决冲突一律
+    `invalid`（fail-closed）；
+  - `facts_digest` 排除 wall-clock（`generated_at` / `facts_digest` / `determinism`），
+    相同仓库事实 ⇒ 相同 digest；`authority` / `contract` 机器可读声明
+    `review_authority=gpt_only`、`tool_can_sign_review=false`、
+    `tool_can_sign_adjudication=false`、`tool_can_advance_review_pointer=false`、
+    `writes_*=false`、`network_access=false`、`model_calls=false`、
+    `exit_code_zero_is_not_review_pass=true`；
+  - 退出码：`0` 无 fail-closed 项（**绝不是** GPT PASS）/ `2` fail-closed 或存在待裁决矛盾 /
+    `3` `PROJECT_STATE` 或 ledger 不可用 / `4` `--output` 被拒（绝不写文件）。
+- 新增 `tests/unit/test_review_evidence_manifest.py`（**25 项**：authority / contract /
+  determinism 只读边界、源码守卫、四态分类与 fail-closed、受控 `--output`、CLI ASCII 与
+  确定性）；
+- 新增 `tests/integration/test_review_evidence_manifest_regression.py`（**19 项**：真实 backlog
+  与 §2.11 逐项一致、7 个已知矛盾为 `needs-gpt-adjudication`、逐项身份由 raw `git` blob +
+  `diff-tree` **独立复算**、`facts_digest` 与 wall-clock 无关、`.ai/results` 全树 /
+  `PROJECT_STATE` / `GPT_REVIEW_LEDGER` / 裁决 store 前后字节一致、§2.8/§2.13 fail-closed
+  暴露未弱化、Phase 3.3 与交易安全不变量不变）；
+- 文档：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.16；`README.md` 工具段同步。
+
+### 3. 验证
+
+- `pytest tests/unit/test_review_evidence_manifest.py -q` → 25 passed；
+- `pytest tests/integration/test_review_evidence_manifest_regression.py -q` → 19 passed；
+- `pytest tests -q` → **3712 passed, 1 skipped in 535.20s**；`ruff check .` → **All checks
+  passed**；`mypy config database src scripts` → **Success: no issues found in 183 source files**；
+- 真实仓库当前事实：backlog 17 项（TEST-001/002 + GOLD-028~042，与 §2.11 完全一致），
+  `needs-gpt-adjudication=7`（= `KNOWN_CONTRADICTION_TASKS`）、`pending-substantive-review=10`、
+  `invalid=0`、`facts-ready=0`、`adjudicated=0`、`exit_code=2`；裁决 store 仍不存在
+  （Executor 未创建真实裁决），`last_reviewed_task` 仍为 `GOLD-027`。
+
+### 4. 遗留 / 建议下一步（由 GPT 决定）
+
+- 本任务**只产证据**：真正的历史矛盾裁决、随后的实质 review、`GPT_REVIEW_LEDGER` 追加与
+  `last_reviewed_task` 推进仍必须由 GPT 完成（GOLD-044 将把有效裁决接入 review binding /
+  integrity，GOLD-045 提供写入前原子预检）；
+- `PHASE3_3_DATA` 保持 BLOCKED；未进入 Phase 3.4，未跨 L3/L4；`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
+
+
 
 
 

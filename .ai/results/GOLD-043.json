@@ -1,0 +1,79 @@
+{
+  "task_id": "GOLD-043",
+  "title": "建立历史矛盾任务的确定性裁决证据包",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "completed",
+  "finished_at": "2026-09-24T21:00:34+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    "?? orchestrator/review_evidence_manifest.py",
+    "?? tests/integration/test_review_evidence_manifest_regression.py",
+    "?? tests/unit/test_review_evidence_manifest.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 67 +++++++++++++++++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 69 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                   | 40 ++++++++++++++++++++++++++\n 3 files changed, 176 insertions(+)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-24T20:30:59+08:00",
+      "finished_at": "2026-09-24T21:00:34+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "completed",
+      "normalized_finish_reason": "completed",
+      "finish_reason": "completed",
+      "cline_finish_reason_raw": "completed",
+      "model": "deepseek-flash",
+      "iterations": 130,
+      "duration_ms": 1219273,
+      "usage": {
+        "inputTokens": 24610742,
+        "outputTokens": 118069,
+        "cacheReadTokens": 24343936,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.18389410800000006
+      },
+      "cline_final_text": "Submission recorded (verified): GOLD-043 已完成：新增历史矛盾任务的确定性裁决证据包。\n\n完成内容\n1. 新增只读模块 `orchestrator/review_evidence_manifest.py`（`schema=gold-ai/review-evidence-manifest/v1`，CLI `python -m orchestrator.review_evidence_manifest`）。它复用既有唯一事实口径、不另造身份算法：result/commit/validation 事实来自 §2.8 `review_binding`（只读 Git 白名单），终态矛盾来自 §2.13 `result_terminal_consistency`，裁决状态来自 §2.15 `legacy_result_adjudication`，backlog 边界/ledger identity 来自 §2.11 `review_backlog` + §2.9 `review_ledger_integrity`。\n2. 逐项输出：task/result canonical sha256、completion commit `sha/branch/subject/committed_at` + `changed_paths`（只读 `git log -1 --name-only`）、validation `commands/return_codes`、`terminal_consistency.{contradiction,format,reason_codes,details}`、`ledger.{entry_present,entry_count,entry_valid,identity_consistent,status}`、`adjudication.{state,valid,adjudication,reason_codes}` 与稳定 reason codes。\n3. 四态分类 `facts-ready` / `needs-gpt-adjudication` / `pending-substantive-review` / `invalid`，并有稳定 fail-closed：缺 completion commit、hash 漂移、事实不齐、ledger 非法/漂移、**裁决冲突**、已解析 commit 的 changed paths 不可读一律 `invalid`；只有 §2.15 可恢复的 legacy 矛盾走裁决路径，归一化矛盾不算可恢复。`exit_code=0` 与 validation `returncode=0` 明确声明不等于 GPT PASS（无 verdict 字段 + authority/contract 机器可读锁定）。\n4. 确定性：`facts_digest` 排除 `generated_at`（wall-clock），相同仓库事实输出一致；默认 stdout 只读，`--output` 复用 §2.6 守卫，仅允许 `.ai/runtime/**` 或系统临时目录；不联网、不调用模型、不写 tasks/results/state/ledger/adjudication、不推进 review pointer。\n5. 文档：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.16；`README.md` 新增工具段与约束速查行；`PROGRESS_LOG.md` 新增 GOLD-043 记录。\n\n修改/新增文件\n- 新增：`orchestrator/review_evidence_manifest.py`（1248 行）\n- 新增：`tests/unit/test_review_evidence_manifest.py`（25 项）\n- 新增：`tests/integration/test_review_evidence_manifest_regression.py`（19 项）\n- 修改：`.ai/DEVELOPMENT_PROTOCOL.md`（§2.16）、`README.md`、`PROGRESS_LOG.md`\n\n测试结果（实测）\n- `.venv\\Scripts\\python.exe -m pytest tests -q` → 3712 passed, 1 skipped in 535.20s\n- `pytest tests/unit/test_review_evidence_manifest.py -q` → 25 passed\n- `pytest tests/integration/test_review_evidence_manifest_regression.py -q` → 19 passed\n- `ruff check .` → All checks passed\n- `mypy config database src scripts` → Success: no issues found in 183 source files\n- 真实仓库端到端：17 项 backlog（与 §2.11 逐项一致）、needs-gpt-adjudication=7、pending-substantive-review=10、invalid=0、exit_code=2；跨进程/跨 generated_at 的 facts_digest 一致；`.ai/results` 全树、`PROJECT_STATE`、`GPT_REVIEW_LEDGER`、裁决 store 前后字节一致；逐项身份由 raw git blob + diff-tree 独立复算一致。\n\n遗留问题\n- 本任务只产证据：真实历史矛盾裁决、实质 review、ledger 追加与 `last_reviewed_task` 推进仍须由 GPT 完成（GOLD-044/045 后续任务）。\n- 未解决阻塞：无（`.ai/runtime` 为 Orchestrator 既有运行产物，非本次写入）。\n\n是否满足 acceptance\n- 满足：GPT 可从单一确定性 manifest 审核全部历史矛盾项与普通 pending 项，且每项身份可独立复算；缺 commit/hash 漂移/矛盾裁决/不完整事实均 fail-closed，工具无法自签 review/adjudication；全量 pytest/ruff/mypy 通过，Phase 3.3 blocker、L3/L4、GPT 独占权与 `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变（git status 显示未触碰任何 forbidden 路径）。\n\n建议下一步（由 GPT 决定）\n- 按 GOLD-044 将有效 GPT-only legacy adjudication 接入 review binding/backlog/integrity（未裁决或无效矛盾继续 fail-closed），随后 GOLD-045 提供写入前原子预检。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        "?? orchestrator/review_evidence_manifest.py",
+        "?? tests/integration/test_review_evidence_manifest_regression.py",
+        "?? tests/unit/test_review_evidence_manifest.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 67 +++++++++++++++++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 69 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                   | 40 ++++++++++++++++++++++++++\n 3 files changed, 176 insertions(+)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  1%]\n........................................................................ [  3%]\n........................................................................ [  5%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 13%]\n........................................................................ [ 15%]\n........................................................................ [ 17%]\n........................................................................ [ 19%]\n........................................................................ [ 21%]\n........................................................................ [ 23%]\n........................................................................ [ 25%]\n........................................................................ [ 27%]\n........................................................................ [ 29%]\n........................................................................ [ 31%]\n........................................................................ [ 32%]\n........................................................................ [ 34%]\n........................................................................ [ 36%]\n........................................................................ [ 38%]\n........................................................................ [ 40%]\n........................................................................ [ 42%]\n........................................................................ [ 44%]\n........................................................................ [ 46%]\n........................................................................ [ 48%]\n........................................................................ [ 50%]\n........................................................................ [ 52%]\n........................................................................ [ 54%]\n........................................................................ [ 56%]\n........................................................................ [ 58%]\n........................................................................ [ 60%]\n........................................................................ [ 62%]\n........................................................................ [ 63%]\n........................................................................ [ 65%]\n........................................................................ [ 67%]\n........................................................................ [ 69%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 75%]\n........................................................................ [ 77%]\n........................................................................ [ 79%]\n........................................................................ [ 81%]\n........................................................................ [ 83%]\n........................................................................ [ 85%]\n........................................................................ [ 87%]\n........................................................................ [ 89%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 95%]\n........................................................................ [ 96%]\n....................................................................s... [ 98%]\n.........................................                                [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3712 passed, 1 skipped in 546.49s (0:09:06)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

@@ -849,6 +849,73 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   7 个真实矛盾 result 的身份由 raw `git` + `hashlib` **独立复算**、`.ai/results` 全树 /
   `PROJECT_STATE` / `GPT_REVIEW_LEDGER` 前后字节一致、CLI 确定性 ASCII、§2.13 fail-closed
   暴露未被弱化、Executor 未创建真实裁决 store）。
+## 2.16 历史矛盾裁决的确定性证据包（GOLD-043）
+
+- **为什么**：§2.15 提供裁决**契约**后，GPT 仍要逐项手跑 `review_binding` /
+  `legacy_result_adjudication` / `review_backlog` 才能看清「`last_reviewed_task` 之后的
+  完整 backlog 里，每一项是可直接实质 review、还是必须先裁决、还是事实不齐」。§2.16 提供
+  那份**单一、只读、确定性**的证据 manifest：逐项汇总客观事实与稳定分类，**只产事实、
+  绝不签发 verdict 或裁决**。
+- **唯一规则来源**：`orchestrator/review_evidence_manifest.py`（只读、纯标准库、零网络、
+  零数据库、零模型调用、零 wall-clock 参与内容身份）。内容身份 / 完成 commit / validation
+  复用 §2.8 `orchestrator.review_binding`（只读 Git 白名单 `log` / `ls-tree` / `cat-file` /
+  `hash-object`）；终态矛盾判定复用 §2.13 `orchestrator.result_terminal_consistency`；
+  裁决状态复用 §2.15 `orchestrator.legacy_result_adjudication`；backlog 边界 / ledger
+  identity 复用 §2.11 `review_backlog` + §2.9 `review_ledger_integrity`（**不存在第二套
+  result / commit 身份算法**）。
+- **契约**：`schema=gold-ai/review-evidence-manifest/v1` + `schema_version=1`；CLI
+  `python -m orchestrator.review_evidence_manifest`。默认 stdout 只读；显式 `--output`
+  **复用** §2.6 的 fail-closed 路径守卫（只允许 `<root>/.ai/runtime/**` 或系统临时目录），
+  因此结构上不可能写 `.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json` / `.ai/adjudications/**`。
+- **覆盖范围**：`PROJECT_STATE.last_reviewed_task` **之后**的全部 `completed` result
+  （与 §2.11 backlog 同一口径），并在 `coverage` 里显式给出已知矛盾集合
+  `KNOWN_CONTRADICTION_TASKS` 是否落在 backlog 内；若已知矛盾任务已完成却不在 backlog
+  （指针越过未裁决矛盾）⇒ `KNOWN_CONTRADICTION_NOT_IN_BACKLOG` + fail-closed。
+- **逐项事实**：`task` / `result` 的 canonical sha256（§2.8 口径）、completion
+  `commit.{sha,branch,subject,committed_at}` + `changed_paths`（只读
+  `git log -1 --name-only`）、`validation.status/commands/return_codes`（记录值，
+  **绝不重新执行**）、`terminal_consistency.{contradiction,format,reason_codes,details}`
+  （§2.13 唯一判定）、`ledger.{entry_present,entry_count,entry_valid,identity_consistent,status}`、
+  `adjudication.{state,valid,adjudication,reason_codes}`（§2.15）与稳定 `reason_codes`。
+- **四种客观分类（`items[].classification`，绝不是 verdict 词表）**：
+  - `facts-ready`：事实齐全且无未解阻塞（无 legacy 矛盾 / 矛盾已有有效 GPT 裁决 /
+    已被 ledger 合法绑定）；
+  - `needs-gpt-adjudication`：事实齐全但存在**未裁决的 legacy** 终态矛盾，必须先由 GPT 裁决；
+  - `pending-substantive-review`：事实齐全、无矛盾、尚未绑定，等待 GPT 实质 review；
+  - `invalid`：缺 completion commit / hash 漂移 / 事实不齐 / ledger 非法 / **裁决冲突** /
+    已解析 commit 的 changed paths 不可读 ⇒ fail-closed。
+  归一化格式（非 legacy）的矛盾**没有**恢复路径，一律 `invalid`，绝不当作待裁决。
+- **测试通过 ≠ GPT PASS**：`validation` 的 `returncode=0`、CI 通过或 `exit_code=0` 都只是
+  「客观事实可复算、无 fail-closed 项」，**绝不等于** review 已完成；manifest 顶层不存在
+  `verdict` / `review_verdict` / `acceptance_summary` / `reviewed_at` / `reviewer` /
+  `reviewer_role`（`FORBIDDEN_MANIFEST_KEYS`，裁决 reviewer 身份作为**事实**只嵌套在
+  `items[].adjudication` 内）。
+- **确定性**：`facts_digest = sha256(canonical json: sort_keys + compact separators)`，
+  排除 `generated_at` / `facts_digest` / `determinism`；相同仓库事实 ⇒ 相同 digest；
+  不联网、不调用模型、不推进 review pointer、不写 state / ledger / adjudication。
+- **退出码**：`0` 客观事实可复算且无 fail-closed 项（**绝不是** GPT PASS）/ `2` fail-closed
+  （缺 commit / hash 漂移 / 事实不齐 / 裁决冲突，或存在待裁决矛盾）/ `3` `PROJECT_STATE` 或
+  ledger 不可用 / `4` `--output` 目标被拒绝（绝不写文件）。
+- **职责边界（不可协商）**：`authority` 段机器可读声明 `review_authority=gpt_only` /
+  `tool_can_sign_review=false` / `tool_can_sign_adjudication=false` /
+  `tool_can_write_review_ledger=false` / `tool_can_write_adjudication=false` /
+  `tool_can_advance_review_pointer=false` / `tool_can_advance_state=false` /
+  `writes_*` 全为 `false` / `network_access=false` / `model_calls=false`；工具**不能**
+  自签 review 或裁决，也不改变 `PHASE3_3_DATA` blocker、Phase 3.4 边界、L1~L4、
+  rolling queue、`LIVE_TRADING=false` 或 `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
+- **与 §2.14 的一致性**：真实 Git 历史不完整（浅克隆）时，逐项 facts 仍按 §2.8 口径
+  fail-closed（`GIT_HISTORY_SHALLOW` + `COMPLETION_COMMIT_NOT_FOUND` ⇒ `invalid`），
+  **绝不**把浅历史当「任务未完成」或伪通过。
+- **回归测试**：`tests/unit/test_review_evidence_manifest.py`（25 项：authority / contract /
+  determinism 只读边界、源码守卫、四态分类与 fail-closed、受控 `--output`、CLI ASCII 与
+  确定性）+ `tests/integration/test_review_evidence_manifest_regression.py`（19 项：真实
+  backlog 与 §2.11 逐项一致、7 个已知矛盾为 `needs-gpt-adjudication`、逐项身份由 raw
+  `git` blob + `diff-tree` **独立复算**、`facts_digest` 与 wall-clock 无关、`.ai/results`
+  全树 / `PROJECT_STATE` / `GPT_REVIEW_LEDGER` / 裁决 store 前后字节一致、§2.8/§2.13
+  fail-closed 暴露未弱化、Phase 3.3 与交易安全不变量不变）。
+
+
 
 
 

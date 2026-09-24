@@ -1992,6 +1992,45 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
   .venv\Scripts\python.exe -m orchestrator.legacy_result_adjudication --task GOLD-035 --as-of 2026-09-24T00:00:00+08:00
   ```
 
+### 历史矛盾裁决的确定性证据包（`orchestrator/review_evidence_manifest.py`，GOLD-043）
+
+> **合规红线**：本项**只读** —— 默认 stdout，显式 `--output` 只允许 `.ai/runtime/**` 或系统
+> 临时目录；不写 tasks / results / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json` /
+> `.ai/adjudications/**`，不签发 review 或裁决、不联网、不调用模型、不推进 review 指针；
+> `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
+
+- **一句话**：把 `PROJECT_STATE.last_reviewed_task` 之后的**完整 backlog**（与 §2.11 同一口径）
+  逐项汇总成一份**单一、确定性**的证据 manifest，让 GPT 一次看清每项是
+  `facts-ready` / `needs-gpt-adjudication` / `pending-substantive-review` / `invalid`；
+- **逐项事实**：`task` / `result` 的 canonical sha256、completion
+  `commit.{sha,branch,subject,committed_at}` + `changed_paths`（只读 `git log --name-only`）、
+  `validation.commands/return_codes`、`terminal_consistency.{contradiction,format,reason_codes}`、
+  `ledger.{entry_valid,identity_consistent,status}`、`adjudication.{state,valid,adjudication}`；
+- **四态分类**：`facts-ready`（无未解阻塞）/ `needs-gpt-adjudication`（未裁决的 legacy 矛盾）/
+  `pending-substantive-review`（事实齐全待实质 review）/ `invalid`（缺 commit、hash 漂移、
+  事实不齐、ledger 非法、裁决冲突 ⇒ fail-closed）；归一化（非 legacy）矛盾一律 `invalid`；
+- **复用唯一口径**：内容身份 / commit 复用 §2.8 `review_binding`（只读 Git 白名单），矛盾判定
+  复用 §2.13 `result_terminal_consistency`，裁决状态复用 §2.15 `legacy_result_adjudication`
+  （**不存在第二套身份算法**）；`facts_digest` 排除 wall-clock，相同仓库事实输出确定一致；
+- **测试通过 ≠ GPT PASS**：`exit_code=0` / `returncode=0` 只表示「客观事实可复算、无 fail-closed
+  项」，manifest 顶层不存在 `verdict` / `acceptance_summary` / `reviewed_at` 等结论字段；
+- **退出码**：`0` 无 fail-closed 项 / `2` fail-closed 或存在待裁决矛盾 / `3` state 或 ledger
+  不可用 / `4` `--output` 被拒（绝不写文件）；**回归测试**：
+  `tests/unit/test_review_evidence_manifest.py`（25 项）+
+  `tests/integration/test_review_evidence_manifest_regression.py`（19 项：backlog 与 §2.11
+  逐项一致、身份由 raw `git` blob + `diff-tree` 独立复算、前后零改写）；
+- **用法**（只读）：
+
+  ```bash
+  # 全量证据 manifest 写 stdout（当前存在待裁决矛盾 ⇒ 退出码 2）
+  .venv\Scripts\python.exe -m orchestrator.review_evidence_manifest
+
+  # 需要人工诊断时才写受控镜像（只允许 .ai/runtime/** 或系统临时目录）
+  .venv\Scripts\python.exe -m orchestrator.review_evidence_manifest --output .ai\runtime\review_evidence_manifest.json
+  ```
+
+
+
 
 ## 8. 数据模型
 
@@ -2162,4 +2201,5 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 | **跨平台 PID 探活 fail-safe** | `orchestrator.ai_orchestrator.running_process_image` / `is_pid_running`：Windows `tasklist` 与 POSIX `os.kill(pid, 0)` 共用同一三态契约，**探测失败一律按「存活」处理**（绝不放行清理仍存活的锁）（GOLD-040） |
 | **issue / blocking 集合必须同源** | `orchestrator/planner_mutation_precondition.py`：聚合门禁标记 `STATE_RESULT_DRIFT` 必须先是 `issues` 里的真实 `error` issue（`drift.aggregate_code`），`blocking_reason_codes` 只从 `issues` 的 gating ERROR 集合**投影** ⇒ 两者恒等；`warning` 只报告不 gate，review 指针滞后仍只报告（GOLD-041） |
 | **历史矛盾裁决必须 GPT-only 且内容身份绑定** | `orchestrator/legacy_result_adjudication.py`：裁决记录与 `.ai/results` 物理分离（`.ai/adjudications/legacy_result_adjudications.json`），必须绑定原 result sha256/status + completion commit sha/branch + 原始 contradiction codes + GPT reviewer 身份/理由/时间；Cline / DeepSeek / 未知身份、重复 / 冲突 / 过期 / 五种身份漂移一律 fail-closed，原 result 逐字节不变，裁决 ≠ Review PASS、不推进指针、不解除 `PHASE3_3_DATA`（GOLD-042） |
+| **历史矛盾证据必须只读且四态可复算** | `orchestrator/review_evidence_manifest.py`：逐项汇总 `last_reviewed_task` 之后的完整 backlog（与 §2.11 同一口径）的 result/commit sha256、changed paths、validation return codes、§2.13 终态矛盾、ledger/裁决状态与稳定 reason codes，分类为 `facts-ready` / `needs-gpt-adjudication` / `pending-substantive-review` / `invalid`；缺 commit、hash 漂移、事实不齐、裁决冲突一律 fail-closed，`exit_code=0` 绝不等于 GPT PASS，工具只读（`--output` 仅 `.ai/runtime/**` 或系统临时目录）（GOLD-043） |
 
