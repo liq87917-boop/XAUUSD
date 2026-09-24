@@ -1,0 +1,79 @@
+{
+  "task_id": "GOLD-045",
+  "title": "建立 GPT Review 收口写入前的原子一致性预检",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "completed",
+  "finished_at": "2026-09-24T22:22:59+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    "?? orchestrator/review_closure_precondition.py",
+    "?? tests/integration/test_review_closure_precondition_regression.py",
+    "?? tests/unit/test_review_closure_precondition.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 89 ++++++++++++++++++++++++++++++++++++++++++++-\n PROGRESS_LOG.md             | 68 ++++++++++++++++++++++++++++++++++\n README.md                   | 44 ++++++++++++++++++++++\n 3 files changed, 199 insertions(+), 2 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-24T21:47:07+08:00",
+      "finished_at": "2026-09-24T22:22:59+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "completed",
+      "normalized_finish_reason": "completed",
+      "finish_reason": "completed",
+      "cline_finish_reason_raw": "completed",
+      "model": "deepseek-flash",
+      "iterations": 198,
+      "duration_ms": 1533976,
+      "usage": {
+        "inputTokens": 43173239,
+        "outputTokens": 174557,
+        "cacheReadTokens": 42995456,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.260388018
+      },
+      "cline_final_text": "Submission recorded (verified): ## GOLD-045 完成：GPT Review 收口写入前的原子一致性只读预检\n\n### 完成内容（对应 requirements / acceptance）\n1. **新增只读预检工具** `orchestrator/review_closure_precondition.py`（§2.18，CLI `python -m orchestrator.review_closure_precondition --candidate <临时文件|->`）：单一只读事实包组合**最新 HEAD**（复用 §2.5 planner snapshot 的 `git` 段）、**tasks/results digest**、**§2.15 legacy adjudication 校验**（复用 `store_entries` / `store_consistency_issues` / `evaluate_task`）、**§2.8 binding + §2.11 backlog + §2.9 integrity**、以及**候选 PROJECT_STATE 指针事实**；任何 stale / 不连续 / 越权 / 安全不变量变化一律 fail-closed。本模块自身判定算法为零（摘要算法复用 §2.12、受控输出守卫复用 §2.6）。\n2. **零写入 + 无变更开关**：候选**只**允许来自显式临时文件（系统临时目录 / `<root>/.ai/runtime/**`）或 stdin；managed 状态路径（`.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json` / `.ai/tasks` / `.ai/results` / `.ai/adjudications/**`）一律拒绝；CLI **没有** `--apply/--fix/--advance/--sign`（argparse 实测拒绝）；源码经守卫测试确认无 `write_text/write_bytes/mkdir/subprocess/tempfile/json.dump(` 等写入痕迹，`--output` 仅写受控 runtime/临时路径。\n3. **fail-closed 清单**：`LEDGER_CHAIN_GAP`（复用 §2.9）、`CANDIDATE_PASS_PAST_UNRESOLVED_CONTRADICTION`、`LEDGER_RESULT/COMMIT_*_MISMATCH`（身份漂移）、`CANDIDATE_ADJUDICATION_NOT_GPT` / `CANDIDATE_ADJUDICATION_INVALID`（§2.15 稳定 code 原样透传）、`CANDIDATE_LAST_REVIEWED_REGRESSION` / `..._AHEAD`、`CANDIDATE_STATE_POINTER_DRIFT`、`CANDIDATE_PHASE3_3_BLOCKER_REMOVED` / `CANDIDATE_BLOCKER_REMOVED`、`CANDIDATE_PHASE3_4_ENTRY`、`CANDIDATE_TRADING_SAFETY_CHANGED`、`STALE_REMOTE_HEAD`、五类 base 摘要漂移、候选缺失/非法/schema/base 缺失。\n4. **candidate-ready ≠ committed-current ≠ review 完成**：`closure` 段机器可读区分 `candidate_ready` 与 `committed_current`，并硬编码 `review_completed=false` / `review_verdict_issued=false` / `phase_gate_lifted=false` / `executor_write_triggered=false` / `state_advanced=false` / `auto_push=false`。\n5. **确定性 digest + 稳定 reason codes**：`precondition_digest` 排除 `generated_at/as_of/precondition_digest/determinism`（幂等）；Windows/Linux 路径由 `Path.resolve()` + 允许根前缀判定统一处理。\n\n### 修改 / 新增文件\n- 新增：`orchestrator/review_closure_precondition.py`、`tests/unit/test_review_closure_precondition.py`（43 项）、`tests/integration/test_review_closure_precondition_regression.py`（8 项）\n- 修改：`.ai/DEVELOPMENT_PROTOCOL.md`（新增 §2.18）、`README.md`（工具段 + 红线表）、`PROGRESS_LOG.md`（GOLD-045 收尾记录）\n- **未触碰**：`.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`.ai/GPT_REVIEW_LEDGER.json`（git status 仅列出上述 3 改 3 新）\n\n### 测试结果（实际执行输出）\n- `pytest tests -q` → **3807 passed / 1 skipped，0 failed**（605.54s）\n- `pytest tests/unit/test_review_closure_precondition.py -q` → **43 passed**\n- `pytest tests/integration/test_review_closure_precondition_regression.py -q` → **8 passed**（真实仓库：候选对齐已提交事实 ⇒ `candidate_ready=true`/exit 0 且 `review_completed=false`；§2.8 身份全部 `bound=true`；digest 幂等；stale HEAD / 指针漂移 / 删除 `PHASE3_3_DATA` / ledger 链断裂 ⇒ exit 2；CLI 显式临时文件端到端零写入；`.ai/results|tasks|PROJECT_STATE|GPT_REVIEW_LEDGER|adjudications` 与 worktree 前后字节一致）\n- `ruff check .` → **All checks passed**；`mypy config database src scripts` → **Success（183 files）**\n- 关联回归：review/planner/terminal/docs/encoding/orchestrator-源码扫描 共 324 + 119 + 9 项全绿\n\n### 遗留问题 / 建议下一步\n- 真实仓库当前事实：`PROJECT_STATE` 指针（`current_task=GOLD-042` / `last_completed_task=GOLD-041`）落后于已完成 results（`latest_terminal=GOLD-044`），因此**未对齐指针**的候选会被 `CANDIDATE_STATE_POINTER_DRIFT` fail-closed（这是真实漂移的如实暴露，非工具缺陷）；把指针对齐 results 的候选 ⇒ exit 0 且 `review_completed=false`。\n- 真正的历史矛盾裁决、实质 review、ledger 追加与 `last_reviewed_task` 推进仍**只能由 GPT** 完成；本工具只验证候选，绝不代写 / 代签 / 代推进；`PHASE3_3_DATA` 保持 BLOCKED，未进入 Phase 3.4、未跨 L3/L4，`LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。\n\n### 是否满足 acceptance\n满足：GPT 可在真实写入前一次性验证 adjudication / ledger / state 与 HEAD 的原子一致性（stale/缺失/越权/不连续均 fail-closed）；工具严格零写入且不把候选通过误报为 review 完成或 Phase gate 解除；全量 pytest / ruff / mypy 全绿，Phase 3.3 blocker、L3/L4、GPT 独占权与交易安全开关不变。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        "?? orchestrator/review_closure_precondition.py",
+        "?? tests/integration/test_review_closure_precondition_regression.py",
+        "?? tests/unit/test_review_closure_precondition.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 89 ++++++++++++++++++++++++++++++++++++++++++++-\n PROGRESS_LOG.md             | 68 ++++++++++++++++++++++++++++++++++\n README.md                   | 44 ++++++++++++++++++++++\n 3 files changed, 199 insertions(+), 2 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  1%]\n........................................................................ [  3%]\n........................................................................ [  5%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 13%]\n........................................................................ [ 15%]\n........................................................................ [ 17%]\n........................................................................ [ 18%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 28%]\n........................................................................ [ 30%]\n........................................................................ [ 32%]\n........................................................................ [ 34%]\n........................................................................ [ 35%]\n........................................................................ [ 37%]\n........................................................................ [ 39%]\n........................................................................ [ 41%]\n........................................................................ [ 43%]\n........................................................................ [ 45%]\n........................................................................ [ 47%]\n........................................................................ [ 49%]\n........................................................................ [ 51%]\n........................................................................ [ 52%]\n........................................................................ [ 54%]\n........................................................................ [ 56%]\n........................................................................ [ 58%]\n........................................................................ [ 60%]\n........................................................................ [ 62%]\n........................................................................ [ 64%]\n........................................................................ [ 66%]\n........................................................................ [ 68%]\n........................................................................ [ 69%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 75%]\n........................................................................ [ 77%]\n........................................................................ [ 79%]\n........................................................................ [ 81%]\n........................................................................ [ 83%]\n........................................................................ [ 85%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 94%]\n........................................................................ [ 96%]\n........................................................................ [ 98%]\n...................s............................................         [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3807 passed, 1 skipped in 611.51s (0:10:11)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

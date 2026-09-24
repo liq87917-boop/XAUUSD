@@ -2077,6 +2077,49 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 
 
 
+### GPT Review 收口写入前的原子一致性预检（GOLD-045）
+
+> **合规红线**：本项**只读** —— 工具只验证候选写集，绝不写入 / 应用 / 推进任何状态；候选
+> 只允许来自显式临时文件或 stdin；没有 `--apply` / `--fix` / `--advance` / `--sign` 等变更
+> 开关；`candidate_ready=true` **不等于** review 完成，也不触发 Executor 写入或自动 push；
+> `PHASE3_3_DATA`、L1~L4、`LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`
+> 全部不变。
+
+- **一句话**：GPT 在真正写入历史裁决 / `GPT_REVIEW_LEDGER` / `PROJECT_STATE` **之前**，
+  用单一只读预检把候选写集与当前已提交事实（HEAD、tasks/results/state/ledger/store 摘要、
+  §2.15 裁决校验、§2.8 binding、§2.11 backlog、§2.9 integrity）一次性比对，任何 stale /
+  不连续 / 越权 / 安全不变量变化一律 fail-closed；
+- **候选契约**：`schema=gold-ai/review-closure-candidate/v1`，三段可选
+  （`adjudication_store` / `review_ledger` / `project_state`）+ 必需 `base`
+  （`head_sha` / `results_digest` / `tasks_digest` / `project_state_sha256` /
+  `review_ledger_sha256` / `adjudication_store_sha256`）；
+- **fail-closed**：候选缺失 / 非法 / schema 不支持 / base 缺失或非法、`STALE_REMOTE_HEAD`、
+  五类 base 摘要漂移、`LEDGER_CHAIN_GAP` / 顺序与 review 时间回退 / 身份 mismatch、
+  `CANDIDATE_LEDGER_ENTRY_REMOVED`、`CANDIDATE_PASS_PAST_UNRESOLVED_CONTRADICTION`、
+  `CANDIDATE_ADJUDICATION_NOT_GPT` / `CANDIDATE_ADJUDICATION_INVALID`（§2.15 稳定 code 原样
+  透传）、`CANDIDATE_LAST_REVIEWED_REGRESSION` / `..._AHEAD` /
+  `CANDIDATE_STATE_POINTER_DRIFT`、`CANDIDATE_PHASE3_3_BLOCKER_REMOVED` /
+  `CANDIDATE_BLOCKER_REMOVED`、`CANDIDATE_PHASE3_4_ENTRY`、
+  `CANDIDATE_TRADING_SAFETY_CHANGED`；
+- **candidate-ready ≠ review 完成**：`closure` 段机器可读给出 `candidate_ready`
+  （候选与已提交事实原子一致）与 `committed_current`，并硬编码
+  `review_completed=false` / `review_verdict_issued=false` / `phase_gate_lifted=false` /
+  `executor_write_triggered=false` / `state_advanced=false` / `auto_push=false`；
+- **用法**（只读；`precondition_digest` 与 wall-clock 无关、幂等）：
+
+  ```bash
+  .venv\Scripts\python.exe -m orchestrator.review_closure_precondition --candidate .ai\runtime\closure-candidate.json
+  .venv\Scripts\python.exe -m orchestrator.review_closure_precondition --candidate - < candidate.json
+  ```
+
+- **回归测试**：`tests/unit/test_review_closure_precondition.py`（43 项）+
+  `tests/integration/test_review_closure_precondition_regression.py`（8 项：真实仓库
+  candidate-ready、§2.8 身份绑定、digest 幂等、stale HEAD / 指针漂移 / 删除
+  `PHASE3_3_DATA` / 链断裂 fail-closed、CLI 显式临时文件端到端零写入，`.ai` 全树与
+  worktree 前后一致）。
+
+
+
 ## 8. 数据模型
 
 
@@ -2247,5 +2290,6 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 | **issue / blocking 集合必须同源** | `orchestrator/planner_mutation_precondition.py`：聚合门禁标记 `STATE_RESULT_DRIFT` 必须先是 `issues` 里的真实 `error` issue（`drift.aggregate_code`），`blocking_reason_codes` 只从 `issues` 的 gating ERROR 集合**投影** ⇒ 两者恒等；`warning` 只报告不 gate，review 指针滞后仍只报告（GOLD-041） |
 | **历史矛盾裁决必须 GPT-only 且内容身份绑定** | `orchestrator/legacy_result_adjudication.py`：裁决记录与 `.ai/results` 物理分离（`.ai/adjudications/legacy_result_adjudications.json`），必须绑定原 result sha256/status + completion commit sha/branch + 原始 contradiction codes + GPT reviewer 身份/理由/时间；Cline / DeepSeek / 未知身份、重复 / 冲突 / 过期 / 五种身份漂移一律 fail-closed，原 result 逐字节不变，裁决 ≠ Review PASS、不推进指针、不解除 `PHASE3_3_DATA`（GOLD-042） |
 | **历史矛盾证据必须只读且四态可复算** | `orchestrator/review_evidence_manifest.py`：逐项汇总 `last_reviewed_task` 之后的完整 backlog（与 §2.11 同一口径）的 result/commit sha256、changed paths、validation return codes、§2.13 终态矛盾、ledger/裁决状态与稳定 reason codes，分类为 `facts-ready` / `needs-gpt-adjudication` / `pending-substantive-review` / `invalid`；缺 commit、hash 漂移、事实不齐、裁决冲突一律 fail-closed，`exit_code=0` 绝不等于 GPT PASS，工具只读（`--output` 仅 `.ai/runtime/**` 或系统临时目录）（GOLD-043） |
+| **Review 收口写入必须原子一致且零写入预检** | `orchestrator/review_closure_precondition.py`：GPT 写入历史裁决 / `GPT_REVIEW_LEDGER` / `PROJECT_STATE` 前，把候选写集（只允许来自显式临时文件或 stdin）与已提交 HEAD、tasks/results/state/ledger/store 摘要、§2.15 裁决校验、§2.8 binding、§2.11 backlog、§2.9 integrity 一次性比对；stale HEAD / 摘要漂移 / ledger 链断裂 / PASS 越过未裁决矛盾 / 非 GPT 裁决 / 身份漂移 / 删除条目 / `last_reviewed_task` 倒退或超前 / 删除 `PHASE3_3_DATA` / 提前进入 Phase 3.4 / 交易安全不变量变化一律 fail-closed；无 `--apply` / `--fix` / `--advance` / `--sign`，`candidate_ready` ≠ review 完成、不触发 Executor 写入或自动 push（GOLD-045） |
 | **只有有效 GPT 裁决才恢复事实可绑定性** | `orchestrator/review_binding.py` + `review_backlog` / `review_ledger_integrity` / `planner_mutation_precondition` / `planner_refill_request`：默认 `facts_complete=false`，仅当存在 schema 合法、GPT 权威有效、原 result sha256/status + commit sha/branch + 原始 contradiction codes 完全匹配且不冲突的 §2.15 裁决、且无其它阻塞 code 时 `binding.facts_ready=true`；原始 contradiction finding / result sha256 / 裁决 identity 一律保留，越权 / 漂移 / 重复 / 冲突 / store 损坏 fail-closed，裁决 ≠ Review PASS、不写 ledger、不推进指针、不解除 `PHASE3_3_DATA`（GOLD-044） |
 

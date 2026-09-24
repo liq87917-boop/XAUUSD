@@ -990,8 +990,93 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   `LEDGER_CHAIN_GAP` fail-closed、backlog 端到端分类）。
 
 
+## 2.18 GPT Review 收口写入前的原子一致性预检（GOLD-045）
 
-
+- **为什么**：§2.15 给出裁决契约，§2.16 给出证据包，§2.17 把有效裁决接入 review 事实链，
+  但 GPT 真正**写**三份状态（`.ai/adjudications/legacy_result_adjudications.json`、
+  `.ai/GPT_REVIEW_LEDGER.json`、`.ai/PROJECT_STATE.json`）时是**分次写入**的：写到一半
+  （裁决已落盘但 ledger / `last_reviewed_task` 未跟上，或 ledger 越过仍未裁决的矛盾）就会
+  制造**新的** ledger / state drift。§2.18 提供**单一只读预检**：GPT 在写入前把候选写集与
+  当前已提交事实一次性比对，任何 stale / 不连续 / 越权 / 安全不变量变化一律 fail-closed。
+- **唯一规则来源**：`orchestrator/review_closure_precondition.py`（只读、纯标准库、零网络、
+  零数据库、零模型调用、零 wall-clock 参与内容身份）。HEAD / 指针复用 §2.5 planner snapshot；
+  result / commit 身份复用 §2.8 `review_binding`（只读 Git 白名单）；ledger 校验与连续性复用
+  §2.9 `review_ledger_integrity` + §2.8 `review_ledger`；裁决校验复用 §2.15
+  `legacy_result_adjudication`（`store_entries` / `store_consistency_issues` /
+  `evaluate_task`）；backlog 复用 §2.11 `review_backlog`；摘要算法复用 §2.12
+  `planner_mutation_precondition`（`canonical_digest` / `file_facts` / `directory_facts`）
+  与 §2.6 受控输出守卫（**不存在第二套身份 / 连续性算法**）。
+- **候选契约**：`schema=gold-ai/review-closure-candidate/v1` + `schema_version=1`，三段可选
+  （`adjudication_store` / `review_ledger` / `project_state`）加**必需的** `base`
+  （`head_sha` / `results_digest` / `tasks_digest` / `project_state_sha256` /
+  `review_ledger_sha256` / `adjudication_store_sha256`）。**候选只允许来自显式临时文件或
+  stdin**（`--candidate <系统临时目录|.ai/runtime/** 文件>` 或 `--candidate -`）；把
+  `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json` / `.ai/tasks` / `.ai/results` /
+  `.ai/adjudications/**` 当候选来源一律拒绝。
+- **一次性比对的事实**：`head`（observed HEAD + `base.head_sha` 比对）、`committed_current`
+  的 `tasks_digest` / `results_digest` / `project_state.blob_sha256` /
+  `review_ledger.blob_sha256` / `adjudication_store.blob_sha256`、§2.11 backlog 事实、
+  §2.9 integrity 事实、按候选 task 汇总的 §2.8 binding 事实子集，以及候选裁决 / ledger /
+  state 三段逐项校验。
+- **fail-closed 清单（稳定 reason code）**：
+  - 候选层：`CANDIDATE_MISSING` / `CANDIDATE_UNREADABLE` / `CANDIDATE_JSON_INVALID` /
+    `CANDIDATE_NOT_OBJECT` / `CANDIDATE_SCHEMA_UNSUPPORTED` / `CANDIDATE_SECTION_INVALID` /
+    `CANDIDATE_BASE_MISSING` / `CANDIDATE_BASE_INVALID`；
+  - 并发层：`STALE_REMOTE_HEAD`（`base.head_sha` 与 observed HEAD 不一致）、
+    `CANDIDATE_BASE_RESULTS_DRIFT` / `..._TASKS_DRIFT` / `..._STATE_DRIFT` /
+    `..._LEDGER_DRIFT` / `..._ADJUDICATION_DRIFT`、`GIT_INFO_UNAVAILABLE`、
+    `COMMITTED_FACTS_UNAVAILABLE`；
+  - 连续性层：`LEDGER_CHAIN_GAP` / `LEDGER_ORDER_REGRESSION` /
+    `LEDGER_REVIEW_TIME_REGRESSION` / `LEDGER_RESULT_*_MISMATCH` /
+    `LEDGER_COMMIT_*_MISMATCH` / `LEDGER_MANIFEST_FACTS_INCOMPLETE`（§2.9 原样复用）、
+    `CANDIDATE_LEDGER_ENTRY_REMOVED`、`CANDIDATE_PASS_PAST_UNRESOLVED_CONTRADICTION`
+    （PASS 越过**未裁决**的历史矛盾）；
+  - 裁决层：`CANDIDATE_ADJUDICATION_NOT_GPT` / `CANDIDATE_ADJUDICATION_INVALID` 与 §2.15
+    原样透传的稳定 code（越权 / 未知身份 / 重复 / 冲突 / 过期 / 五种身份漂移）；
+  - 状态层：`CANDIDATE_LAST_REVIEWED_REGRESSION` / `CANDIDATE_LAST_REVIEWED_AHEAD` /
+    `CANDIDATE_STATE_POINTER_DRIFT` / `CANDIDATE_PHASE3_3_BLOCKER_REMOVED` /
+    `CANDIDATE_BLOCKER_REMOVED` / `CANDIDATE_PHASE3_4_ENTRY` /
+    `CANDIDATE_TRADING_SAFETY_CHANGED`。
+- **candidate-ready ≠ committed-current ≠ review 完成**：`closure` 段机器可读地区分
+  `candidate_ready`（候选写集与已提交事实原子一致）、`committed_current`
+  （head / state / backlog / integrity 是否可读），并硬编码 `review_completed=false` /
+  `review_verdict_issued=false` / `phase_gate_lifted=false` /
+  `executor_write_triggered=false` / `state_advanced=false` / `auto_push=false`；
+  候选通过**不**触发 Executor 写入、**不**自动 push、**不**解除 Phase gate。
+- **零写入与 CLI**：`python -m orchestrator.review_closure_precondition --candidate <临时文件|->`
+  （另有只读 `--root` / `--state` / `--tasks-dir` / `--results-dir` / `--ledger` /
+  `--adjudication-store` / `--as-of` / `--generated-at`）。**没有** `--apply` / `--fix` /
+  `--advance` / `--sign` 等变更开关；默认 stdout 纯 ASCII JSON（`stderr` 只放人类摘要），
+  显式 `--output` **复用** §2.6 守卫（只允许 `<root>/.ai/runtime/**` 或系统临时目录）。
+- **确定性**：`precondition_digest = sha256(canonical json: sort_keys + compact separators)`，
+  排除 `generated_at` / `as_of` / `precondition_digest` / `determinism`；相同候选 + 相同已提交
+  事实 ⇒ 相同 digest（幂等），并区分 Windows / Linux 路径（`Path.resolve()` + 允许根前缀判定）。
+- **退出码**：`0` 候选与已提交事实原子一致（candidate-ready，**绝不是** review PASS）/
+  `2` fail-closed（stale HEAD / 漂移 / 链不连续 / 越权 / 安全不变量变化）/
+  `3` 候选不可用或 `PROJECT_STATE` 不可读 / `4` `--output` 被拒（绝不写任何文件）。
+- **职责边界（不可协商）**：`authority` 段机器可读声明 `review_authority=gpt_only` /
+  `tool_can_apply_candidate=false` / `tool_can_sign_review=false` /
+  `tool_can_sign_adjudication=false` / `tool_can_write_adjudication=false` /
+  `tool_can_write_review_ledger=false` / `tool_can_update_project_state=false` /
+  `tool_can_advance_pointer=false` / `tool_can_advance_state=false` /
+  `tool_can_lift_blocker=false` / `mutation_switches_exposed=[]` / `network_access=false` /
+  `model_calls=false`；候选通过**不**写裁决 / ledger / state / tasks / results，**不**推进
+  `last_reviewed_task`、**不**解除 `PHASE3_3_DATA`、**不**决定 Phase。
+- **不破坏既有门禁**：§2.13 写入前门禁、§2.8~§2.12 事实链、ledger 连续性、浅历史
+  `GIT_HISTORY_SHALLOW` / `COMPLETION_COMMIT_NOT_FOUND` fail-closed、rolling queue、L1~L4
+  档位、Phase 3.3 data blocker、`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 全部不变。
+- **回归测试**：`tests/unit/test_review_closure_precondition.py`（43 项：契约 / authority /
+  源码只读守卫 / 无变更开关、candidate-ready 与 closure 语义、组合事实、零写入、确定性
+  digest 与幂等、候选缺失 / 非法 / schema / base 缺失 / stale HEAD / 摘要漂移、链断裂 /
+  PASS 越过未裁决矛盾 / 有效 GPT 裁决恢复 candidate-ready / 非 GPT / 身份漂移 / 条目删除、
+  `last_reviewed` 倒退与超前 / blocker 删除 / Phase 3.4 / 交易安全不变量、临时文件与 stdin
+  来源守卫与跨平台路径、CLI 零写入与受控 `--output`）
+  + `tests/integration/test_review_closure_precondition_regression.py`（8 项：真实仓库候选
+  与已提交事实一致 ⇒ candidate-ready、§2.8 身份绑定、`precondition_digest` 幂等、stale HEAD /
+  指针漂移 / 删除 `PHASE3_3_DATA` / ledger 链断裂 fail-closed、CLI 显式临时文件端到端零写入，
+  且 `.ai/results` / `.ai/tasks` / `PROJECT_STATE` / `GPT_REVIEW_LEDGER` /
+  `.ai/adjudications` 前后字节一致、worktree 状态不变）。
 
 
 

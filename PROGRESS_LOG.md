@@ -5708,8 +5708,76 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
 
 
+## GOLD-045 —— GPT Review 收口写入前的原子一致性预检
 
+### 1. 完成内容
 
+- 新增只读模块 `orchestrator/review_closure_precondition.py`（`§2.18`）：在 GPT 真正写入历史
+  裁决 / `GPT_REVIEW_LEDGER` / `PROJECT_STATE` **之前**，用**单一**只读预检把候选写集与当前
+  已提交事实一次性比对，任何 stale / 不连续 / 越权 / 安全不变量变化一律 fail-closed。
+- **复用，不复制**：HEAD / 指针复用 §2.5 `planner_snapshot`（经 planner snapshot 的 `git` 段）；
+  result / commit 身份复用 §2.8 `review_binding`；ledger 校验与连续性复用 §2.8 `review_ledger`
+  + §2.9 `review_ledger_integrity`；裁决校验复用 §2.15 `legacy_result_adjudication`
+  （`store_entries` / `store_consistency_issues` / `evaluate_task`）；backlog 事实复用 §2.11
+  `review_backlog`；确定性摘要与受控输出守卫复用 §2.12 `planner_mutation_precondition` +
+  §2.6 `planner_snapshot_output`。本模块自身判定算法为零。
+- **候选契约**：`schema=gold-ai/review-closure-candidate/v1` + `schema_version=1`，三段可选
+  （`adjudication_store` / `review_ledger` / `project_state`）+ 必需 `base`
+  （`head_sha` / `results_digest` / `tasks_digest` / `project_state_sha256` /
+  `review_ledger_sha256` / `adjudication_store_sha256`）。候选**只允许**来自显式临时文件
+  （系统临时目录 / `<root>/.ai/runtime/**`）或 stdin；managed 状态路径（`.ai/PROJECT_STATE.json`
+  / `.ai/GPT_REVIEW_LEDGER.json` / `.ai/tasks` / `.ai/results` / `.ai/adjudications/**`）一律拒绝。
+- **fail-closed 门禁**：`CANDIDATE_MISSING` / `..._UNREADABLE` / `..._JSON_INVALID` /
+  `..._NOT_OBJECT` / `..._SCHEMA_UNSUPPORTED` / `..._SECTION_INVALID` / `..._BASE_MISSING` /
+  `..._BASE_INVALID`、`STALE_REMOTE_HEAD`、五类 base 摘要漂移、`GIT_INFO_UNAVAILABLE`、
+  `COMMITTED_FACTS_UNAVAILABLE`、§2.9 `LEDGER_CHAIN_GAP` / 顺序与 review 时间回退 / 五类身份
+  mismatch / `LEDGER_MANIFEST_FACTS_INCOMPLETE`、`CANDIDATE_LEDGER_ENTRY_REMOVED`、
+  `CANDIDATE_PASS_PAST_UNRESOLVED_CONTRADICTION`、`CANDIDATE_ADJUDICATION_NOT_GPT` /
+  `CANDIDATE_ADJUDICATION_INVALID`（§2.15 稳定 code 原样透传）、
+  `CANDIDATE_LAST_REVIEWED_REGRESSION` / `..._AHEAD` / `CANDIDATE_STATE_POINTER_DRIFT` /
+  `CANDIDATE_PHASE3_3_BLOCKER_REMOVED` / `CANDIDATE_BLOCKER_REMOVED` /
+  `CANDIDATE_PHASE3_4_ENTRY` / `CANDIDATE_TRADING_SAFETY_CHANGED`。
+- **candidate-ready ≠ committed-current ≠ review 完成**：`closure` 段机器可读给出
+  `candidate_ready` 与 `committed_current`（head / state / backlog / integrity 是否可读），并
+  硬编码 `review_completed=false` / `review_verdict_issued=false` / `phase_gate_lifted=false` /
+  `executor_write_triggered=false` / `state_advanced=false` / `auto_push=false`。
+- **零写入 CLI**：`python -m orchestrator.review_closure_precondition --candidate <临时文件|->`
+  （只读 `--root` / `--state` / `--tasks-dir` / `--results-dir` / `--ledger` /
+  `--adjudication-store` / `--as-of` / `--generated-at`）；**没有** `--apply` / `--fix` /
+  `--advance` / `--sign` 等变更开关；默认 stdout 纯 ASCII JSON，显式 `--output` 复用 §2.6
+  守卫（只允许 `<root>/.ai/runtime/**` 或系统临时目录），退出码 `0` / `2` / `3` / `4`。
+- **确定性**：`precondition_digest` 排除 `generated_at` / `as_of` / `precondition_digest` /
+  `determinism`，相同候选 + 相同已提交事实 ⇒ 相同 digest（幂等）；Windows / Linux 路径由
+  `Path.resolve()` + 允许根前缀判定统一处理。
+- 文档：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.18；`README.md` 工具段 + 红线表同步
+  （本文件新增本节）。
+
+### 2. 修改 / 新增文件
+
+- 新增：`orchestrator/review_closure_precondition.py`、`tests/unit/test_review_closure_precondition.py`、
+  `tests/integration/test_review_closure_precondition_regression.py`；
+- 修改：`.ai/DEVELOPMENT_PROTOCOL.md`（§2.18）、`README.md`（工具段 + 红线表）、
+  `PROGRESS_LOG.md`（本节）。
+
+### 3. 验证
+
+- `pytest tests/unit/test_review_closure_precondition.py -q` → 43 passed；
+- `pytest tests/integration/test_review_closure_precondition_regression.py -q` → 8 passed；
+- `pytest tests -q` → **3807 passed / 1 skipped**（0 failed，605.54s）；
+- `ruff check .` → All checks passed；`mypy config database src scripts` → Success（183 files）；
+- 真实仓库当前事实：`PROJECT_STATE` 指针（`current_task=GOLD-042` / `last_completed_task=GOLD-041`）
+  落后于已完成 results（`latest_terminal=GOLD-044`），因此**未对齐指针**的候选会被
+  `CANDIDATE_STATE_POINTER_DRIFT` fail-closed；把指针对齐 results 的候选（
+  `current_task=GOLD-045` / `last_completed_task=GOLD-044` / `last_reviewed_task=GOLD-027` +
+  现有 ledger）⇒ `candidate_ready=true` / exit `0`，但 `review_completed=false`，
+  `.ai` 全树与 worktree 前后字节一致。
+
+### 4. 遗留 / 建议下一步（由 GPT 决定）
+
+- 真正的历史矛盾裁决、随后的实质 review、`GPT_REVIEW_LEDGER` 追加与 `last_reviewed_task`
+  推进仍**只能由 GPT** 完成（本项提供写入前原子预检，工具绝不代写 / 代签 / 代推进）；
+- `PHASE3_3_DATA` 保持 BLOCKED；未进入 Phase 3.4，未跨 L3/L4；`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
 
 
 
