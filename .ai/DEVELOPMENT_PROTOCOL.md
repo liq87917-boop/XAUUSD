@@ -1130,6 +1130,67 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   独立复算 GOLD-044 归一化矛盾；`test_review_evidence_manifest_regression.py`
   `invalid_count` 计入 GOLD-044）。
 
+## 2.20 结果终态控制面的新进程端到端 canary（GOLD-047）
+
+- **为什么**：§2.13 / §2.19 的修复都只在**测试进程内**被验证。同进程 monkeypatch、旧模块
+  缓存、宽松 mock 与 fixture 终态改写都可能让「纯函数测试通过」掩盖**真实收尾路径并未
+  生效**——GOLD-044 的 `status=completed` + `cline_finish_reason_raw=aborted` 就是这种
+  回归。§2.20 把它变成**独立子进程**的机器可读证据。
+- **唯一入口**：`python -m orchestrator.result_terminal_canary [workdir]`；退出码 `0` PASS /
+  `1` FAIL（fail-closed），报告是 **ASCII** JSON，schema
+  `gold-ai/result-terminal-canary/v1`。
+- **必须经过的真实入口链**：在**新进程加载的真模块**上调用
+  `orchestrator.ai_orchestrator.process_task`，覆盖终态解析（`parse_cline_json_output` /
+  `authoritative_cline_terminal`）、归一化（`attempt_outcome` / `normalize_finish_reason` /
+  `build_attempt_record`）、terminal-consistency（`ensure_result_terminal_consistency` /
+  `ensure_completion_terminal_consistency`）、result 持久化决策（`write_final_result`）与
+  completion commit 决策（`commit_task_result` + 假 git 记录）。**严禁**只调用 validator
+  纯函数，也**严禁**替换终态链上的任何入口（只允许替换进程外的 `run_cline` /
+  `run_validations` / `get_changed_files` / `get_diff_stat` / `git` 与只读 refill 提示）。
+- **两个自洽场景**（同一降级前置：exit code 0 + validation 全通过 + 工作树有变更）：
+  - 权威 raw `completed` ⇒ `completed` result + completion commit（正常路径必须保持可用）；
+  - 权威 raw `aborted` ⇒ 只允许 `failed` attempt（`terminal_not_completed` /
+    `CLINE_TERMINAL_NOT_COMPLETED`）+ `blocked` 顶层；**不得**出现 completed result、
+    completion commit 或完成推进，且用同一份事实强制走 completion 门禁必须被拒。
+- **新稳定 reason code**（`orchestrator/result_terminal_canary.py`，共 16 个
+  `RESULT_TERMINAL_CANARY_*`）：`INTERNAL_ERROR` / `RESULT_MISSING` / `RESULT_UNREADABLE` /
+  `ITERATION_NOT_TERMINAL` / `UNEXPECTED_GIT_COMMAND` / `FRESH_IMPORT_BOUNDARY_BROKEN` /
+  `RAW_ABORTED_RAW_REWRITTEN` / `RAW_ABORTED_FIXTURE_DEGRADED` /
+  `RAW_ABORTED_ATTEMPT_NOT_FAILED` / `RAW_ABORTED_PRODUCED_COMPLETED` /
+  `RAW_ABORTED_PRODUCED_COMPLETION_COMMIT` / `RAW_COMPLETED_NOT_COMPLETED` /
+  `RAW_COMPLETED_MISSING_RAW_EVIDENCE` / `RAW_COMPLETED_MISSING_COMPLETION_COMMIT` /
+  `AUTHORITY_MODULE_NOT_LOADED` / `AUTHORITY_RULE_INCONSISTENT`。
+- **新进程边界 fail-closed**：`FRESH_IMPORT_BOUNDARY_BROKEN` 在「本进程已 import pytest」
+  或「边界模块（`ai_orchestrator` / `result_terminal_consistency`）此前已被加载」时触发，
+  报告 `fresh_process=false` / `pytest_imported=true`；canary 绝不复用测试进程内的旧模块
+  状态、宽松 mock 或历史 fixture。判定规则的唯一来源仍是
+  `result_terminal_consistency.raw_terminal_is_success`（canary 只校验它仍然严格）。
+- **隔离与安全（不可协商）**：只写自己的**临时 workdir**（`TASK_DIR` / `RESULT_DIR` /
+  `TASK_STATE_DIR` / `RECOVERY_DIR` / `LOG_DIR` 全部重定向到该 workdir）；假 `git` 只允许
+  白名单命令，白名单外一律 raise `CanaryGitError` ⇒ `UNEXPECTED_GIT_COMMAND`，**绝不**
+  spawn 真实 Cline / 真实 git / 网络；真实 `.ai/tasks` / `.ai/results` / `PROJECT_STATE` /
+  `GPT_REVIEW_LEDGER` / adjudication store 与 worktree 在命令前后逐字节不变。
+- **不可变语料计数不再写死（同一批回归）**：
+  `tests/integration/test_review_evidence_manifest_regression.py` /
+  `test_review_closure_adjudication_regression.py` 里针对 immutable 语料的
+  `invalid_count` / `unresolved_contradiction_count` 改为**与逐项分类 / 逐项事实同源复算**。
+  理由：历史 result 永久只读、语料只增不减，写死数字在下一份任务 result 落库后必然失真
+  （GOLD-046 自身 result 让这两个计数各 +1）；复算后仍**显式**要求「每个 invalid 项都以
+  客观终态矛盾为理由」「`GOLD-044` / `GOLD-046` 必须出现在归一化矛盾集合里」
+  「除已裁决项外每条已知历史矛盾都必须仍在未裁决集合里」，因此是**收紧**而不是放宽，
+  且对后续新落库的不可变 result 不再回退（CI 不会因新增 result 变红）。
+- **职责边界**：canary PASS 只是**回归事实**，不签发 verdict、不写 ledger / state、不推进
+  `last_reviewed_task`、不解除 `PHASE3_3_DATA`、不改变 Phase / L1~L4 / `LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`；GOLD-047 自身 result 的终态自洽仍由 GPT 核对。
+- **回归测试**：`tests/unit/test_result_terminal_canary.py`（18 项：schema / 退出码 /
+  reason code 词表与同名常量、假 git 白名单与 commit 证据、源码守卫「绝不 spawn 子进程」
+  「绝不 patch 终态链」、平台无关（无 `os.name` / `sys.platform` 分支）、事实投影、正确
+  事实零 code、以及缺失 / 不可读 / 非终态 / 退化 fixture / raw 被改写 / GOLD-044 式回归
+  全部 fail-closed）+
+  `tests/integration/test_result_terminal_canary_regression.py`（6 项：新进程 PASS 且真实
+  仓库零改写、两场景语义独立、两次运行稳定、父进程 monkeypatch 免疫、新进程边界被污染
+  必 fail-closed、Phase 3.3 / 交易安全不变量不变）。
+
 
 
 

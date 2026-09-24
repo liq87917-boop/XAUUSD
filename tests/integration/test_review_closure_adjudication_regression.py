@@ -481,7 +481,23 @@ def test_backlog_classifies_adjudicated_contradiction_end_to_end(
 
     assert payload["summary"]["adjudicated_count"] == 1
     assert payload["summary"]["adjudicated_pending_count"] == 1
-    assert payload["summary"]["unresolved_contradiction_count"] == 7
+
+    # 计数器必须与逐项事实**同源**：历史 result 永久只读、语料只会单调增长，因此绝不写死
+    # 数字。每一条**已知历史矛盾**（除本次已裁决的 TASK_ID）都必须仍显式落在「未裁决」集合
+    # 里，已裁决那一条绝不能混进来。
+    unresolved = [
+        item
+        for item in payload["backlog"]
+        if not item["facts_ready"] and not item["adjudicated"]
+    ]
+
+    unresolved_ids = {item["task_id"] for item in unresolved}
+
+    assert payload["summary"]["unresolved_contradiction_count"] == len(unresolved)
+
+    assert set(adjudication.KNOWN_CONTRADICTION_TASKS) - {TASK_ID} <= unresolved_ids
+
+    assert TASK_ID not in unresolved_ids
 
     assert_repo_unchanged(before_repo)
 

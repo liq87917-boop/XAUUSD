@@ -214,7 +214,25 @@ def test_normal_completed_items_are_pending_substantive_review() -> None:
         assert item["facts_complete"] is True
         assert item["terminal_consistency"]["contradiction"] is False
 
-    assert payload["summary"]["invalid_count"] == 1
+    # 计数必须与逐项分类**同源**：历史 result 永久只读、语料只会单调增长（每完成一个任务
+    # 就多一份不可变 result），因此这里绝不写死数字；同时每个 invalid 项都必须以**客观终态
+    # 矛盾**为理由（归一化 raw 终态矛盾 GOLD-044 / GOLD-046 必须显式可见，绝不静默放过）。
+    invalid = [
+        item
+        for item in payload["items"]
+        if item["classification"] == evidence.CLASSIFICATION_INVALID
+    ]
+
+    invalid_ids = {item["task_id"] for item in invalid}
+
+    assert invalid
+
+    assert payload["summary"]["invalid_count"] == len(invalid)
+
+    assert all(item["terminal_consistency"]["contradiction"] is True for item in invalid)
+
+    assert {"GOLD-044", "GOLD-046"} <= invalid_ids
+
     assert payload["summary"]["facts_ready_count"] == 0
     assert payload["summary"]["adjudicated_count"] == 0
     assert payload["summary"]["exit_code"] == evidence.EXIT_FAIL_CLOSED

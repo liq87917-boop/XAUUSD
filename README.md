@@ -2163,6 +2163,37 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 
 
 
+### 结果终态控制面的新进程端到端 canary（GOLD-047）
+
+> **合规红线**：终态修复必须在**新进程加载的真模块**上被证明；只靠同进程纯函数测试不算
+> 验证。canary 只报告事实，绝不签发 review verdict、绝不改写历史 result。
+
+- **一句话**：GOLD-039 / GOLD-046 的修复此前只在**测试进程内**被验证，同进程 monkeypatch
+  与旧模块缓存可能让「纯函数测试通过」掩盖真实收尾路径未生效。GOLD-047 用**独立子进程**
+  canary 把这件事变成机器可读证据；
+- **唯一入口**：`python -m orchestrator.result_terminal_canary [workdir]`（退出码 `0` PASS
+  / `1` FAIL，报告为 **ASCII** JSON，schema `gold-ai/result-terminal-canary/v1`）；
+- **经过的真实入口链**：在新进程里调用 `orchestrator.ai_orchestrator.process_task`，覆盖
+  终态解析 → 归一化 → terminal-consistency → result 持久化决策 → completion commit 决策；
+  只替换进程外的 `run_cline` / `run_validations` / `get_changed_files` / `get_diff_stat` /
+  `git`（假 git 白名单，白名单外 `CanaryGitError`），**绝不**替换终态链上任何入口；
+- **两个自洽场景**（同一降级前置：exit code 0 + validation 全通过 + 工作树有变更）：
+  raw `completed` ⇒ completed result + completion commit；raw `aborted` ⇒ 只允许 `failed`
+  attempt（`terminal_not_completed` / `CLINE_TERMINAL_NOT_COMPLETED`）+ `blocked` 顶层，
+  **不得**出现 completed result / completion commit，强制走 completion 门禁必须被拒；
+- **新稳定 reason code**：`RESULT_TERMINAL_CANARY_*`（共 16 个，含
+  `FRESH_IMPORT_BOUNDARY_BROKEN` / `RAW_ABORTED_PRODUCED_COMPLETED` /
+  `RAW_ABORTED_PRODUCED_COMPLETION_COMMIT` / `RAW_COMPLETED_MISSING_COMPLETION_COMMIT`）；
+  判定规则唯一来源仍是 `orchestrator/result_terminal_consistency.py`；
+- **隔离**：只写临时 workdir；真实 `.ai/tasks` / `.ai/results` / `PROJECT_STATE` /
+  `GPT_REVIEW_LEDGER` 与 worktree 前后逐字节不变；canary PASS ≠ Review PASS；
+- **回归测试**：`tests/unit/test_result_terminal_canary.py`（18 项）+
+  `tests/integration/test_result_terminal_canary_regression.py`（6 项：新进程 PASS 且真实
+  仓库零改写、两场景语义独立、两次运行稳定、父进程 monkeypatch 免疫、边界被污染必
+  fail-closed、Phase 3.3 / 交易安全不变量不变）。
+
+
+
 ## 8. 数据模型
 
 
@@ -2336,5 +2367,6 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 | **Review 收口写入必须原子一致且零写入预检** | `orchestrator/review_closure_precondition.py`：GPT 写入历史裁决 / `GPT_REVIEW_LEDGER` / `PROJECT_STATE` 前，把候选写集（只允许来自显式临时文件或 stdin）与已提交 HEAD、tasks/results/state/ledger/store 摘要、§2.15 裁决校验、§2.8 binding、§2.11 backlog、§2.9 integrity 一次性比对；stale HEAD / 摘要漂移 / ledger 链断裂 / PASS 越过未裁决矛盾 / 非 GPT 裁决 / 身份漂移 / 删除条目 / `last_reviewed_task` 倒退或超前 / 删除 `PHASE3_3_DATA` / 提前进入 Phase 3.4 / 交易安全不变量变化一律 fail-closed；无 `--apply` / `--fix` / `--advance` / `--sign`，`candidate_ready` ≠ review 完成、不触发 Executor 写入或自动 push（GOLD-045） |
 | **只有有效 GPT 裁决才恢复事实可绑定性** | `orchestrator/review_binding.py` + `review_backlog` / `review_ledger_integrity` / `planner_mutation_precondition` / `planner_refill_request`：默认 `facts_complete=false`，仅当存在 schema 合法、GPT 权威有效、原 result sha256/status + commit sha/branch + 原始 contradiction codes 完全匹配且不冲突的 §2.15 裁决、且无其它阻塞 code 时 `binding.facts_ready=true`；原始 contradiction finding / result sha256 / 裁决 identity 一律保留，越权 / 漂移 / 重复 / 冲突 / store 损坏 fail-closed，裁决 ≠ Review PASS、不写 ledger、不推进指针、不解除 `PHASE3_3_DATA`（GOLD-044） |
 | **权威 raw 终态是成功判定与 completion 的唯一来源** | `orchestrator/result_terminal_consistency.py` + `ai_orchestrator.py`：Cline 自报的**最终 raw finish reason**（流中最后一个携带 reason 的终态事件）是唯一权威终态；`attempt_outcome` 要求 `exit code 0` + validation 全通过 + raw `completed`，`aborted` / 非成功 raw / 缺失一律判 `failed`（`terminal_not_completed` / `CLINE_TERMINAL_NOT_COMPLETED`，可重试、retry 耗尽落 `blocked`）；`ensure_completion_terminal_consistency` 在状态推进 / completion commit **之前**执行 §2.13 唯一门禁，新 code `RESULT_TERMINAL_RAW_TERMINAL_CONTRADICTS_COMPLETED`；timeout / provider fatal / blocked / 人工中止语义不折叠、重试有界，历史 result / ledger / state / adjudications 只读（GOLD-046） |
+| **终态修复必须在新进程边界被证明** | `orchestrator/result_terminal_canary.py`：独立子进程 canary（`python -m orchestrator.result_terminal_canary [workdir]`，ASCII JSON，退出码 `0` PASS / `1` FAIL）在**新进程加载的真模块**上经过真实 `process_task` 边界跑 raw `completed`（⇒ completed result + completion commit，正常路径保持可用）与 raw `aborted`（exit code 0 + validation 全通过 + 工作树有变更 ⇒ 只允许 `failed` attempt `terminal_not_completed` / `CLINE_TERMINAL_NOT_COMPLETED` + `blocked` 顶层，**不得**产生 completed result / completion commit，且同一份事实强制走 completion 门禁必须被拒）；只替换进程外的 `run_cline` / `run_validations` / `get_changed_files` / `get_diff_stat` / 假 `git`（白名单外 `CanaryGitError` ⇒ `UNEXPECTED_GIT_COMMAND`），终态解析 / 归一化 / terminal-consistency / result 持久化决策全部走真代码；已 import pytest 或边界模块此前已被加载 ⇒ `RESULT_TERMINAL_CANARY_FRESH_IMPORT_BOUNDARY_BROKEN` fail-closed；只写临时 workdir，真实 `.ai/tasks` / `.ai/results` / `PROJECT_STATE` / `GPT_REVIEW_LEDGER` 与 worktree 逐字节不变，canary PASS ≠ Review PASS（GOLD-047） |
 
 

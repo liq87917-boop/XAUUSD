@@ -1,0 +1,198 @@
+{
+  "task_id": "GOLD-047",
+  "title": "建立结果终态修复的新进程端到端 canary",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "completed",
+  "finished_at": "2026-09-25T00:17:54+08:00",
+  "attempt_count": 3,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    " M tests/integration/test_review_closure_adjudication_regression.py",
+    " M tests/integration/test_review_evidence_manifest_regression.py",
+    "?? orchestrator/result_terminal_canary.py",
+    "?? tests/integration/test_result_terminal_canary_regression.py",
+    "?? tests/unit/test_result_terminal_canary.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md                        | 61 ++++++++++++++++++++++\n PROGRESS_LOG.md                                    | 58 ++++++++++++++++++++\n README.md                                          | 32 ++++++++++++\n .../test_review_closure_adjudication_regression.py | 18 ++++++-\n .../test_review_evidence_manifest_regression.py    | 20 ++++++-\n 5 files changed, 187 insertions(+), 2 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-24T22:48:18+08:00",
+      "finished_at": "2026-09-24T23:08:23+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "failed",
+      "normalized_finish_reason": "failed",
+      "finish_reason": "failed",
+      "cline_finish_reason_raw": "aborted",
+      "model": "deepseek-flash",
+      "iterations": 80,
+      "duration_ms": 587780,
+      "usage": {
+        "inputTokens": 10230721,
+        "outputTokens": 66633,
+        "cacheReadTokens": 10091264,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.09117214199999998
+      },
+      "cline_final_text": "",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M README.md",
+        "?? orchestrator/result_terminal_canary.py",
+        "?? tests/integration/test_result_terminal_canary_regression.py",
+        "?? tests/unit/test_result_terminal_canary.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 47 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                   | 32 ++++++++++++++++++++++++++++++\n 2 files changed, 79 insertions(+)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "... [ 65%]\n........................................................................ [ 67%]\n........................................................................ [ 69%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 78%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 89%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 95%]\n........................................................................ [ 97%]\n....................................................s................... [ 99%]\n.........................                                                [100%]\n================================== FAILURES ===================================\n________ test_backlog_classifies_adjudicated_contradiction_end_to_end _________\n\ntmp_path = WindowsPath('C:/Users/Admin/AppData/Local/Temp/pytest-of-Admin/pytest-1032/test_backlog_classifies_adjudi0')\nbefore_repo = {'results': {'GOLD-001-R1.json': '0474f7d5a143c7cecb5ab051ba0c99ed3eac877c23a4d4424345bf0d50e87688', 'GOLD-001-R2.json...9\\x98\\xbb\\xe5\\xa1\\x9e\\xe3\\x80\\x82\",\\r\\n      \"reviewed_at\": \"2026-09-23T16:17:00+08:00\"\\r\\n    }\\r\\n  ]\\r\\n}\\r\\n', ...}\n\n    def test_backlog_classifies_adjudicated_contradiction_end_to_end(\n        tmp_path: Path, before_repo: dict[str, Any]\n    ) -> None:\n        store = write_store(tmp_path, [make_entry(build_manifest())])\n    \n        payload = backlog.build_review_backlog_manifest(\n            root=REPO_ROOT,\n            tasks_dir=TASKS_DIR,\n            results_dir=RESULTS_DIR,\n            state_path=PROJECT_STATE,\n            ledger_path=REVIEW_LEDGER,\n            adjudication_store_path=store,\n            generated_at=AUDIT_TIME,\n        )\n    \n        items = {item[\"task_id\"]: item for item in payload[\"backlog\"]}\n    \n        adjudicated_item = items[TASK_ID]\n    \n        assert adjudicated_item[\"adjudicated\"] is True\n        assert adjudicated_item[\"facts_ready\"] is True\n        assert adjudicated_item[\"review_status\"] == backlog.REVIEW_STATUS_PENDING\n        assert adjudicated_item[\"adjudication\"][\"state\"] == adjudication.TASK_STATE_ADJUDICATED\n    \n        # \\u5176\\u5b83\\u5df2\\u77e5\\u77db\\u76fe\\u4ecd\\u65e0\\u88c1\\u51b3 \\u21d2 \\u4ecd\\u7136 fail-closed\\uff08unresolved\\uff09\\u3002\n        others = [item for task, item in items.items() if task != TASK_ID]\n    \n        assert all(item[\"adjudicated\"] is False for item in others)\n        assert all(\n            item[\"review_status\"] == backlog.REVIEW_STATUS_INVALID\n            for item in others\n            if item[\"facts_complete\"] is False\n        )\n    \n        assert payload[\"summary\"][\"adjudicated_count\"] == 1\n        assert payload[\"summary\"][\"adjudicated_pending_count\"] == 1\n>       assert payload[\"summary\"][\"unresolved_contradiction_count\"] == 7\nE       assert 8 == 7\n\ntests\\integration\\test_review_closure_adjudication_regression.py:484: AssertionError\n_________ test_normal_completed_items_are_pending_substantive_review __________\n\n    def test_normal_completed_items_are_pending_substantive_review() -> None:\n        payload = build_manifest()\n    \n        pending = [\n            item\n            for item in payload[\"items\"]\n            if item[\"classification\"] == evidence.CLASSIFICATION_PENDING_SUBSTANTIVE_REVIEW\n        ]\n    \n        assert pending\n    \n        for item in pending:\n            assert item[\"facts_complete\"] is True\n            assert item[\"terminal_consistency\"][\"contradiction\"] is False\n    \n>       assert payload[\"summary\"][\"invalid_count\"] == 1\nE       assert 2 == 1\n\ntests\\integration\\test_review_evidence_manifest_regression.py:217: AssertionError\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\nFAILED tests/integration/test_review_closure_adjudication_regression.py::test_backlog_classifies_adjudicated_contradiction_end_to_end\nFAILED tests/integration/test_review_evidence_manifest_regression.py::test_normal_completed_items_are_pending_substantive_review\n2 failed, 3838 passed, 1 skipped in 612.56s (0:10:12)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    },
+    {
+      "attempt": 2,
+      "started_at": "2026-09-24T23:08:34+08:00",
+      "finished_at": "2026-09-24T23:39:16+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "failed",
+      "normalized_finish_reason": "failed",
+      "finish_reason": "failed",
+      "cline_finish_reason_raw": "aborted",
+      "model": "deepseek-flash",
+      "iterations": 115,
+      "duration_ms": 1238609,
+      "usage": {
+        "inputTokens": 17026350,
+        "outputTokens": 104790,
+        "cacheReadTokens": 16910848,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.13093184399999996
+      },
+      "cline_final_text": "",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        "?? orchestrator/result_terminal_canary.py",
+        "?? tests/integration/test_result_terminal_canary_regression.py",
+        "?? tests/unit/test_result_terminal_canary.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 47 +++++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 67 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                   | 35 +++++++++++++++++++++++\n 3 files changed, 149 insertions(+)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 1,
+          "timed_out": false,
+          "stdout_tail": "... [ 65%]\n........................................................................ [ 67%]\n........................................................................ [ 69%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 78%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 89%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 95%]\n........................................................................ [ 97%]\n........................................................s............... [ 99%]\n.............................                                            [100%]\n================================== FAILURES ===================================\n________ test_backlog_classifies_adjudicated_contradiction_end_to_end _________\n\ntmp_path = WindowsPath('C:/Users/Admin/AppData/Local/Temp/pytest-of-Admin/pytest-1045/test_backlog_classifies_adjudi0')\nbefore_repo = {'results': {'GOLD-001-R1.json': '0474f7d5a143c7cecb5ab051ba0c99ed3eac877c23a4d4424345bf0d50e87688', 'GOLD-001-R2.json...9\\x98\\xbb\\xe5\\xa1\\x9e\\xe3\\x80\\x82\",\\r\\n      \"reviewed_at\": \"2026-09-23T16:17:00+08:00\"\\r\\n    }\\r\\n  ]\\r\\n}\\r\\n', ...}\n\n    def test_backlog_classifies_adjudicated_contradiction_end_to_end(\n        tmp_path: Path, before_repo: dict[str, Any]\n    ) -> None:\n        store = write_store(tmp_path, [make_entry(build_manifest())])\n    \n        payload = backlog.build_review_backlog_manifest(\n            root=REPO_ROOT,\n            tasks_dir=TASKS_DIR,\n            results_dir=RESULTS_DIR,\n            state_path=PROJECT_STATE,\n            ledger_path=REVIEW_LEDGER,\n            adjudication_store_path=store,\n            generated_at=AUDIT_TIME,\n        )\n    \n        items = {item[\"task_id\"]: item for item in payload[\"backlog\"]}\n    \n        adjudicated_item = items[TASK_ID]\n    \n        assert adjudicated_item[\"adjudicated\"] is True\n        assert adjudicated_item[\"facts_ready\"] is True\n        assert adjudicated_item[\"review_status\"] == backlog.REVIEW_STATUS_PENDING\n        assert adjudicated_item[\"adjudication\"][\"state\"] == adjudication.TASK_STATE_ADJUDICATED\n    \n        # \\u5176\\u5b83\\u5df2\\u77e5\\u77db\\u76fe\\u4ecd\\u65e0\\u88c1\\u51b3 \\u21d2 \\u4ecd\\u7136 fail-closed\\uff08unresolved\\uff09\\u3002\n        others = [item for task, item in items.items() if task != TASK_ID]\n    \n        assert all(item[\"adjudicated\"] is False for item in others)\n        assert all(\n            item[\"review_status\"] == backlog.REVIEW_STATUS_INVALID\n            for item in others\n            if item[\"facts_complete\"] is False\n        )\n    \n        assert payload[\"summary\"][\"adjudicated_count\"] == 1\n        assert payload[\"summary\"][\"adjudicated_pending_count\"] == 1\n>       assert payload[\"summary\"][\"unresolved_contradiction_count\"] == 7\nE       assert 8 == 7\n\ntests\\integration\\test_review_closure_adjudication_regression.py:484: AssertionError\n_________ test_normal_completed_items_are_pending_substantive_review __________\n\n    def test_normal_completed_items_are_pending_substantive_review() -> None:\n        payload = build_manifest()\n    \n        pending = [\n            item\n            for item in payload[\"items\"]\n            if item[\"classification\"] == evidence.CLASSIFICATION_PENDING_SUBSTANTIVE_REVIEW\n        ]\n    \n        assert pending\n    \n        for item in pending:\n            assert item[\"facts_complete\"] is True\n            assert item[\"terminal_consistency\"][\"contradiction\"] is False\n    \n>       assert payload[\"summary\"][\"invalid_count\"] == 1\nE       assert 2 == 1\n\ntests\\integration\\test_review_evidence_manifest_regression.py:217: AssertionError\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\nFAILED tests/integration/test_review_closure_adjudication_regression.py::test_backlog_classifies_adjudicated_contradiction_end_to_end\nFAILED tests/integration/test_review_evidence_manifest_regression.py::test_normal_completed_items_are_pending_substantive_review\n2 failed, 3842 passed, 1 skipped in 596.96s (0:09:56)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    },
+    {
+      "attempt": 3,
+      "started_at": "2026-09-24T23:39:26+08:00",
+      "finished_at": "2026-09-25T00:17:54+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "completed",
+      "normalized_finish_reason": "completed",
+      "finish_reason": "completed",
+      "cline_finish_reason_raw": "aborted",
+      "model": "deepseek-flash",
+      "iterations": 120,
+      "duration_ms": 1692739,
+      "usage": {
+        "inputTokens": 23874160,
+        "outputTokens": 138029,
+        "cacheReadTokens": 23713408,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.1780704239999999
+      },
+      "cline_final_text": "",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        " M tests/integration/test_review_closure_adjudication_regression.py",
+        " M tests/integration/test_review_evidence_manifest_regression.py",
+        "?? orchestrator/result_terminal_canary.py",
+        "?? tests/integration/test_result_terminal_canary_regression.py",
+        "?? tests/unit/test_result_terminal_canary.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md                        | 61 ++++++++++++++++++++++\n PROGRESS_LOG.md                                    | 58 ++++++++++++++++++++\n README.md                                          | 32 ++++++++++++\n .../test_review_closure_adjudication_regression.py | 18 ++++++-\n .../test_review_evidence_manifest_regression.py    | 20 ++++++-\n 5 files changed, 187 insertions(+), 2 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  1%]\n........................................................................ [  3%]\n........................................................................ [  5%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 13%]\n........................................................................ [ 14%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 24%]\n........................................................................ [ 26%]\n........................................................................ [ 28%]\n........................................................................ [ 29%]\n........................................................................ [ 31%]\n........................................................................ [ 33%]\n........................................................................ [ 35%]\n........................................................................ [ 37%]\n........................................................................ [ 39%]\n........................................................................ [ 41%]\n........................................................................ [ 43%]\n........................................................................ [ 44%]\n........................................................................ [ 46%]\n........................................................................ [ 48%]\n........................................................................ [ 50%]\n........................................................................ [ 52%]\n........................................................................ [ 54%]\n........................................................................ [ 56%]\n........................................................................ [ 57%]\n........................................................................ [ 59%]\n........................................................................ [ 61%]\n........................................................................ [ 63%]\n........................................................................ [ 65%]\n........................................................................ [ 67%]\n........................................................................ [ 69%]\n........................................................................ [ 71%]\n........................................................................ [ 72%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 78%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 87%]\n........................................................................ [ 89%]\n........................................................................ [ 91%]\n........................................................................ [ 93%]\n........................................................................ [ 95%]\n........................................................................ [ 97%]\n.............................................................s.......... [ 99%]\n..................................                                       [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3849 passed, 1 skipped in 608.84s (0:10:08)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

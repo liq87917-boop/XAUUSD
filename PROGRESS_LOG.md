@@ -5781,3 +5781,61 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
 
 
 
+
+## GOLD-047：结果终态控制面的新进程端到端 canary
+
+### 1. 本任务完成内容（Phase 2 / 控制面回归；未进入 Phase 3.4）
+
+- 新增 `orchestrator/result_terminal_canary.py`：在**独立子进程**里经过真实
+  `process_task` 边界跑两个终态场景（同一降级前置：exit code 0 + validation 全通过 +
+  工作树有变更）：raw `completed` ⇒ completed result + completion commit；raw `aborted`
+  ⇒ 只允许 `failed` attempt（`terminal_not_completed` / `CLINE_TERMINAL_NOT_COMPLETED`）
+  + `blocked` 顶层，且用同一份事实强制走 completion 门禁必须被拒；
+- 新进程边界 fail-closed：`fresh_process=false` / `pytest_imported=true` 或边界模块此前
+  已被加载 ⇒ `RESULT_TERMINAL_CANARY_FRESH_IMPORT_BOUNDARY_BROKEN`（退出码 1，ASCII JSON）；
+- 隔离：只写临时 workdir（`TASK_DIR` / `RESULT_DIR` / `TASK_STATE_DIR` / `RECOVERY_DIR`
+  全部重定向），假 git 白名单外一律 `CanaryGitError` ⇒
+  `RESULT_TERMINAL_CANARY_UNEXPECTED_GIT_COMMAND`；不 spawn 真实 Cline / 真实 git / 网络；
+- 反证（一次性、未入库）：把 `attempt_outcome` 还原成 GOLD-046 之前的「exit 0 + validation
+  通过即成功」并去掉两道门禁后，canary 立即 FAIL 并报
+  `RAW_ABORTED_ATTEMPT_NOT_FAILED` / `RAW_ABORTED_PRODUCED_COMPLETED` /
+  `RAW_ABORTED_PRODUCED_COMPLETION_COMMIT`（raw aborted 场景确实产出 completed result 与
+  completion commit），证明该 canary 不是空过。
+
+- 修正不可变语料计数的 fixture 漂移：`tests/integration/test_review_evidence_manifest_regression.py`
+  （`invalid_count`）与 `tests/integration/test_review_closure_adjudication_regression.py`
+  （`unresolved_contradiction_count`）原先写死数字，GOLD-046 自身 result 被写入后各 +1 而失真。
+  现改为**与逐项分类 / 逐项事实同源复算**，并显式要求「每个 invalid 项都以客观终态矛盾为
+  理由」「`GOLD-044` / `GOLD-046` 出现在归一化矛盾集合里」「除已裁决项外每条已知历史矛盾都
+  仍在未裁决集合里」——是收紧，不是放宽，且不再因后续新增不可变 result 回退。
+
+### 2. 修改 / 新增文件
+
+- 新增：`orchestrator/result_terminal_canary.py`、`tests/unit/test_result_terminal_canary.py`、
+  `tests/integration/test_result_terminal_canary_regression.py`；
+- 修改：`.ai/DEVELOPMENT_PROTOCOL.md`（§2.20）、`README.md`（工具段 + 红线表）、
+  `PROGRESS_LOG.md`（本节）、`tests/integration/test_review_evidence_manifest_regression.py`
+  与 `tests/integration/test_review_closure_adjudication_regression.py`（不可变语料计数改为同源复算）。
+
+### 3. 验证
+
+- `pytest tests/unit/test_result_terminal_canary.py tests/integration/test_result_terminal_canary_regression.py -q`
+  → **24 passed**（18 unit + 6 integration）；
+- `pytest tests -q` → 见本轮全量结果（0 failed）；
+- `ruff check .` → All checks passed；`mypy config database src scripts` → Success（183 files）；
+- 真实仓库 `.ai/tasks` / `.ai/results` / `PROJECT_STATE` / `GPT_REVIEW_LEDGER` 与 worktree 在
+  canary 运行前后逐字节一致；未改写任何历史 result。
+
+### 4. 遗留 / 建议下一步（由 GPT 决定）
+
+- **长驻 Orchestrator 进程仍是陈旧模块（只报告事实，不在本任务范围）**：GOLD-044 / GOLD-046 的
+  result 仍是 `status=completed` + `cline_finish_reason_raw=aborted`（GOLD-046 result 于 22:48
+  写入），而当前 Orchestrator 进程的启动时间（20:05）早于 GOLD-039 / GOLD-046 的源码修改 ⇒ 修复
+  只对**新进程加载**生效；本任务只验证新进程边界（GOLD-047 目标），**重启长驻进程属 operator /
+  Orchestrator 职责**，且绝不能靠改写历史 result 掩盖；
+- canary PASS 只是**回归事实**：GOLD-047 自身 result 的终态自洽、GOLD-044 等历史矛盾的裁决、
+  后续实质 review 与 `GPT_REVIEW_LEDGER` 追加 / `last_reviewed_task` 推进仍**只能由 GPT**
+  完成（工具绝不代写 / 代签 / 代推进）；
+- `PHASE3_3_DATA` 保持 BLOCKED；未进入 Phase 3.4，未跨 L3/L4；`LIVE_TRADING=false` /
+  `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
+
