@@ -628,7 +628,10 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   - `PROJECT_STATE.branch` 与 observed HEAD 分支漂移 ⇒ `STATE_BRANCH_DRIFT`；
   - `state` 声称的 `current_task` / `last_completed_task` / `task_queue` 声明与 results 事实
     漂移 ⇒ 复用 §2.5 的 `PROJECT_STATE_POINTER_*` / `QUEUE_DECLARATION_MISMATCH` /
-    `QUEUE_TASK_MISSING` 并叠加聚合标记 `STATE_RESULT_DRIFT`；
+    `QUEUE_TASK_MISSING`，并叠加聚合标记 `STATE_RESULT_DRIFT`（**GOLD-041 单一事实源**：该聚合
+    标记必须先在 `issues` 里作为真实 `error` issue 存在，再由 `blocking_reason_codes` 从
+    `issues` **投影** ⇒ `planner_mutation.blocking_reason_codes` 与 `issues` 的 gating ERROR
+    集合恒等，`drift.aggregate_code` 给出该标记；`warning` 只报告、不 gate）；
   - review backlog 事实来源不可用 ⇒ `REVIEW_BACKLOG_FACTS_UNAVAILABLE`。
 - **不阻塞正常执行**：`last_reviewed_task` 指针落后属于 **review backlog** 事实（§2.11 口径），
   只报告（`drift.review_pointer_codes`），**不**作为写队列 gate；`executor_execution_blocked=false`
@@ -646,10 +649,11 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   `.ai/results` / `.ai/PROJECT_STATE.json` / `.ai/GPT_REVIEW_LEDGER.json`。
 - **退出码**：`0` HEAD 一致且无事实漂移 / `2` fail-closed（stale / 漂移 / HEAD 不可解析）/
   `3` `PROJECT_STATE` 不可读 / `4` `--output` 被拒（此时绝不写文件）。
-- **回归测试**：`tests/unit/test_ai_orchestrator_planner_mutation_precondition.py`（24 项：
+- **回归测试**：`tests/unit/test_ai_orchestrator_planner_mutation_precondition.py`（26 项：
   事实包完整性、digest 幂等与内容敏感、stale / 非法 expected / HEAD 不可解析 / 各类 state
   漂移 fail-closed、**Executor completion push 让旧 precondition 失效且重读后可恢复**、
-  authority 与源码守卫、CLI fail-closed 与受控输出）+
+  authority 与源码守卫、CLI fail-closed 与受控输出，以及 **GOLD-041 的 issue/blocking
+  一致性三态**：真实 `STATE_RESULT_DRIFT` / 仅 review 指针滞后 / 两者并存）+
   `tests/integration/test_planner_mutation_precondition_regression.py`（5 项：真实仓库 HEAD /
   digest 由测试独立复算、漂移 gate 与独立复算一致、stale 只改变 HEAD 事实、CLI 幂等 + 前后
   零改写、Phase 3.3 blocker 与交易安全不变量不变）。

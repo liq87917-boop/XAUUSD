@@ -1920,11 +1920,17 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
   `STATE_RESULT_DRIFT`（并附带复用的 `PROJECT_STATE_POINTER_*` / `QUEUE_DECLARATION_MISMATCH` /
   `QUEUE_TASK_MISSING`）/ `REVIEW_BACKLOG_FACTS_UNAVAILABLE`；`last_reviewed_task` 落后只报告
   （review backlog 口径），不阻塞写队列；
+- **单一事实源（GOLD-041）**：聚合标记 `STATE_RESULT_DRIFT` 必须先在 `issues` 里作为真实
+  `error` issue 存在（`drift.aggregate_code` 给出该标记），再由 `blocking_reason_codes` 从
+  `issues` 投影 ⇒ `blocking_reason_codes` 与 `issues` 的 gating ERROR 集合**恒等**，
+  `warning` 只报告、不 gate；此前「blocking 含 `STATE_RESULT_DRIFT`、`issues` 却没有该事实」的
+  不一致被消除，**fail-closed 语义不变**（绝不删除 / 降级该标记）；
 - **退出码**：`0` 可安全写队列 / `2` fail-closed（stale / 漂移 / HEAD 不可解析）/
   `3` `PROJECT_STATE` 不可读 / `4` `--output` 目标被拒（守卫只允许 `.ai/runtime/**` 或系统临时目录，
   且 `.ai/**` 内除 `runtime` 外一律拒绝）；
-- **回归测试**：`tests/unit/test_ai_orchestrator_planner_mutation_precondition.py`（24 项，含
-  Executor completion push 让旧 precondition 失效、重读最新 HEAD 后可重新生成有效事实包）+
+- **回归测试**：`tests/unit/test_ai_orchestrator_planner_mutation_precondition.py`（26 项，含
+  Executor completion push 让旧 precondition 失效、重读最新 HEAD 后可重新生成有效事实包，以及
+  GOLD-041 的 issue/blocking 一致性三态：真实漂移 / 仅 review 滞后 / 两者并存）+
   `tests/integration/test_planner_mutation_precondition_regression.py`（5 项：真实仓库 HEAD /
   digest 由 `git` 与 `hashlib` 独立复算、前后零改写、CLI 幂等）；
 - **用法**（只读）：
@@ -2105,4 +2111,5 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 | **CI 必须提供完整可达历史** | `.github/workflows/ci.yml` 的 quality（py3.12 / 3.13）与 postgres 两个 job 均 `actions/checkout@v4` + `fetch-depth: 0`：§2.8 review binding / §2.9 ledger integrity / §2.11 backlog 必须独立重算历史完成 commit 的绑定；浅克隆由 `GIT_HISTORY_SHALLOW` 显式 fail-closed，绝不放宽 `COMPLETION_COMMIT_NOT_FOUND`（GOLD-040） |
 | **受控输出只写 runtime / 临时路径** | `orchestrator/planner_snapshot_output.py` 守卫：只允许 `<root>/.ai/runtime/**` 与系统临时目录；**只对** `<root>/.ai/runtime/**` 做确定性父目录准备（parents-only），`.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `src` / `database` 一律拒绝且零创建（GOLD-040） |
 | **跨平台 PID 探活 fail-safe** | `orchestrator.ai_orchestrator.running_process_image` / `is_pid_running`：Windows `tasklist` 与 POSIX `os.kill(pid, 0)` 共用同一三态契约，**探测失败一律按「存活」处理**（绝不放行清理仍存活的锁）（GOLD-040） |
+| **issue / blocking 集合必须同源** | `orchestrator/planner_mutation_precondition.py`：聚合门禁标记 `STATE_RESULT_DRIFT` 必须先是 `issues` 里的真实 `error` issue（`drift.aggregate_code`），`blocking_reason_codes` 只从 `issues` 的 gating ERROR 集合**投影** ⇒ 两者恒等；`warning` 只报告不 gate，review 指针滞后仍只报告（GOLD-041） |
 

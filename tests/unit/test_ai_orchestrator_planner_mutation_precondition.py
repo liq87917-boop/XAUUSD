@@ -368,6 +368,29 @@ def collect_string_values(payload: object) -> set[str]:
     return found
 
 
+def gating_issue_codes(payload: dict[str, Any]) -> list[str]:
+    """测试**自己**复算「issues 里的 gating ERROR fact」code 集合（独立于被测模块）。"""
+
+    return sorted(
+        {
+            str(issue["code"])
+            for issue in payload["issues"]
+            if issue["severity"] == planner.SEVERITY_ERROR
+            and not precondition.is_review_pointer_fact(issue)
+        }
+    )
+
+
+def aggregate_drift_issues(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """测试**自己**从 ``issues`` 里挑出聚合标记 ``STATE_RESULT_DRIFT`` 事实。"""
+
+    return [
+        issue
+        for issue in payload["issues"]
+        if issue["code"] == precondition.REASON_STATE_RESULT_DRIFT
+    ]
+
+
 # ============================================================
 # 1. 单个确定性事实包：HEAD / 队列 / state / 目录 digest / refill / backlog 指针
 # ============================================================
@@ -759,6 +782,112 @@ def test_review_pointer_lag_alone_does_not_block_planner_mutation(
     assert payload["summary"]["state_result_drift"] is False
     assert payload["planner_mutation"]["allowed"] is True
     assert payload["summary"]["exit_code"] == precondition.EXIT_OK
+
+    # GOLD-041：仅有 review 指针滞后时**不**产生聚合标记、也**不**产生任何 blocker；
+    # blocking 与 issues 的 gating ERROR 集合仍然恒等（单一事实源）。
+    assert payload["drift"]["aggregate_code"] is None
+    assert precondition.REASON_STATE_RESULT_DRIFT not in payload["reason_codes"]
+    assert aggregate_drift_issues(payload) == []
+    assert payload["planner_mutation"]["blocking_reason_codes"] == []
+    assert payload["planner_mutation"]["blocking_reason_codes"] == gating_issue_codes(payload)
+
+
+def test_state_result_drift_is_a_real_error_issue_with_consistent_blocking(
+    pc_fs: PreconditionFS,
+) -> None:
+    """GOLD-041：``STATE_RESULT_DRIFT`` 必须是 issues 里的真实 ERROR issue，且与 blocking 恒等。"""
+
+    seed_consistent_fs(pc_fs)
+
+    write_result(pc_fs.results, "GOLD-002")
+
+    write_task(pc_fs.tasks, "GOLD-003")
+
+    # 仅执行指针落后（last_completed_task 落后于 results）；review 指针与 results 一致。
+    write_state(
+        pc_fs.state,
+        current_task="GOLD-003",
+        last_completed_task="GOLD-001",
+        last_reviewed_task="GOLD-002",
+        task_queue=["GOLD-003"],
+    )
+
+    payload = build(pc_fs, expected_head_sha=HEAD_A)
+
+    aggregate = aggregate_drift_issues(payload)
+
+    assert len(aggregate) == 1
+    assert aggregate[0]["severity"] == planner.SEVERITY_ERROR
+    assert aggregate[0]["source"] == "orchestrator.planner_mutation_precondition"
+    assert planner.ISSUE_POINTER_BEHIND_RESULTS in aggregate[0]["detail"]
+
+    assert payload["drift"]["state_fact_codes"] == [planner.ISSUE_POINTER_BEHIND_RESULTS]
+    assert payload["drift"]["review_pointer_codes"] == []
+    assert payload["drift"]["aggregate_code"] == precondition.REASON_STATE_RESULT_DRIFT
+    assert payload["summary"]["state_result_drift"] is True
+
+    # 单一事实源：blocking 就是 issues 的 gating ERROR 集合（既不多也不少）。
+    assert payload["planner_mutation"]["blocking_reason_codes"] == gating_issue_codes(payload)
+    assert payload["planner_mutation"]["blocking_reason_codes"] == [
+        planner.ISSUE_POINTER_BEHIND_RESULTS,
+        precondition.REASON_STATE_RESULT_DRIFT,
+    ]
+    assert set(payload["planner_mutation"]["blocking_reason_codes"]) <= set(payload["reason_codes"])
+
+    # fail-closed 不弱化
+    assert payload["planner_mutation"]["allowed"] is False
+    assert payload["planner_mutation"]["forbidden"] is True
+    assert payload["planner_mutation"]["requires_reread"] is True
+    assert payload["summary"]["exit_code"] == precondition.EXIT_FAIL_CLOSED
+    assert payload["planner_mutation"]["execution_blocked"] is False
+
+
+def test_state_result_drift_and_review_pointer_lag_coexist_consistently(
+    pc_fs: PreconditionFS,
+) -> None:
+    """两者并存：真漂移照旧 gate（聚合 fact 与底层 code 同一来源），review 滞后只报告。"""
+
+    seed_consistent_fs(pc_fs)
+
+    write_result(pc_fs.results, "GOLD-002")
+
+    write_task(pc_fs.tasks, "GOLD-003")
+
+    write_state(
+        pc_fs.state,
+        current_task="GOLD-003",
+        last_completed_task="GOLD-001",
+        last_reviewed_task="GOLD-001",
+        task_queue=["GOLD-003"],
+    )
+
+    payload = build(pc_fs, expected_head_sha=HEAD_A)
+
+    blocking = payload["planner_mutation"]["blocking_reason_codes"]
+
+    assert blocking == gating_issue_codes(payload)
+    assert blocking == [
+        planner.ISSUE_POINTER_BEHIND_RESULTS,
+        precondition.REASON_STATE_RESULT_DRIFT,
+    ]
+    assert payload["drift"]["state_fact_codes"] == [planner.ISSUE_POINTER_BEHIND_RESULTS]
+    assert payload["drift"]["review_pointer_codes"] == [planner.ISSUE_POINTER_BEHIND_RESULTS]
+    assert payload["drift"]["aggregate_code"] == precondition.REASON_STATE_RESULT_DRIFT
+    assert payload["summary"]["exit_code"] == precondition.EXIT_FAIL_CLOSED
+
+    # 每个 blocker 都必须有**非 review 指针**的 ERROR fact 支撑
+    # （同一个稳定 code 可能同时来自执行指针与 review 指针，按 issue 来源逐条核对）。
+    for code in blocking:
+        assert any(
+            issue["code"] == code
+            and issue["severity"] == planner.SEVERITY_ERROR
+            and not precondition.is_review_pointer_fact(issue)
+            for issue in payload["issues"]
+        ), code
+
+    # review 指针滞后的事实确实被报告（只报告），且聚合标记不是 review 指针 code。
+    assert any(precondition.is_review_pointer_fact(issue) for issue in payload["issues"])
+    assert payload["drift"]["aggregate_code"] not in precondition.POINTER_REASON_CODES
 
 
 # ============================================================

@@ -5448,3 +5448,65 @@ record 之间的绑定）**没有被一次性验证**。真实证据到来时才
   `GIT_HISTORY_SHALLOW` 并停线，绝不静默重算；
 - 建议下一步（由 GPT 决定）：CI 转绿后 review GOLD-036~040，再决定是否解除 `PHASE3_3_DATA` 相关阻塞。
 
+- 建议下一步（由 GPT 决定）：CI 转绿后 review GOLD-036~040，再决定是否解除 `PHASE3_3_DATA` 相关阻塞。
+
+## GOLD-041：planner mutation 门禁集合一致性（`STATE_RESULT_DRIFT` 单一事实源）
+
+### 1. 背景 / 问题
+
+- GOLD-040 之后 GitHub Actions（Python 3.12 / 3.13，完整可达历史）稳定失败于
+  `tests/integration/test_planner_mutation_precondition_regression.py::test_cli_is_idempotent_ascii_and_zero_write`；
+- **根因**（本地同仓库状态即可复现）：`planner_mutation.blocking_reason_codes` 里的聚合标记
+  `STATE_RESULT_DRIFT` 是 `blocking_reason_codes()` 内部**临时 `codes.add(...)`** 出来的，
+  payload 的 `issues` 里**没有对应事实** ⇒ 同一门禁事实在 issues / blocking 两个集合里表示
+  不一致（测试按 `issues` 的 gating ERROR 集合复算时必然发现「blocking 多出
+  `STATE_RESULT_DRIFT`」）；
+- 另外 `blocking_reason_codes` 由「各来源 code 直接并集」组装、`issues` 另行组装，
+  review 指针滞后（`last_reviewed_task`）与执行指针漂移共用**同一**稳定 code
+  `PROJECT_STATE_POINTER_BEHIND_RESULTS`，使「按 code 集合比较」的断言在两者并存时自相矛盾
+  （把「review 滞后不 gate」误写成「该 code 不得出现在 blocking」）。
+
+### 2. 变更（最小范围）
+
+- `orchestrator/planner_mutation_precondition.py`：
+  - 新增单一事实源 `gating_error_issues()`（`error` 且非 review 指针 fact）/
+    `state_result_drift_codes()` / `state_result_drift_issues()`：聚合标记 `STATE_RESULT_DRIFT`
+    **先成为 `issues` 里的真实 `error` issue**（detail 列出底层 code），再由
+    `blocking_reason_codes(issues)` 从 issue 集合**投影** ⇒ 两者恒等；
+  - `blocking_reason_codes()` 只做集合投影（不再自行 `codes.add(STATE_RESULT_DRIFT)`），
+    并只认 `error` 级别（与 `planner_snapshot` 退出码口径一致；`warning` 只报告、不 gate）；
+  - `drift` 新增机器可读 `aggregate_code`；`OWN_BLOCKING_REASON_CODES` 目录补入该聚合 code；
+  - **fail-closed 不变**：不删除 / 不降级 `STATE_RESULT_DRIFT`，不改 GOLD-038 的
+    「review 指针滞后只报告、不 gate」语义，不改任何其它 blocker 分类。
+- `tests/integration/test_planner_mutation_precondition_regression.py`：两处「按 code 集合比较」
+  断言改为**按 issue 来源**核对 + `blocking_reason_codes == issues 的 gating ERROR 集合` 恒等
+  断言（真实仓库上正好覆盖「执行指针漂移 + review 指针滞后并存」场景），不再有任何按 code
+  集合的伪否定。
+- `tests/unit/test_ai_orchestrator_planner_mutation_precondition.py`（24 → 26 项）：新增
+  「真实 `STATE_RESULT_DRIFT` 必须是真实 ERROR issue 且与 blocking 恒等」与
+  「真漂移 + review 滞后并存一致」两项；并扩展现有「仅 review 滞后」用例（无聚合标记、
+  blocking 为空、exit 0）。
+- 文档：`.ai/DEVELOPMENT_PROTOCOL.md` §2.12 与 `README.md`（工具段 + 约束速查表）同步
+  单一事实源口径与测试计数；历史 GOLD-038 日志条目不改写。
+
+### 3. 验证
+
+- 复现：修复前 `pytest tests/integration/test_planner_mutation_precondition_regression.py -q`
+  稳定 `1 failed`（`Extra items in the left set: 'STATE_RESULT_DRIFT'`）；
+- 修复后：`pytest tests/unit/test_ai_orchestrator_planner_mutation_precondition.py -q`
+  → 26 passed；真实仓库 CLI 事实包中 `STATE_RESULT_DRIFT` 已是 `issues` 里的 `error` issue，
+  `blocking_reason_codes` 与 `issues` 的 gating ERROR 集合逐项相等，退出码仍为 `2`；
+- 全量门禁：`pytest tests -q`、`ruff check .`、`mypy config database src scripts`（全部通过）；
+- 未修改 `.ai/tasks/**` / `.ai/results/**` / `.ai/PROJECT_STATE.json` /
+  `.ai/GPT_REVIEW_LEDGER.json`、`.github/workflows/**`、`src/alpha/**`、`src/execution/**`、
+  `database/**`、`data/**`；未新增依赖；Cline 未执行任何 Git 写操作。
+
+### 4. 遗留 / 下一步
+
+- GOLD-035 / GOLD-039 历史 `completed` + raw `aborted` 矛盾、Phase 3.3 blocker、L3/L4、
+  GPT 独占规划权与交易安全开关**全部未变**；
+- 真实仓库当前仍处于「`PROJECT_STATE` 执行指针落后于 results」的真实漂移（只报告、绝不自动
+  改写），`STATE_RESULT_DRIFT` 继续 fail-closed（exit `2`）；
+- 建议下一步（由 GPT 决定）：CI 转绿后 review GOLD-036~041，再决定是否解除
+  `PHASE3_3_DATA` 相关阻塞。
+

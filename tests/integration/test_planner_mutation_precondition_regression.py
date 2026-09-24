@@ -245,12 +245,28 @@ def test_state_result_drift_gate_matches_independent_recomputation(head_sha: str
     # （同一个稳定 code 可能同时来自执行指针与 review 指针，因此按 issue 来源逐条核对。）
     assert set(drift["review_pointer_codes"]) <= set(drift["codes"])
 
-    for code in payload["planner_mutation"]["blocking_reason_codes"]:
-        if code == precondition.REASON_STATE_RESULT_DRIFT:
-            continue
+    # GOLD-041 单一事实源：`blocking_reason_codes` 必须与 issues 的 gating ERROR fact 集合
+    # **恒等**，聚合标记 `STATE_RESULT_DRIFT` 也必须是其中一条真实 ERROR issue。
+    gating_error_codes = sorted(
+        {
+            str(issue["code"])
+            for issue in payload["issues"]
+            if issue["severity"] == planner.SEVERITY_ERROR
+            and not precondition.is_review_pointer_fact(issue)
+        }
+    )
 
+    assert payload["planner_mutation"]["blocking_reason_codes"] == gating_error_codes
+
+    assert drift["aggregate_code"] == (
+        precondition.REASON_STATE_RESULT_DRIFT if drift["state_fact_codes"] else None
+    )
+
+    for code in payload["planner_mutation"]["blocking_reason_codes"]:
         assert any(
-            issue["code"] == code and not precondition.is_review_pointer_fact(issue)
+            issue["code"] == code
+            and issue["severity"] == planner.SEVERITY_ERROR
+            and not precondition.is_review_pointer_fact(issue)
             for issue in payload["issues"]
         ), code
 
@@ -336,16 +352,21 @@ def test_cli_is_idempotent_ascii_and_zero_write(head_sha: str) -> None:
     else:
         assert run_first.returncode == precondition.EXIT_OK
 
-    # 被报告的 review 指针事实就是不 gate 的那一类：它们只能出现在 issues 里，
-    # 绝不出现在 blocking_reason_codes（否则会阻塞 GPT planner 的合法写入）。
-    assert set(payload["planner_mutation"]["blocking_reason_codes"]) <= set(gating_error_codes)
+    # GOLD-041 单一事实源：`blocking_reason_codes` 必须与 issues 里的 gating ERROR 集合
+    # **恒等** —— 包括聚合标记 STATE_RESULT_DRIFT 也必须是真实 ERROR issue；既不允许多出
+    # 无事实支撑的 code，也不允许真实 gating fact 被漏掉。
+    assert payload["planner_mutation"]["blocking_reason_codes"] == gating_error_codes
 
+    # review 指针滞后（`last_reviewed_task`）只报告、绝不作为 gate 依据：每个 blocking code 都
+    # 必须有**非 review 指针**的 ERROR issue 支撑。同一个稳定 code 可能同时来自执行指针与
+    # review 指针，因此按 issue 来源逐条核对，而不是按 code 集合比较。
     for code in payload["planner_mutation"]["blocking_reason_codes"]:
-        assert code not in {
-            str(issue["code"])
+        assert any(
+            issue["code"] == code
+            and not precondition.is_review_pointer_fact(issue)
             for issue in payload["issues"]
-            if precondition.is_review_pointer_fact(issue)
-        }, code
+            if issue["severity"] == planner.SEVERITY_ERROR
+        ), code
 
     # 库 API 与 CLI 必须给出同一份事实包（同一 digest）
     assert (

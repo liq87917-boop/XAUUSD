@@ -146,10 +146,14 @@ POINTER_REASON_CODES = (
 REVIEW_POINTER_DETAIL_PREFIX = "last_reviewed_task"
 
 # 本模块自己的 blocked code（其余 blocked code 动态来自 planner snapshot 的 error issue）。
+# ``REASON_STATE_RESULT_DRIFT`` 是**聚合**门禁标记：它必须先在 ``issues`` 里作为真实 ERROR
+# issue 存在（见 :func:`state_result_drift_issues`），再由 :func:`blocking_reason_codes` 从
+# issue 集合**投影**出来 —— 绝不允许它只在 blocking 里凭空出现（GOLD-041）。
 OWN_BLOCKING_REASON_CODES = (
     REASON_STALE_REMOTE_HEAD,
     REASON_EXPECTED_HEAD_SHA_INVALID,
     REASON_STATE_BRANCH_DRIFT,
+    REASON_STATE_RESULT_DRIFT,
     REASON_REVIEW_BACKLOG_FACTS_UNAVAILABLE,
 )
 
@@ -238,6 +242,50 @@ def is_review_pointer_fact(issue: dict[str, Any]) -> bool:
     return str(issue.get("code")) in POINTER_REASON_CODES and str(issue.get("detail")).startswith(
         REVIEW_POINTER_DETAIL_PREFIX
     )
+
+
+def gating_error_issues(issues: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """真正的 gate fact：``error`` 级别且**非** ``last_reviewed_task`` 指针事实（§2.11 只报告）。"""
+
+    return [
+        issue
+        for issue in issues
+        if str(issue.get("severity")) == planner.SEVERITY_ERROR
+        and not is_review_pointer_fact(issue)
+    ]
+
+
+def state_result_drift_codes(snapshot_issues: Sequence[dict[str, Any]]) -> list[str]:
+    """聚合标记 ``STATE_RESULT_DRIFT`` 的**底层**稳定 code（唯一事实源）。"""
+
+    return sorted(
+        {str(issue.get("code")) for issue in gating_error_issues(snapshot_issues)}
+        & set(STATE_FACT_REASON_CODES)
+    )
+
+
+def state_result_drift_issues(snapshot_issues: Sequence[dict[str, Any]]) -> list[dict[str, str]]:
+    """把聚合标记 ``STATE_RESULT_DRIFT`` 变成**真实 ERROR issue**（与 blocking 同一事实源）。
+
+    GOLD-041：该聚合标记以前只出现在 ``planner_mutation.blocking_reason_codes``，``issues``
+    里没有对应事实 ⇒ 同一门禁在 issue / blocking 两个集合里不一致。现在它由
+    :func:`state_result_drift_codes` 单一事实源派生：先成为 ERROR issue，再由
+    :func:`blocking_reason_codes` 从 issue 集合投影出来。
+    """
+
+    codes = state_result_drift_codes(snapshot_issues)
+
+    if not codes:
+        return []
+
+    return [
+        own_issue(
+            REASON_STATE_RESULT_DRIFT,
+            "state 声称与 results 事实漂移（"
+            + ", ".join(codes)
+            + "）：禁止 planner mutation；只报告，绝不改写 PROJECT_STATE / results",
+        )
+    ]
 
 
 def file_facts(path: Path) -> tuple[int | None, str | None]:
@@ -640,19 +688,19 @@ def drift_facts(
         issue for issue in snapshot_issues if issue.get("severity") == planner.SEVERITY_ERROR
     ]
 
-    gating_issues = [issue for issue in error_issues if not is_review_pointer_fact(issue)]
+    gating_issues = gating_error_issues(snapshot_issues)
 
     codes = sorted({str(issue.get("code")) for issue in error_issues})
 
-    state_fact_codes = sorted(
-        {str(issue.get("code")) for issue in gating_issues} & set(STATE_FACT_REASON_CODES)
-    )
+    # 聚合标记与 blocking code 共用**同一**事实源（GOLD-041）。
+    state_fact_codes = state_result_drift_codes(snapshot_issues)
 
     review_pointer_codes = sorted(
         {str(issue.get("code")) for issue in error_issues if is_review_pointer_fact(issue)}
     )
 
     return {
+        "aggregate_code": REASON_STATE_RESULT_DRIFT if state_fact_codes else None,
         "branch_fact_codes": sorted({str(code) for code in branch_codes}),
         "codes": codes,
         "current_task_pointer": pointer.get("current_task"),
@@ -674,37 +722,29 @@ def drift_facts(
     }
 
 
-def blocking_reason_codes(
-    *,
-    head_issues: Sequence[dict[str, str]],
-    snapshot_issues: Sequence[dict[str, str]],
-    branch_issues: Sequence[dict[str, str]],
-    backlog_issues: Sequence[dict[str, str]],
-) -> list[str]:
+def blocking_reason_codes(issues: Sequence[dict[str, Any]]) -> list[str]:
     """决定「能否安全写队列」的稳定 code 集合（fail-closed；任一命中即禁止）。
 
+    **单一事实源（GOLD-041）**：只从最终 ``issues`` **投影** —— 每个 blocking code 都必须由一条
+    ``error`` 且非 review 指针的 fact 支撑，反之每条这样的 fact 都必须是 blocker。因此
+    ``planner_mutation.blocking_reason_codes`` 与 ``issues`` 的 gating ERROR 集合**恒等**，
+    不会出现「聚合标记 ``STATE_RESULT_DRIFT`` 只在 blocking 里、却不在 issues 里」的不一致。
+
     - HEAD 相关：``STALE_REMOTE_HEAD`` / ``EXPECTED_HEAD_SHA_INVALID`` /
-      ``GIT_INFO_UNAVAILABLE``（``head_issues``）；
-    - state 分支漂移：``STATE_BRANCH_DRIFT``（``branch_issues``）；
-    - state 声称 vs results 事实漂移：复用 planner snapshot 的稳定 code，并叠加聚合标记
-      ``STATE_RESULT_DRIFT``；``last_reviewed_task`` 指针类 issue 属于 review backlog 事实，
-      只报告、不阻塞（见 ``REVIEW_POINTER_DETAIL_PREFIX``）；
+      ``GIT_INFO_UNAVAILABLE``（HEAD fact）；
+    - state 分支漂移：``STATE_BRANCH_DRIFT``；
+    - state 声称 vs results 事实漂移：复用 planner snapshot 的稳定 code，并叠加同源聚合标记
+      ``STATE_RESULT_DRIFT``（由 :func:`state_result_drift_issues` 生成、必须先是真实 issue）；
+    - ``last_reviewed_task`` 指针落后 / 超前属于 review backlog 事实（§2.11），只报告、
+      **不**阻塞写队列（见 ``REVIEW_POINTER_DETAIL_PREFIX``）；
     - 其它 planner snapshot error issue（task 文件损坏 / 依赖环 / Gate 不一致 / 安全不变量缺失
       等）同样说明事实不可信 ⇒ 一并禁止（**绝不**只挑一部分漂移来看）。
+
+    本函数**绝不**自行新增 / 删除 code（``warning`` 只报告、不 gate，与 ``planner_snapshot``
+    的退出码口径一致）。
     """
 
-    codes: set[str] = {issue["code"] for issue in head_issues}
-    codes |= {issue["code"] for issue in branch_issues}
-    codes |= {issue["code"] for issue in backlog_issues}
-
-    gating_snapshot = [issue for issue in snapshot_issues if not is_review_pointer_fact(issue)]
-
-    if {issue["code"] for issue in gating_snapshot} & set(STATE_FACT_REASON_CODES):
-        codes.add(REASON_STATE_RESULT_DRIFT)
-
-    codes |= {issue["code"] for issue in gating_snapshot}
-
-    return sorted(codes)
+    return sorted({str(issue.get("code")) for issue in gating_error_issues(issues)})
 
 
 # ============================================================
@@ -936,22 +976,27 @@ def build_planner_mutation_precondition(
 
     branch_issues = state_branch_drift_issues(state, remote_head)
 
-    blocking = blocking_reason_codes(
-        head_issues=head_issues,
-        snapshot_issues=snapshot_issues,
-        branch_issues=branch_issues,
-        backlog_issues=backlog_issues,
-    )
+    # GOLD-041：聚合标记 STATE_RESULT_DRIFT 必须先成为**真实 ERROR issue**（单一事实源），
+    # 再由 blocking_reason_codes 从 issue 集合投影 ⇒ issue / blocking 恒等（fail-closed 不变）。
+    drift_issues = state_result_drift_issues(snapshot_issues)
 
     issues = sorted(
         {
             (issue["code"], issue["severity"], issue["detail"]): issue
-            for issue in [*snapshot_issues, *head_issues, *backlog_issues, *branch_issues]
+            for issue in [
+                *snapshot_issues,
+                *head_issues,
+                *backlog_issues,
+                *branch_issues,
+                *drift_issues,
+            ]
         }.values(),
         key=lambda issue: (issue["code"], issue["detail"]),
     )
 
-    reason_codes = sorted({issue["code"] for issue in issues} | set(blocking))
+    blocking = blocking_reason_codes(issues)
+
+    reason_codes = sorted({issue["code"] for issue in issues})
 
     error_count = sum(1 for issue in issues if issue["severity"] == planner.SEVERITY_ERROR)
 
