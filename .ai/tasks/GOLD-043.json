@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-043",
+  "type": "CONTROL_PLANE_LEGACY_REVIEW_EVIDENCE_MANIFEST",
+  "title": "建立历史矛盾任务的确定性裁决证据包",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-042"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "为 GPT 裁决历史 terminal inconsistency 提供单一、只读、确定性的证据 manifest，汇总原 result、completion commit、task、diff 范围、validation 与矛盾事实，但绝不自行得出 PASS/FAIL 或签发裁决。",
+  "requirements": [
+    "新增只读 evidence manifest builder/CLI，复用 review_binding、result_terminal_consistency 与 Git 只读白名单的既有事实算法，不另造 result/commit 身份口径。",
+    "逐项输出 task/result sha256、completion commit sha/branch/subject、changed paths、validation return codes、terminal consistency findings、现有 ledger/adjudication 状态与稳定 reason codes。",
+    "manifest 覆盖 last_reviewed_task 之后的完整 backlog，明确区分 facts-ready、needs-gpt-adjudication、pending-substantive-review 与 invalid；不得把测试通过或 exit_code=0 自动等同于 GPT PASS。",
+    "facts_digest 排除 wall-clock；相同仓库事实输出必须确定一致。默认 stdout 只读，显式 --output 仅允许 .ai/runtime 或系统临时目录。",
+    "工具不得联网、不得写 tasks/results/state/ledger/adjudication、不得调用模型、不得推进 review pointer。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "PROGRESS_LOG.md", "TECH_DEBT.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**", "data/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；证据工具只产事实，不产 verdict 或裁决。",
+    "不得重写历史 result、伪造 validation/CI/evidence，或弱化 GOLD-039 terminal-consistency 门禁。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 可从一个确定性 manifest 审核全部历史矛盾项及普通 pending 项，且每项身份可独立复算。",
+    "任何缺 commit、hash 漂移、矛盾裁决或不完整事实均 fail-closed；工具无法自签 review/adjudication。",
+    "全量 pytest/ruff/mypy 通过；Phase 3.3 blocker、L3/L4、GPT 独占权与交易安全开关不变。"
+  ]
+}

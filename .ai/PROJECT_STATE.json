@@ -4,14 +4,19 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-041",
-  "last_completed_task": "GOLD-040",
+  "current_task": "GOLD-042",
+  "last_completed_task": "GOLD-041",
   "last_reviewed_task": "GOLD-027",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "Business Phase 3.3 evidence remains blocked pending legally authorized Author/News evidence with trustworthy independent time/availability semantics. Separately, GOLD-040 commit 02467e0e8a8b405820a56bfef2d47eab2d9d5dae passed local pytest/ruff/mypy but GitHub CI run 35940864242 failed the same planner mutation precondition regression on Python 3.12 and 3.13: STATE_RESULT_DRIFT appears in planner_mutation.blocking_reason_codes without the corresponding gating ERROR issue set. GOLD-041 is the only newly approved task and is limited to restoring that fail-closed issue/blocking consistency; GOLD-036..040 remain pending GPT substantive review until CI is green.",
+      "detail": "Business Phase 3.3 evidence remains blocked pending legally authorized Author/News evidence with trustworthy independent time/availability semantics. This blocker remains independent of the control-plane review recovery queue and must not be treated as resolved by code, tests, CI, review adjudication, or ledger closure.",
       "retryable": false
+    },
+    {
+      "code": "GPT_REVIEW_TERMINAL_HISTORY",
+      "detail": "Formal review remains continuous only through GOLD-027. GOLD-036 and GOLD-037 have individually complete review-binding facts, but cannot be appended past unresolved earlier gaps. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, and GOLD-041 are fail-closed because their immutable legacy results record status=completed while the final raw finish_reason=aborted. No historical result or ledger entry was rewritten. GOLD-042..045 provide the approved recovery path: GPT-only adjudication contract, deterministic evidence manifest, strict binding/integrity integration, then atomic closure preflight.",
+      "retryable": true
     }
   ],
   "resolved_blockers": [
@@ -34,9 +39,13 @@
     {
       "code": "GPT_REVIEW_LEDGER_BOOTSTRAP",
       "resolved_by": "2026-09-23: GPT created .ai/GPT_REVIEW_LEDGER.json with cryptographically bound PASS reviews for GOLD-025 through GOLD-027 and advanced last_reviewed_task to GOLD-027."
+    },
+    {
+      "code": "GOLD_041_CI_RECOVERY",
+      "resolved_by": "2026-09-24: GOLD-041 commit 0a9234b84f1dc7e39870c821c2a7db82a2f319c9 restored STATE_RESULT_DRIFT issue/blocking consistency; GitHub Actions CI #151 attempt 2 passed Python 3.12, Python 3.13, and PostgreSQL jobs."
     }
   ],
-  "next_action": "Execute GPT-approved GOLD-041 only. Restore fail-closed consistency between STATE_RESULT_DRIFT issue facts and planner_mutation.blocking_reason_codes, then require GitHub CI Python 3.12/3.13 green. Do not create unrelated work. After CI is green, GPT must substantively review GOLD-036..040 (and recovery GOLD-041 as applicable) before any further queue refill.",
+  "next_action": "Execute GPT-approved GOLD-042 through GOLD-045 in order. Build a GPT-only, content-bound recovery path for immutable legacy completed+aborted results, produce deterministic adjudication evidence, integrate only valid GPT adjudications into review binding/integrity, and add an atomic closure preflight. Do not rewrite history or auto-sign review. After GOLD-045 is complete and CI is green, GPT must adjudicate the historical contradictions and substantively review the continuous backlog before advancing last_reviewed_task.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -57,7 +66,7 @@
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ],
   "queue_target_size": 3,
-  "task_queue": ["GOLD-041"],
+  "task_queue": ["GOLD-042", "GOLD-043", "GOLD-044", "GOLD-045"],
   "queue_status": "ACTIVE",
   "planner_lookahead_size": 3
 }

@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-042",
+  "type": "CONTROL_PLANE_LEGACY_RESULT_ADJUDICATION_CONTRACT",
+  "title": "建立历史 Result 矛盾的 GPT 专属裁决契约",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-041"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "为不可改写的 legacy result（顶层 completed、最终 raw finish_reason=aborted）建立独立、可加密绑定、仅 GPT 可签发的裁决契约，使后续 review closure 有合法恢复路径；原 result 必须保持逐字节不变。",
+  "requirements": [
+    "新增版本化 legacy result adjudication schema、只读 validator 与 CLI；裁决必须绑定原 result sha256、completion commit sha/branch、task id、裁决类型、GPT reviewer identity、理由摘要与时间，任一身份漂移均 fail-closed。",
+    "裁决记录必须与 .ai/results 分离，且不得替换、归一化、删除或静默修补任何历史 result；validator 必须持续原样报告原始 terminal contradiction reason code。",
+    "只有 reviewer_role=GPT 且 reviewer 为允许的 planner identity 才能形成有效裁决；Cline/DeepSeek/Executor、未知身份、重复或冲突裁决一律拒绝。",
+    "本任务只实现契约、validator、CLI、文档与测试，不得由 Executor 创建真实 GPT 裁决、写 GPT_REVIEW_LEDGER、推进 last_reviewed_task 或修改 PROJECT_STATE。",
+    "覆盖当前已知矛盾集合 GOLD-028、GOLD-031、GOLD-035、GOLD-038、GOLD-039、GOLD-040、GOLD-041 的 fixture/回归形状，但不得把 fixture 当作真实裁决。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "PROGRESS_LOG.md", "TECH_DEBT.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**", "data/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行已批准任务且不得签发裁决。",
+    "历史 result 与现有 GPT Review Ledger 只读；禁止以迁移、格式化或兼容名义改写。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "历史矛盾有独立、确定性、GPT-only 且内容身份绑定的合法裁决契约；原 result 的 sha256 与字节保持不变。",
+    "缺失、越权、重复、冲突、过期或身份不匹配裁决全部 fail-closed，且原始 contradiction 继续显式可见。",
+    "全量 pytest/ruff/mypy 通过；Phase 3.3 blocker、L3/L4、GPT 独占权与交易安全开关不变。"
+  ]
+}

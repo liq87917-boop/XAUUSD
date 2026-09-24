@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-045",
+  "type": "CONTROL_PLANE_REVIEW_CLOSURE_MUTATION_PRECONDITION",
+  "title": "建立 GPT Review 收口写入前的原子一致性预检",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-044"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "在 GPT 最终写入历史裁决、Review Ledger 与 PROJECT_STATE 之前提供单一只读预检，证明候选收口保持连续性、身份绑定和安全不变量，防止只写一半造成新的 ledger/state drift。",
+  "requirements": [
+    "新增只读 review closure precondition/CLI，组合最新 HEAD、result/task digests、legacy adjudication 校验、review binding/backlog/integrity 与 PROJECT_STATE 候选指针事实；任何 stale 或不连续候选均 fail-closed。",
+    "候选输入只允许来自显式临时文件或 stdin，工具不得直接写 adjudication、ledger、state、tasks 或 results；不得提供 --apply、--fix、--advance、--sign 等变更开关。",
+    "预检必须拒绝 ledger chain gap、PASS 越过未裁决矛盾、result/commit/hash 漂移、非 GPT 裁决、last_reviewed_task 超前或倒退、Phase3_3 blocker 被删除、Phase 3.4 提前进入、交易安全开关变化。",
+    "预检必须区分 candidate-ready 与 committed-current；候选通过不等于已完成 review，也不得触发 Executor 写入或自动 push。",
+    "提供确定性 digest 与稳定 reason codes，补充端到端零写入、幂等、Windows/Linux 路径和 stale HEAD 回归测试。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "PROGRESS_LOG.md", "TECH_DEBT.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**", "data/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；预检工具只验证候选，不签发或应用任何变更。",
+    "历史 result 永久只读；不得弱化 GOLD-039 terminal-consistency 或 ledger 连续性门禁。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 可在真实写入前一次性验证 adjudication、ledger、state 与 HEAD 的原子一致性；任一部分 stale/缺失/越权/不连续均 fail-closed。",
+    "工具保持严格零写入且不能把候选通过误报为 review 已完成或 Phase gate 已解除。",
+    "全量 pytest/ruff/mypy 通过；Phase 3.3 blocker、L3/L4、GPT 独占权与交易安全开关不变。"
+  ]
+}

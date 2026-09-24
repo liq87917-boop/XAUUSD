@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-044",
+  "type": "CONTROL_PLANE_REVIEW_CLOSURE_INTEGRATION",
+  "title": "将有效 GPT 历史裁决接入 Review Binding 与连续性门禁",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-043"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "把 GOLD-042 的有效 GPT-only legacy adjudication 作为独立补充事实接入 review binding/backlog/ledger integrity，使已裁决的历史矛盾可被 GPT 后续实质 review，同时任何未裁决或无效矛盾继续 fail-closed。",
+  "requirements": [
+    "review_binding 对 legacy contradiction 默认行为保持 facts_complete=false；仅当存在 schema 合法、GPT 权威有效、原 result/commit 身份完全匹配且不冲突的裁决时，才可把该项标记为 adjudicated facts-ready。",
+    "即使裁决有效，manifest 仍必须保留原始 contradiction finding、原 result sha256 与 adjudication identity；不得删除、降级或伪装历史事实。",
+    "review_backlog、review_ledger_integrity、planner mutation precondition 与 refill diagnostics 复用同一裁决事实，稳定区分 unresolved contradiction、adjudicated pending review、bound review 与 identity drift。",
+    "有效裁决只恢复 GPT 实质 review 的可能性，不自动产生 PASS/FAIL、不自动写 ledger、不自动推进 last_reviewed_task、不自动解除 PHASE3_3_DATA 或决定 Phase。",
+    "增加端到端回归：无裁决 fail-closed、合法裁决 facts-ready、越权/漂移/重复裁决 fail-closed、原始历史文件零改写、ledger 连续性仍严格执行。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": ["orchestrator/**", "tests/unit/**", "tests/integration/**", ".ai/DEVELOPMENT_PROTOCOL.md", "README.md", "PROGRESS_LOG.md", "TECH_DEBT.md"],
+    "forbidden_paths": [".ai/tasks/**", ".ai/results/**", ".ai/PROJECT_STATE.json", ".ai/GPT_REVIEW_LEDGER.json", "src/alpha/**", "src/execution/**", "database/**", "data/**"]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Executor 不得签裁决、签 review、改状态或生成后续任务。",
+    "历史 result 永久只读；GOLD-039 terminal-consistency 的未来写入门禁不得弱化。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "合法 GPT 裁决可以在不改写历史 result 的前提下恢复事实可绑定性；未裁决或无效矛盾仍稳定 fail-closed。",
+    "裁决不等于 review verdict，不能自动推进 ledger/state/Phase；所有身份和连续性门禁保持可审计。",
+    "全量 pytest/ruff/mypy 通过；Phase 3.3 blocker、L3/L4、GPT 独占权与交易安全开关不变。"
+  ]
+}
