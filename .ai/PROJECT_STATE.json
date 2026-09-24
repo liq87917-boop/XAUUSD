@@ -4,13 +4,13 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-040",
-  "last_completed_task": "GOLD-039",
+  "current_task": "GOLD-041",
+  "last_completed_task": "GOLD-040",
   "last_reviewed_task": "GOLD-027",
   "blockers": [
     {
       "code": "PHASE3_3_DATA",
-      "detail": "Business Phase 3.3 evidence remains blocked pending legally authorized Author/News evidence with trustworthy independent time/availability semantics. Separately, GitHub CI run 35869237769 fails 17 control-plane tests on Python 3.12/3.13 after GOLD-039; GOLD-040 is the only newly approved task and is limited to CI/history/runtime/PID/terminal-consistency portability recovery.",
+      "detail": "Business Phase 3.3 evidence remains blocked pending legally authorized Author/News evidence with trustworthy independent time/availability semantics. Separately, GOLD-040 commit 02467e0e8a8b405820a56bfef2d47eab2d9d5dae passed local pytest/ruff/mypy but GitHub CI run 35940864242 failed the same planner mutation precondition regression on Python 3.12 and 3.13: STATE_RESULT_DRIFT appears in planner_mutation.blocking_reason_codes without the corresponding gating ERROR issue set. GOLD-041 is the only newly approved task and is limited to restoring that fail-closed issue/blocking consistency; GOLD-036..040 remain pending GPT substantive review until CI is green.",
       "retryable": false
     }
   ],
@@ -36,7 +36,7 @@
       "resolved_by": "2026-09-23: GPT created .ai/GPT_REVIEW_LEDGER.json with cryptographically bound PASS reviews for GOLD-025 through GOLD-027 and advanced last_reviewed_task to GOLD-027."
     }
   ],
-  "next_action": "Execute GPT-approved GOLD-040 only as blocker-facing/control-plane recovery. Fix GitHub CI Python 3.12/3.13 failures from run 35869237769 without altering PHASE3_3_DATA, L3/L4 gates, GPT-exclusive planning, LIVE_TRADING=false, or ALLOW_EXTERNAL_ORDER_SUBMISSION=false. After CI is green, GPT must review GOLD-036..040 before adding further blocker-facing work.",
+  "next_action": "Execute GPT-approved GOLD-041 only. Restore fail-closed consistency between STATE_RESULT_DRIFT issue facts and planner_mutation.blocking_reason_codes, then require GitHub CI Python 3.12/3.13 green. Do not create unrelated work. After CI is green, GPT must substantively review GOLD-036..040 (and recovery GOLD-041 as applicable) before any further queue refill.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -57,9 +57,7 @@
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4"
   ],
   "queue_target_size": 3,
-  "task_queue": [
-    "GOLD-040"
-  ],
+  "task_queue": ["GOLD-041"],
   "queue_status": "ACTIVE",
   "planner_lookahead_size": 3
 }
