@@ -1,0 +1,62 @@
+{
+  "task_id": "GOLD-041",
+  "type": "CONTROL_PLANE_CI_STATE_RESULT_DRIFT_RECOVERY",
+  "title": "修复 CI planner mutation 的 STATE_RESULT_DRIFT 门禁集合一致性",
+  "max_attempts": 3,
+  "depends_on": ["GOLD-040"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": "L1",
+  "goal": "仅修复 GOLD-040 后 GitHub Actions Python 3.12/3.13 稳定失败的 planner mutation precondition 回归：blocking_reason_codes 含 STATE_RESULT_DRIFT，但测试计算的 gating_error_codes 未包含它，导致同一门禁事实的 issue/blocking 集合不一致。保持 fail-closed，不得删除、降级或掩盖真实 STATE_RESULT_DRIFT。",
+  "requirements": [
+    "先在完整 Git 历史的 Linux/CI 语义下复现 tests/integration/test_planner_mutation_precondition_regression.py::test_cli_is_idempotent_ascii_and_zero_write 的失败，并定位 STATE_RESULT_DRIFT 为什么进入 planner_mutation.blocking_reason_codes 却未进入该 payload 的 gating error issue 集合。",
+    "建立单一事实源：STATE_RESULT_DRIFT 若是有效 mutation blocker，必须以一致的 ERROR issue/门禁事实参与 gating_error_codes 与 blocking_reason_codes；不得通过从 blocking_reason_codes 删除 STATE_RESULT_DRIFT、改成 warning、跳过断言或伪造 PROJECT_STATE/result 来让 CI 变绿。",
+    "保持 GOLD-038 的 review-pointer-lag 非 gate 语义；只修 STATE_RESULT_DRIFT 与 issue/blocking 集合的契约一致性，不扩大或缩小其他 blocker 分类。",
+    "补充最小回归测试，覆盖真实 STATE_RESULT_DRIFT、仅 review pointer lag、以及两者并存时的 exit_code/blocking_reason_codes 一致性。",
+    "不得改写 .ai/results/GOLD-035.json、GOLD-039.json、GOLD-040.json 或 GPT Review Ledger；历史 completed+aborted/状态漂移事实必须继续被客观暴露。",
+    "本地全量 pytest/ruff/mypy 必须通过；提交后 GitHub Actions Python 3.12 与 3.13 pytest 必须通过，PostgreSQL native schema+seeds 不得回退。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/planner_mutation_precondition.py",
+      "orchestrator/planner_snapshot_output.py",
+      "orchestrator/review_binding.py",
+      "tests/integration/test_planner_mutation_precondition_regression.py",
+      "tests/unit/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行本任务。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4，不得跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "STATE_RESULT_DRIFT 必须保持 fail-closed；禁止为了 CI 通过而弱化审计/一致性门禁。",
+    "不得弱化 source authorization/robots/certificate/data-availability 等安全门禁。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/integration/test_planner_mutation_precondition_regression.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "STATE_RESULT_DRIFT 在 issues、gating facts、blocking_reason_codes 与 exit_code 之间具有单一一致语义，并继续 fail-closed。",
+    "test_cli_is_idempotent_ascii_and_zero_write 在 Linux/CI 完整历史下通过，且 review pointer lag 单独存在时仍不 gate。",
+    "本地全量 pytest/ruff/mypy 通过；GitHub Actions Python 3.12/3.13 pytest 均通过，PostgreSQL job 保持通过。",
+    "不改写任何历史 result/ledger，不改变 Phase 3.3 blocker、L3/L4、GPT 独占规划权或交易安全开关。"
+  ]
+}
