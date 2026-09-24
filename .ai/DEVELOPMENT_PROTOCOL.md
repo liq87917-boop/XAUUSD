@@ -791,3 +791,64 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
 
 
 
+## 2.15 历史 Result 矛盾的 GPT 专属裁决契约（GOLD-042）
+
+- **为什么**：§2.13 让历史矛盾（`status=completed` + 最终 attempt raw `finish_reason=aborted`）
+  fail-closed 暴露，但没有**恢复路径**；§2.15 增加**独立、确定性、GPT-only、内容身份绑定**的
+  裁决契约，只恢复「GPT 可对该历史矛盾做实质 review」的可能性，**绝不**改写 / 归一化 /
+  删除历史 result，也绝不由 Executor 代签（Executor 只实现契约、validator、CLI、文档与测试）。
+- **唯一规则来源**：`orchestrator/legacy_result_adjudication.py`（只读、纯函数、零外部进程、
+  零网络、零数据库、零模型调用）。矛盾判定继续复用 §2.13
+  `orchestrator.result_terminal_consistency`；result canonical sha256 / completion commit
+  identity 继续复用 §2.8 `orchestrator.review_binding`（**不存在第二套身份算法**）。
+- **契约**：`schema=gold-ai/legacy-result-adjudication/v1` + `schema_version=1`；store
+  `gold-ai/legacy-result-adjudication-store/v1`，唯一 canonical 位置
+  `.ai/adjudications/legacy_result_adjudications.json`（与 `.ai/results` **物理分离**，
+  本工具绝不写 `.ai/results` / 绝不创建裁决 store）。
+- **裁决条目**（缺任一必填字段 ⇒ fail-closed）：`adjudication_id` / `task_id` /
+  `adjudication_type`（唯一合法值 `legacy_terminal_contradiction`）/ `reviewer` /
+  `reviewer_role=GPT` / `reason_summary` / `adjudicated_at`（带时区 ISO）/ 可选 `expires_at` /
+  `bound_result{sha256,status}` / `bound_commit{sha,branch}` / `contradiction_reason_codes`。
+- **GPT-only**：只有 `reviewer` 命中 §2.5 planner 身份（`PLANNER_AGENTS=("gpt",)`）且
+  `reviewer_role=GPT` 才是有效裁决；Cline / DeepSeek ⇒ `ADJUDICATION_EXECUTOR_FORBIDDEN`，
+  未知身份 ⇒ `ADJUDICATION_REVIEWER_NOT_AUTHORIZED`。
+- **fail-closed（稳定 reason code）**：store 缺失 / 不可读 / schema 不支持 /
+  `adjudications` 非数组；条目非对象 / 缺字段；task_id 非法；同一 store 内
+  `adjudication_id` 重复（`ADJUDICATION_ID_DUPLICATE`）、同一 task 多条完全相同
+  （`ADJUDICATION_TASK_ID_DUPLICATE`）或内容不同（`ADJUDICATION_TASK_ID_CONFLICT`）；
+  越权 / 未知身份 / reviewer_role 非法；理由摘要缺失；时间戳非法 / 无时区；`expires_at`
+  非法、缺 `--as-of` 无法证明未过期（`ADJUDICATION_EXPIRY_UNVERIFIABLE`）或已过期
+  （`ADJUDICATION_EXPIRED`）；绑定形状非法；contradiction code 不在官方词表；
+  **身份漂移**：`ADJUDICATION_RESULT_SHA256_DRIFT` / `..._RESULT_STATUS_DRIFT` /
+  `..._COMMIT_SHA_DRIFT` / `..._COMMIT_BRANCH_DRIFT` / `..._CONTRADICTION_CODES_DRIFT`；
+  live 事实不完整（`ADJUDICATION_LIVE_FACTS_INCOMPLETE`）；对**自洽** result 误签裁决
+  （`ADJUDICATION_RESULT_NOT_CONTRADICTORY`）。
+- **原矛盾始终可见**：报告逐任务给出 `original_contradiction`（来自 §2.13 的唯一判定，
+  含原始 reason code 与细节）；裁决有效 / 无效都不改变该事实，绝不删除、降级或伪装。
+- **退出码**：`0` 全部请求任务均为有效裁决（或不存在需要裁决的矛盾）/ `2` fail-closed
+  （缺失 / 越权 / 重复 / 冲突 / 过期 / 漂移 / 无效）。
+- **职责边界（不可协商）**：`authority` / `contract` 机器可读声明
+  `writes_adjudications` / `writes_results` / `writes_tasks` / `writes_project_state` /
+  `writes_review_ledger` 全为 `false`，且 `tool_can_sign_adjudication=false` /
+  `tool_can_sign_review=false` / `tool_can_repair_result=false` /
+  `tool_can_advance_state=false` / `tool_can_lift_phase_blocker=false` /
+  `executor_can_adjudicate=false` / `adjudication_implies_verdict=false` /
+  `adjudication_advances_review_pointer=false` / `adjudication_lifts_phase3_3_blocker=false`；
+  裁决**不**产生 PASS/FAIL、**不**写 `GPT_REVIEW_LEDGER`、**不**推进 `last_reviewed_task`、
+  **不**解除 `PHASE3_3_DATA`、**不**决定 Phase（源码守卫测试锁定）。
+- **已知矛盾集合**：`GOLD-028 / 031 / 035 / 038 / 039 / 040 / 041` 只作为 CLI 默认巡检与
+  fixture / 回归形状参考（`KNOWN_CONTRADICTION_TASKS`）；**fixture 绝不是真实裁决** ——
+  当前仓库不存在任何真实 GPT 裁决，`unadjudicated` + fail-closed（exit `2`）才是正确事实。
+- **不破坏既有链路**：§2.13 写入前门禁与 Review 层 fail-closed 暴露、§2.8 / §2.9 / §2.11 /
+  §2.12 事实链、rolling queue、Git 恢复状态机、L1~L4 档位、Phase 3.3 data blocker、
+  `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 全部不变。
+- **回归测试**：`tests/unit/test_legacy_result_adjudication.py`（48 项：GPT-only 身份、
+  契约 / authority 只读边界、有效裁决、越权 / 未知身份、缺失字段、重复 / 冲突 / 过期、
+  五类身份漂移、store 顶层契约、确定性 digest 与 ASCII 渲染、CLI 只读行为、7 项已知矛盾
+  fixture 形状）+ `tests/integration/test_legacy_result_adjudication_regression.py`（11 项：
+  7 个真实矛盾 result 的身份由 raw `git` + `hashlib` **独立复算**、`.ai/results` 全树 /
+  `PROJECT_STATE` / `GPT_REVIEW_LEDGER` 前后字节一致、CLI 确定性 ASCII、§2.13 fail-closed
+  暴露未被弱化、Executor 未创建真实裁决 store）。
+
+
+

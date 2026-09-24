@@ -1,0 +1,79 @@
+{
+  "task_id": "GOLD-042",
+  "title": "建立历史 Result 矛盾的 GPT 专属裁决契约",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "completed",
+  "finished_at": "2026-09-24T20:30:43+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M PROGRESS_LOG.md",
+    " M README.md",
+    "?? orchestrator/legacy_result_adjudication.py",
+    "?? tests/integration/test_legacy_result_adjudication_regression.py",
+    "?? tests/unit/test_legacy_result_adjudication.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 61 +++++++++++++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 69 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                   | 50 ++++++++++++++++++++++++++++++++\n 3 files changed, 180 insertions(+)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-24T20:05:46+08:00",
+      "finished_at": "2026-09-24T20:30:43+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "completed",
+      "normalized_finish_reason": "completed",
+      "finish_reason": "completed",
+      "cline_finish_reason_raw": "completed",
+      "model": "deepseek-flash",
+      "iterations": 98,
+      "duration_ms": 994302,
+      "usage": {
+        "inputTokens": 15672353,
+        "outputTokens": 117631,
+        "cacheReadTokens": 15537024,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.13748902200000002
+      },
+      "cline_final_text": "Submission recorded (verified): ## 完成内容（GOLD-042：历史 Result 矛盾的 GPT 专属裁决契约）\n\n**1) 新增只读契约模块 `orchestrator/legacy_result_adjudication.py`（33 个函数，零写入路径、零外部进程）**\n- 版本化 schema：`gold-ai/legacy-result-adjudication/v1` + `schema_version=1`；store `gold-ai/legacy-result-adjudication-store/v1`，唯一 canonical 位置 `.ai/adjudications/legacy_result_adjudications.json`，与 `.ai/results` **物理分离**（绝不替换/归一化/删除/静默修补历史 result）。\n- 裁决绑定：`adjudication_id` / `task_id` / `adjudication_type`（唯一合法值 `legacy_terminal_contradiction`）/ `reviewer` + `reviewer_role=GPT` / `reason_summary` / `adjudicated_at`（带时区）/ 可选 `expires_at` / `bound_result{sha256,status}` / `bound_commit{sha,branch}` / `contradiction_reason_codes`。\n- GPT-only：仅 `orchestrator.planner_snapshot.PLANNER_AGENTS=(\"gpt\",)` 且 `reviewer_role=GPT` 有效；Cline/DeepSeek ⇒ `ADJUDICATION_EXECUTOR_FORBIDDEN`，未知身份 ⇒ `ADJUDICATION_REVIEWER_NOT_AUTHORIZED`。\n- fail-closed 稳定 reason code：store 缺失/不可读/schema 不支持/条目非法、重复（`ADJUDICATION_TASK_ID_DUPLICATE`/`ADJUDICATION_ID_DUPLICATE`）、冲突（`..._TASK_ID_CONFLICT`）、过期（`..._EXPIRED`/`..._EXPIRY_UNVERIFIABLE`）、五类身份漂移（result sha256 / status / commit sha / branch / contradiction codes）、live 事实不完整、对自洽 result 误签裁决。\n- **原始矛盾持续原样可见**：逐任务回显由 `orchestrator.result_terminal_consistency`（唯一规则）算出的 legacy contradiction reason code，裁决有效/缺失都不删除、降级或伪装。\n- 身份来源单一：result canonical sha256 / completion commit 复用 `orchestrator.review_binding`（§2.8），无第二套身份算法；`authority`/`contract` 机器可读声明 `writes_*=false`、`tool_can_sign_adjudication/review=false`、`adjudication_implies_verdict=false`、`adjudication_advances_review_pointer=false`、`adjudication_lifts_phase3_3_blocker=false`。\n- CLI `python -m orchestrator.legacy_result_adjudication [--task ...] [--as-of ...]`（ASCII JSON stdout，退出码 `0`/`2`）。\n\n**2) 新增测试**：`tests/unit/test_legacy_result_adjudication.py`（48 项，含 GOLD-028/031/035/038/039/040/041 fixture 形状参数化、五类漂移、重复/冲突/过期、源码守卫、CLI）＋ `tests/integration/test_legacy_result_adjudication_regression.py`（11 项，真实仓库：7 个矛盾 result 身份用 raw `git ls-tree`+`cat-file blob`+`hashlib` 独立复算、`.ai/results` 全树 / `PROJECT_STATE` / `GPT_REVIEW_LEDGER` 前后字节一致、CLI 确定性 ASCII、§2.13 fail-closed 未弱化）。\n\n**3) 文档**：`.ai/DEVELOPMENT_PROTOCOL.md` 新增 §2.15；`README.md` 工具段 + 约束速查表新增一行；`PROGRESS_LOG.md` 新增 GOLD-042 条目。\n\n## 修改/新增文件\n- 修改：`.ai/DEVELOPMENT_PROTOCOL.md`、`README.md`、`PROGRESS_LOG.md`\n- 新增：`orchestrator/legacy_result_adjudication.py`、`tests/unit/test_legacy_result_adjudication.py`、`tests/integration/test_legacy_result_adjudication_regression.py`\n- 未触碰 `.ai/tasks/**`、`.ai/results/**`、`.ai/PROJECT_STATE.json`、`.ai/GPT_REVIEW_LEDGER.json`、`.github/workflows/**`、`src/**`、`database/**`、`data/**`（`git status --porcelain` 仅上述 6 项）\n\n## 测试结果（实测输出）\n- `pytest tests -q` → **3667 passed, 1 skipped in 497.96s**（无 failed/error）\n- 控制面子集（orchestrator 全部单测/集成 + 文档守卫 + 配置/编码/懒导出/Phase3 守卫）→ **876 passed in 130.76s**\n- 新增两文件 → **59 passed in 5.66s**\n- `ruff check .` → **All checks passed!**\n- `mypy config database src scripts` → **Success: no issues found in 183 source files**\n- 真实仓库 CLI：7 个已知矛盾全部 `unadjudicated` + `ADJUDICATION_STORE_MISSING`，退出码 `2`；`.ai/adjudications` 目录与 store 文件**均不存在**（Executor 未创建任何真实 GPT 裁决）\n\n## acceptance 判定\n- ✅ 历史矛盾有独立、确定性、GPT-only、内容身份绑定的合法裁决契约；原 result sha256 与字节保持不变（集成测试逐个参数化验证）。\n- ✅ 缺失/越权/重复/冲突/过期/身份不匹配裁决全部 fail-closed，且原始 contradiction 继续显式可见。\n- ✅ 全量 pytest/ruff/mypy 通过；Phase 3.3 blocker、L3/L4、GPT 独占权、`LIVE_TRADING=false`、`ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 未变。\n\n## 遗留问题 / 下一步\n- 当前仓库**不存在**任何真实 GPT 裁决（属正确事实，由 GPT 后续按 §2.15 手写/生成）；工具只产事实，裁决 ≠ Review PASS，不写台账、不推进 `last_reviewed_task`、不解除 `PHASE3_3_DATA`。\n- 建议下一步（由 GPT 决定）：GOLD-043 的只读证据 manifest 可直接复用本契约的 `original_contradiction` / `adjudication` 事实与 `review_binding` 身份口径。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M PROGRESS_LOG.md",
+        " M README.md",
+        "?? orchestrator/legacy_result_adjudication.py",
+        "?? tests/integration/test_legacy_result_adjudication_regression.py",
+        "?? tests/unit/test_legacy_result_adjudication.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md | 61 +++++++++++++++++++++++++++++++++++++++\n PROGRESS_LOG.md             | 69 +++++++++++++++++++++++++++++++++++++++++++++\n README.md                   | 50 ++++++++++++++++++++++++++++++++\n 3 files changed, 180 insertions(+)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  1%]\n........................................................................ [  3%]\n........................................................................ [  5%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 13%]\n........................................................................ [ 15%]\n........................................................................ [ 17%]\n........................................................................ [ 19%]\n........................................................................ [ 21%]\n........................................................................ [ 23%]\n........................................................................ [ 25%]\n........................................................................ [ 27%]\n........................................................................ [ 29%]\n........................................................................ [ 31%]\n........................................................................ [ 33%]\n........................................................................ [ 35%]\n........................................................................ [ 37%]\n........................................................................ [ 39%]\n........................................................................ [ 41%]\n........................................................................ [ 43%]\n........................................................................ [ 45%]\n........................................................................ [ 47%]\n........................................................................ [ 49%]\n........................................................................ [ 51%]\n........................................................................ [ 52%]\n........................................................................ [ 54%]\n........................................................................ [ 56%]\n........................................................................ [ 58%]\n........................................................................ [ 60%]\n........................................................................ [ 62%]\n........................................................................ [ 64%]\n........................................................................ [ 66%]\n........................................................................ [ 68%]\n........................................................................ [ 70%]\n........................................................................ [ 72%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 78%]\n........................................................................ [ 80%]\n........................................................................ [ 82%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 94%]\n........................................................................ [ 96%]\n........................................................................ [ 98%]\n.......................s............................................     [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3667 passed, 1 skipped in 496.97s (0:08:16)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 183 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}

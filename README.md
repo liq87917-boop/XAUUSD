@@ -1944,6 +1944,55 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
   ```
 
 
+### 历史 Result 矛盾的 GPT 专属裁决契约（`orchestrator/legacy_result_adjudication.py`，GOLD-042）
+
+> **合规红线**：本项**只读、纯函数** —— 不签发裁决、不写 `.ai/adjudications/**` /
+> `.ai/GPT_REVIEW_LEDGER.json` / `.ai/PROJECT_STATE.json` / tasks / results，不改写任何历史
+> result 的字节，不推进 `last_reviewed_task`、不决定 Phase、不解除 `PHASE3_3_DATA`；
+> `LIVE_TRADING=false` / `ALLOW_EXTERNAL_ORDER_SUBMISSION=false` 不变。
+
+- **一句话**：§2.13（GOLD-039）把历史矛盾（`GOLD-028 / 031 / 035 / 038 / 039 / 040 / 041`：
+  顶层 `status=completed` + 最终 attempt raw `finish_reason=aborted`）显式 fail-closed 暴露，
+  但没有恢复路径；本契约给出**独立、确定性、仅 GPT 可签发、内容身份绑定**的裁决记录，
+  使 GPT 后续能合法做实质 review，**原 result 逐字节不变**；
+- **契约**：`schema=gold-ai/legacy-result-adjudication/v1` + `schema_version=1`；裁决记录存于
+  `.ai/adjudications/legacy_result_adjudications.json`（与 `.ai/results` **物理分离**），
+  每条绑定 `task_id` / `adjudication_type` / `reviewer` + `reviewer_role=GPT` /
+  `reason_summary` / `adjudicated_at`（+ 可选 `expires_at`）/ `bound_result{sha256,status}` /
+  `bound_commit{sha,branch}` / `contradiction_reason_codes`；
+- **GPT-only**：`reviewer` 必须是 §2.5 planner 身份（`PLANNER_AGENTS=("gpt",)`）且
+  `reviewer_role=GPT`；Cline / DeepSeek ⇒ `ADJUDICATION_EXECUTOR_FORBIDDEN`，未知身份 ⇒
+  `ADJUDICATION_REVIEWER_NOT_AUTHORIZED`；
+- **fail-closed（稳定 reason code）**：store 缺失 / schema 不支持 / 条目非法；重复
+  （`ADJUDICATION_TASK_ID_DUPLICATE` / `ADJUDICATION_ID_DUPLICATE`）、冲突
+  （`ADJUDICATION_TASK_ID_CONFLICT`）、过期（`ADJUDICATION_EXPIRED` /
+  `ADJUDICATION_EXPIRY_UNVERIFIABLE`）、身份漂移（`ADJUDICATION_RESULT_SHA256_DRIFT` /
+  `..._RESULT_STATUS_DRIFT` / `..._COMMIT_SHA_DRIFT` / `..._COMMIT_BRANCH_DRIFT` /
+  `..._CONTRADICTION_CODES_DRIFT`）、live 事实不完整
+  （`ADJUDICATION_LIVE_FACTS_INCOMPLETE`）、对自洽 result 误签裁决
+  （`ADJUDICATION_RESULT_NOT_CONTRADICTORY`）；
+- **原始矛盾始终可见**：报告逐任务回显 §2.13 的 `original_contradiction`（原因码 + 细节），
+  裁决无效 / 缺失都不删除、不降级、不伪装历史事实；
+- **裁决 ≠ Review verdict**：不产生 PASS/FAIL、不写台账、不推进 review 指针、不解除
+  `PHASE3_3_DATA`（`authority` / `contract` 段机器可读锁定，源码守卫测试校验）；
+- **身份单一来源**：矛盾判定复用 `orchestrator.result_terminal_consistency`，result canonical
+  sha256 / completion commit identity 复用 `orchestrator.review_binding`（§2.8），
+  **不存在第二套身份算法**；
+- **退出码**：`0` 全部有效裁决 / `2` fail-closed；**回归测试**：
+  `tests/unit/test_legacy_result_adjudication.py`（48 项）+
+  `tests/integration/test_legacy_result_adjudication_regression.py`（11 项：7 个真实矛盾
+  result 身份由 raw `git` + `hashlib` 独立复算、前后零改写、Executor 未创建真实裁决）；
+- **用法**（只读）：
+
+  ```bash
+  # 巡检当前已知矛盾集合（不存在真实裁决 ⇒ 全部 unadjudicated，退出码 2）
+  .venv\Scripts\python.exe -m orchestrator.legacy_result_adjudication
+
+  # 单任务 + 显式参照时间（用于裁决有效期判定）
+  .venv\Scripts\python.exe -m orchestrator.legacy_result_adjudication --task GOLD-035 --as-of 2026-09-24T00:00:00+08:00
+  ```
+
+
 ## 8. 数据模型
 
 
@@ -2112,4 +2161,5 @@ blockers=['PHASE3_3_DATA']), ensure_ascii=True))"
 | **受控输出只写 runtime / 临时路径** | `orchestrator/planner_snapshot_output.py` 守卫：只允许 `<root>/.ai/runtime/**` 与系统临时目录；**只对** `<root>/.ai/runtime/**` 做确定性父目录准备（parents-only），`.ai/tasks` / `.ai/results` / `.ai/PROJECT_STATE.json` / `src` / `database` 一律拒绝且零创建（GOLD-040） |
 | **跨平台 PID 探活 fail-safe** | `orchestrator.ai_orchestrator.running_process_image` / `is_pid_running`：Windows `tasklist` 与 POSIX `os.kill(pid, 0)` 共用同一三态契约，**探测失败一律按「存活」处理**（绝不放行清理仍存活的锁）（GOLD-040） |
 | **issue / blocking 集合必须同源** | `orchestrator/planner_mutation_precondition.py`：聚合门禁标记 `STATE_RESULT_DRIFT` 必须先是 `issues` 里的真实 `error` issue（`drift.aggregate_code`），`blocking_reason_codes` 只从 `issues` 的 gating ERROR 集合**投影** ⇒ 两者恒等；`warning` 只报告不 gate，review 指针滞后仍只报告（GOLD-041） |
+| **历史矛盾裁决必须 GPT-only 且内容身份绑定** | `orchestrator/legacy_result_adjudication.py`：裁决记录与 `.ai/results` 物理分离（`.ai/adjudications/legacy_result_adjudications.json`），必须绑定原 result sha256/status + completion commit sha/branch + 原始 contradiction codes + GPT reviewer 身份/理由/时间；Cline / DeepSeek / 未知身份、重复 / 冲突 / 过期 / 五种身份漂移一律 fail-closed，原 result 逐字节不变，裁决 ≠ Review PASS、不推进指针、不解除 `PHASE3_3_DATA`（GOLD-042） |
 
