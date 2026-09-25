@@ -1,0 +1,64 @@
+{
+  "task_id": "GOLD-050",
+  "type": "CONTROL_PLANE_LEGACY_RESULT_ADJUDICATION_FOR_GOLD047",
+  "title": "为 GOLD-047 历史终态矛盾建立合法 GPT 裁决候选包",
+  "max_attempts": 3,
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": true,
+  "human_gate": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
+  "goal": "复用 GOLD-042/043/044 已交付的 legacy adjudication 契约与 evidence manifest，为 GOLD-047 不可变结果（commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b，status=completed 而最终 attempt raw finish_reason=aborted）生成一份只读的、内容寻址的、GPT-only 的裁决候选包与校验输出。本任务不写任何真实裁决、不动历史 result、不写 GPT_REVIEW_LEDGER、不推进 last_reviewed_task、不修改 PROJECT_STATE；只能生成候选材料与校验报告，交回 GPT 由 GPT 决定是否签发正式裁决。",
+  "requirements": [
+    "使用 orchestrator/review_evidence_manifest.py（GOLD-043）对 GOLD-047 生成 manifest，逐项输出 task/result sha256、completion commit sha/branch/subject、changed paths、validation return codes、terminal consistency findings 与既有 ledger/adjudication 状态；不得复制或改写 .ai/results 原文件。",
+    "使用 orchestrator/legacy_result_adjudication.py（GOLD-042）对上述 manifest 做只读校验：证明当前 store 中不存在 GOLD-047 的有效裁决，并输出会触发 fail-closed 的所有真实条件（例如 result sha256 不匹配、commit sha 不匹配、reviewer_role 非 GPT 等）作为候选人需要满足的字段清单。",
+    "生成一份 draft adjudication 候选 JSON（含 task_id、result_sha256、result_status、completion_commit sha/branch、原始 contradiction codes、建议 reviewer_role=GPT、建议 reviewer、建议 rationale 摘要与会话时间占位）并落盘于显式 --output 指定的 .ai/runtime/** 或系统临时目录；该候选 JSON 必须 1) 不含任何签名字段或决定性 verdict，2) 在首行注释/字段中显式标记 draft=true, signed=false, GPT 决定后才能生效。",
+    "工具与测试均不得写 .ai/adjudications/**、.ai/results/**、.ai/GPT_REVIEW_LEDGER.json、.ai/PROJECT_STATE.json、.ai/tasks/**；不得创建新的真实 GPT 裁决；不得推进 review 指针；不得解除 PHASE3_3_DATA。",
+    "补充回归：1) 现有 adjudication store 中无 GOLD-047 裁决时，manifest 分类为 needs-gpt-adjudication；2) 若在该 manifest 基础上把 result_sha256 或 commit_sha 改成错误值，校验必须 fail-closed 并输出稳定 reason code；3) 生成两次 candidate draft，其除去非确定性字段后的内容摘要必须稳定；4) 全流程 pytest 结束后 .ai/adjudications、.ai/results、.ai/GPT_REVIEW_LEDGER.json、.ai/PROJECT_STATE.json 的 sha256 不变。",
+    "不引入任何真实网络访问、不接入任何外部模型 API、不新增采集；不得修改 .github/workflows/**。",
+    "本地全量 pytest/ruff/mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL 三个 job 必须通过。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/review_evidence_manifest.py",
+      "orchestrator/legacy_result_adjudication.py",
+      "orchestrator/**",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行本任务，不得签发任何裁决，不得生成后续任务，不得推进 Phase。",
+    "历史 result/ledger/state/adjudication 永久只读；本任务不得以任何形式改写或删除既有审计事实。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "本任务禁止在无 fresh-process 证据的情况下 auto_start；由宿主人工解除 human gate 后再执行。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GOLD-047 的候选裁决包可按内容寻址稳定生成，且 draft JSON 明确标记 signed=false，未被错误接受为真实裁决。",
+    "对错误 result sha256 / commit sha 的候选，legacy_result_adjudication 校验稳定 fail-closed 并输出稳定 reason code。",
+    "运行本任务全流程后 .ai/adjudications、.ai/results、.ai/GPT_REVIEW_LEDGER.json、.ai/PROJECT_STATE.json 的 sha256 与运行前完全一致。",
+    "本地全量 pytest/ruff/mypy 通过；GitHub Actions Python 3.12/3.13/PostgreSQL 三项通过。",
+    "不改写任何历史 result/ledger/state/adjudication，不改变 Phase 3.3 blocker、L3/L4，不改变交易安全开关。"
+  ]
+}

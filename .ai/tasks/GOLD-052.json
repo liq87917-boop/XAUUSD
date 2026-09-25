@@ -1,0 +1,63 @@
+{
+  "task_id": "GOLD-052",
+  "type": "CONTROL_PLANE_FAILCLOSED_BACKLOG_READONLY_REPORT",
+  "title": "为 fail-closed 历史任务建立只读清单与 GPT-only 决策包生成器",
+  "max_attempts": 3,
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": true,
+  "human_gate": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
+  "goal": "当前 PROJECT_STATE 明确列出 GOLD-028、GOLD-031、GOLD-035、GOLD-038、GOLD-039、GOLD-040、GOLD-041、GOLD-044、GOLD-046、GOLD-047 因历史终态不一致而 fail-closed。建立一个只读报告工具，把这些任务的「历史事实 + 现有裁决状态 + 是否可被 GOLD-042 契约恢复绑定」一次性聚合成确定性、可复核的清单，供 GPT 逐项内容级复审；工具不得产生 PASS/FAIL，不得推进任何指针，不得写任何审计文件。",
+  "requirements": [
+    "新增只读 CLI `scripts/failclosed_backlog_report.py`，复用 orchestrator/review_evidence_manifest.py（GOLD-043）与 orchestrator/legacy_result_adjudication.py（GOLD-042）的既有事实算法；不得另造 result/commit 身份口径。",
+    "对 PROJECT_STATE 中 GPT_REVIEW_TERMINAL_HISTORY / RESULT_TERMINAL_CONSISTENCY_RECURRENCE 阻塞码所覆盖的每个历史任务，逐项输出：task_id、result sha256、completion commit sha、原始 contradiction codes、当前 store 中是否存在匹配裁决、裁决→是否内容身份绑定匹配、以及需要 GPT 复核的最小事实集合（不得自行产出 verdict）。",
+    "分类严格四态：`no-contradiction`、`needs-gpt-adjudication`、`adjudicated-pending-gpt-substantive-review`、`invalid`；任何缺 commit / hash 不匹配 / 裁决冲突 / store 损坏一律 `invalid` fail-closed。",
+    "默认 dry-run 与只写 stdout；仅当显式 `--output` 时落盘，且仅允许 `.ai/runtime/**` 或系统临时目录（复用 GOLD-040 的受控输出白名单）。输出必须内容寻址、不含 wall-clock 字段。",
+    "工具与测试都不得写 .ai/tasks/**、.ai/results/**、.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/adjudications/**；不得调用模型；不得访问网络；不得修改 .github/workflows/**。",
+    "补充回归：1) 当前仓库状态下，输出包含 GOLD-047 且分类为 `needs-gpt-adjudication`；2) GOLD-028/031/035/038/039/040/041/044/046 分类结果稳定且可复算；3) 输入 hash 被篡改的候选 → `invalid` fail-closed；4) 相同输入的 `--output` 两次生成内容摘要稳定；5) 全流程不改变 .ai/adjudications、.ai/results、.ai/GPT_REVIEW_LEDGER.json、.ai/PROJECT_STATE.json 的 sha256。",
+    "本地全量 pytest/ruff/mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL 三个 job 必须通过。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/**",
+      "scripts/failclosed_backlog_report.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；本任务只产出只读清单，不产生 verdict、不写裁决、不推进指针。",
+    "历史 result/ledger/state/adjudication 永久只读；本任务输出必须与既有审计事实逐项一致。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "本任务禁止在无 fresh-process 证据的情况下 auto_start；由宿主人工解除 human gate 后再执行。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "GPT 可从一个确定性、只读、内容寻址的清单中逐项复核所有 fail-closed 历史任务与其裁决可行性，且清单不产生 PASS/FAIL。",
+    "任何 hash/commit 不匹配、裁决缺失或不一致、store 损坏均稳定 fail-closed 且分类为 invalid。",
+    "运行本任务不改变 .ai/adjudications、.ai/results、.ai/GPT_REVIEW_LEDGER.json、.ai/PROJECT_STATE.json 的 sha256。",
+    "本地全量 pytest/ruff/mypy 通过；GitHub Actions Python 3.12/3.13/PostgreSQL 三项通过。",
+    "不改写历史 result/ledger/state/adjudication，不改变 Phase 3.3 blocker、L3/L4 与交易安全开关。"
+  ]
+}

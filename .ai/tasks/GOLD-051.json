@@ -1,0 +1,64 @@
+{
+  "task_id": "GOLD-051",
+  "type": "CONTROL_PLANE_FRESH_PROCESS_EVIDENCE_STATE",
+  "title": "把 fresh-process / CI 状态机化为可复核的门禁状态文件与回归",
+  "max_attempts": 3,
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": true,
+  "human_gate": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
+  "goal": "消除 CONTROL_PLANE_FRESH_PROCESS_RESTART 的证据判定歧义：由 executor 单方面落盘的自证文本（如 .ai/ci_evidence/fresh_process_restart_evidence.md 由 CI 提交）会让人工门禁失去可判定性。本任务把该门禁由自由文本证据改为机读、可校验、内容寻址的状态文件，且只允许由明确的 CLI 显式执行写入（不得由 CI 或任何自动化流水线自动生成），并在测试中强制「CI 环境中不得创建该文件」、「未显式调用 CLI 时文件不存在视作 gate 未清除」。",
+  "requirements": [
+    "设计版本化 schema `fresh-process-restart-evidence-v1`：必须包含 operator_identity、restart_commit_sha（须 = 本地 HEAD = origin/cline-agent HEAD，且 >= 490c1decf1ba4b316019c7a272726d04601b8fab）、old_pid_terminated（列表 + 终止方式 + 终止时间）、new_process_pid、new_process_started_at、head_check_cmd_and_output、git_fetch_or_pull_cmd_and_output、CI_run_id 与 CI_run_conclusion_on_restart_commit、以及 human_attestation 字段（自由文本声明 + 时间戳 + 主体身份）。",
+    "提供只读校验器：给定 candidate 状态文件与当前仓库 HEAD，稳定判定 cleared / not_cleared / invalid，并输出稳定 reason codes（例如 HEAD_MISMATCH、RESTART_COMMIT_PRECEDES_MIN_SNAPSHOT、CI_NOT_GREEN、MISSING_OPERATOR_IDENTITY、MISSING_HUMAN_ATTESTATION）。",
+    "提供显式 CLI `scripts/record_fresh_process_evidence.py`，仅当检测到非 CI 环境（例如 GITHUB_ACTIONS/CI 环境变量未设置、且进程交互 TTY）时才允许写文件；在 CI 环境中运行必须 fail-closed 并以非零退出码退出，且不写文件。",
+    "在测试中强制：pytest 运行前后 `.ai/ci_evidence/fresh_process_restart_evidence.json` 必须不存在（若存在且不符合 schema 则 fail；本任务不得删除已存在的人工文件，只对新建路径负责）。",
+    "不得改写或删除既有 .ai/ci_evidence/fresh_process_restart_evidence.md；不得修改 .ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/**、.ai/tasks/**、.github/workflows/**。本任务不自行清除 human gate；仅在 README/DEVELOPMENT_PROTOCOL 中说明新状态文件的判定规则，使 GPT 后续能据此做明确判定。",
+    "补充回归：1) schema 合法且 CI 全绿的 candidate → cleared；2) restart_commit_sha 早于 490c1de 或与 HEAD 不一致 → invalid；3) CI 非绿 → not_cleared；4) CI 环境下运行 CLI → 非零退出且不落盘；5) 同一 candidate 输入两次，除时间戳外摘要稳定。",
+    "不引入任何真实网络访问；CLI 不得调用 GitHub API，仅校验本地文件与 git 元数据；CI run 信息以显式文件入参为准。",
+    "本地全量 pytest/ruff/mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL 三个 job 必须通过。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/**",
+      "scripts/record_fresh_process_evidence.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行本任务，不得自行判定 human gate 已清除。",
+    "本任务不解除、不降级 CONTROL_PLANE_FRESH_PROCESS_RESTART；只把证据从自由文本改为可机读、可校验、必须在非 CI 环境显式产生的状态文件。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "本任务禁止在无 fresh-process 证据的情况下 auto_start；由宿主人工解除 human gate 后再执行。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "CONTROL_PLANE_FRESH_PROCESS_RESTART 的证据有机器可校验的 schema、只读校验器与明确的稳定 reason codes；clear 判定所需最小事实集合被固化。",
+    "CI 环境下不得由自动化创建该状态文件；只有非 CI 环境的显式 CLI 调用可以写。",
+    "既有 .ai/ci_evidence/fresh_process_restart_evidence.md 与 .ai/PROJECT_STATE.json 等文件未被改写。",
+    "本地全量 pytest/ruff/mypy 通过；GitHub Actions Python 3.12/3.13/PostgreSQL 三项通过。",
+    "不改写历史 result/ledger/state/adjudication，不改变 Phase 3.3 blocker、L3/L4 与交易安全开关。"
+  ]
+}
