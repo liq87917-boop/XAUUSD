@@ -369,10 +369,10 @@ def test_real_repo_phase3_3_blocker_removal_fails_closed() -> None:
 
     state = consistent_state()
 
-    # PHASE3_3_DATA 已被 GPT 归档到 history_blockers；从 history_blockers 删除它验证 fail-closed。
-    state["history_blockers"] = [
+    # PHASE3_3_DATA 是 active blocker；删除它必须 fail-closed。
+    state["blockers"] = [
         blocker
-        for blocker in state.get("history_blockers", [])
+        for blocker in state.get("blockers", [])
         if blocker.get("code") != precondition.PHASE3_3_BLOCKER
     ]
 
