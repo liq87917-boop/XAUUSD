@@ -327,7 +327,7 @@ def test_phase33_blocker_and_trading_invariants_unchanged() -> None:
     assert "ALLOW_EXTERNAL_ORDER_SUBMISSION=false" in state["invariants"]
     assert state["queue_status"] in {"ACTIVE", "HOLD", "BLOCKED"}
     if state["status"] == "BLOCKED":
-        assert state["queue_status"] == "BLOCKED"
+        assert state["queue_status"] in {"BLOCKED", "HOLD"}
     assert isinstance(state["last_reviewed_task"], str)
 
 

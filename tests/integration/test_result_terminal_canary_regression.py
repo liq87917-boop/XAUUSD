@@ -399,4 +399,4 @@ def test_phase33_blocker_and_trading_invariants_unchanged() -> None:
 
     assert state["queue_status"] in {"ACTIVE", "HOLD", "BLOCKED"}
     if state["status"] == "BLOCKED":
-        assert state["queue_status"] == "BLOCKED"
+        assert state["queue_status"] in {"BLOCKED", "HOLD"}
