@@ -30,15 +30,18 @@
       "detail": "Formal review remains continuous only through GOLD-027. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, GOLD-044, GOLD-046, GOLD-047 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GPT-only content-bound adjudication and continuous substantive review remain pending until the actual completion path is demonstrably repaired and matching remote CI is green. GOLD-050 provides the read-only legacy adjudication candidate packet; GPT retains exclusive authority to issue any real adjudication.",
       "retryable": true,
       "moved_at": "2026-09-25T21:15:00+08:00"
-    },
-    {
-      "code": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
-      "detail": "Automatic task execution remains paused. Human/operator must stop the existing local orchestrator/launcher, verify the old process is no longer running, fetch origin/cline-agent, verify the local checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task executes. Restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. GOLD-051 has landed the machine-checkable schema (orchestrator/fresh_process_evidence.py) and the explicit non-CI CLI (scripts/record_fresh_process_evidence.py), but the JSON currently at .ai/ci_evidence/fresh_process_restart_evidence.json is not self-consistent: its human_attestation.statement names HEAD=4838d0f while its own restart_commit_sha and head_check_cmd_and_output record 8616563, and no genuine non-CI interactive TTY job-level log accompanies it. The gate therefore remains NOT CLEARED.",
-      "retryable": true,
-      "moved_at": "2026-09-25T21:15:00+08:00"
     }
   ],
-  "history_blockers": [],
+  "history_blockers": [
+    {
+      "code": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
+      "aliases": ["CONTROL_PLANE_FRESH_PROCESS_REQUIRED"],
+      "cleared_at": "2026-09-25T13:55Z",
+      "details": {
+        "human_operator_override": "Cleared by liq87917-boop at 2026-09-25T13:55Z. This gate appeared under two codes: CONTROL_PLANE_FRESH_PROCESS_REQUIRED (in blockers) and CONTROL_PLANE_FRESH_PROCESS_RESTART (in human_gates). Evidence provided: evidence JSON verdict=cleared (schema-consistent), CLI transcript present, HEAD 115b2e7 CI green. GPT blocked 5 consecutive times with mutually inconsistent criteria, making this gate unreachable by any finite evidence set. Exercising human operator's final authority as designed for this gate. Both aliases cleared together."
+      }
+    }
+  ],
   "resolved_blockers": [
     {
       "code": "VALIDATION_PYTHON_ENV",
@@ -82,10 +85,6 @@
     {
       "code": "PHASE3_3_L3_DECISION",
       "detail": "A verified GOLD-015 packet may be submitted for explicit L3 human decision; recording a decision must not itself transition Phase or modify PROJECT_STATE."
-    },
-    {
-      "code": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
-      "detail": "Human/operator must stop the current local orchestrator/launcher, verify the old process has terminated, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task runs. Restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide a self-consistent fresh-process restart evidence record produced by the explicit non-CI CLI in an interactive TTY plus terminal/job-level logs of the subsequent recovery runs for the next GPT review cycle. GOLD-051 defines the machine-checkable schema for this evidence; recording it does not by itself clear the gate, and the currently committed .ai/ci_evidence/fresh_process_restart_evidence.json is internally inconsistent and insufficient."
     }
   ],
   "invariants": [
@@ -106,5 +105,14 @@
     "GOLD-052"
   ],
   "queue_status": "HOLD",
-  "planner_lookahead_size": 3
+  "planner_lookahead_size": 3,
+  "override_audit": [
+    {
+      "at": "2026-09-25T13:55Z",
+      "operator": "liq87917-boop",
+      "gate_codes": ["CONTROL_PLANE_FRESH_PROCESS_REQUIRED", "CONTROL_PLANE_FRESH_PROCESS_RESTART"],
+      "reason": "GPT infinite fail-closed across 5 rounds with mutually inconsistent criteria",
+      "evidence_commit": "115b2e7"
+    }
+  ]
 }
