@@ -19,7 +19,9 @@ def _evidence(**overrides) -> dict:
         "schema_version": 1,
         "operator_identity": "human@example.com",
         "restart_commit_sha": "abc123def456",
-        "old_pid_terminated": [{"pid": 123, "terminated_at": "2026-09-25T00:00:00+00:00"}],
+        "old_pid_terminated": [
+            {"pid": 123, "method": "SIGTERM", "terminated_at": "2026-09-25T00:00:00+00:00"}
+        ],
         "new_process_pid": 456,
         "new_process_started_at": "2026-09-25T00:00:00+00:00",
         "head_check_cmd_and_output": "git rev-parse HEAD\nHEAD=abc123def456",
@@ -55,18 +57,18 @@ def test_verify_cleared(monkeypatch, tmp_path) -> None:
 
 
 def test_verify_head_mismatch(monkeypatch, tmp_path) -> None:
-    # evidence 的 restart_commit_sha 与本地 HEAD 不一致
+    # evidence 的 restart_commit_sha 与本地 HEAD 不一致 ⇒ 证据无效
     _mock_git(monkeypatch, head="other999")
     result = fpe.verify_evidence(_write(tmp_path, _evidence()), tmp_path)
-    assert result["verdict"] == fpe.VERDICT_NOT_CLEARED
+    assert result["verdict"] == fpe.VERDICT_INVALID
     assert fpe.REASON_HEAD_MISMATCH in result["reason_codes"]
 
 
 def test_verify_precedes_min_snapshot(monkeypatch, tmp_path) -> None:
-    # restart_commit_sha 不是 MIN_RESTART_SNAPSHOT 的后代
+    # restart_commit_sha 不是 MIN_RESTART_SNAPSHOT 的后代 ⇒ 证据无效
     _mock_git(monkeypatch, ancestor=False)
     result = fpe.verify_evidence(_write(tmp_path, _evidence()), tmp_path)
-    assert result["verdict"] == fpe.VERDICT_NOT_CLEARED
+    assert result["verdict"] == fpe.VERDICT_INVALID
     assert fpe.REASON_RESTART_COMMIT_PRECEDES_MIN_SNAPSHOT in result["reason_codes"]
 
 
@@ -155,3 +157,84 @@ def test_cli_writes_valid_json(monkeypatch, tmp_path) -> None:
     written = json.loads(out_path.read_text(encoding="utf-8"))
     assert written["schema"] == fpe.SCHEMA_VERSION
     assert written["operator_identity"] == "human@example.com"
+
+def test_verify_missing_human_attestation(monkeypatch, tmp_path) -> None:
+    _mock_git(monkeypatch)
+    data = _evidence()
+    data["human_attestation"] = {
+        "statement": "",
+        "attested_at": "2026-09-25T00:00:00+00:00",
+        "operator_identity": "human@example.com",
+    }
+    result = fpe.verify_evidence(_write(tmp_path, data), tmp_path)
+    assert result["verdict"] == fpe.VERDICT_NOT_CLEARED
+    assert fpe.REASON_MISSING_HUMAN_ATTESTATION in result["reason_codes"]
+
+
+def test_verify_digest_mismatch(monkeypatch, tmp_path) -> None:
+    # 内容寻址：摘要与内容不一致 ⇒ 证据被篡改 / 损坏，判 invalid。
+    _mock_git(monkeypatch)
+    data = _evidence()
+    data["content_digest"] = "0" * 64
+    result = fpe.verify_evidence(_write(tmp_path, data), tmp_path)
+    assert result["verdict"] == fpe.VERDICT_INVALID
+    assert fpe.REASON_DIGEST_MISMATCH in result["reason_codes"]
+
+
+def test_compute_content_digest_stable_across_timestamps() -> None:
+    # 回归（req 6 case 5）：同一 candidate 输入两次，除时间戳外摘要稳定。
+    a = _evidence()
+    b = _evidence()
+    b["new_process_started_at"] = "2026-09-26T00:00:00+00:00"
+    b["human_attestation"]["attested_at"] = "2026-09-26T00:00:00+00:00"
+    b["old_pid_terminated"][0]["terminated_at"] = "2026-09-26T00:00:00+00:00"
+    assert fpe.compute_content_digest(a) == fpe.compute_content_digest(b)
+
+
+def test_cli_writes_content_digest(monkeypatch, tmp_path) -> None:
+    # CLI 写入的内容寻址摘要与自校验一致。
+    cli = _import_cli()
+    out_path = tmp_path / "evidence.json"
+    monkeypatch.setattr(cli, "EVIDENCE_PATH", out_path)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr(fpe, "_git_rev_parse", lambda repo, ref: "abc123def456")
+    monkeypatch.setattr(fpe, "_is_ancestor", lambda repo, a, d: True)
+
+    code = cli.main(["--input", json.dumps(_evidence())])
+
+    assert code == cli.EXIT_OK
+    written = json.loads(out_path.read_text(encoding="utf-8"))
+    assert written["content_digest"] == fpe.compute_content_digest(written)
+
+
+def test_production_evidence_path_untouched_by_cli(monkeypatch, tmp_path) -> None:
+    # 回归（req 4）：CLI 只对「新建路径」负责，绝不触碰生产证据文件（若存在则逐字节不变）。
+    cli = _import_cli()
+    prod = cli.EVIDENCE_PATH
+    before = prod.read_bytes() if prod.exists() else None
+    out_path = tmp_path / "evidence.json"
+    monkeypatch.setattr(cli, "EVIDENCE_PATH", out_path)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.setattr(fpe, "_git_rev_parse", lambda repo, ref: "abc123def456")
+    monkeypatch.setattr(fpe, "_is_ancestor", lambda repo, a, d: True)
+
+    code = cli.main(["--input", json.dumps(_evidence())])
+
+    assert code == cli.EXIT_OK
+    after = prod.read_bytes() if prod.exists() else None
+    assert after == before  # 生产证据文件逐字节不变
+
+
+def test_production_evidence_file_if_present_is_schema_valid() -> None:
+    # 回归（req 4）：pytest 运行前后生产证据文件若存在，必须符合 schema（否则 fail）。
+    # 本任务不删除已存在的人工文件，只对新建路径负责。
+    cli = _import_cli()
+    prod = cli.EVIDENCE_PATH
+    if not prod.exists():
+        return  # 允许不存在（gate 未清除）
+    data = json.loads(prod.read_text(encoding="utf-8"))
+    assert data.get("schema") == fpe.SCHEMA_VERSION
+    for field in fpe.REQUIRED_FIELDS:
+        assert field in data, f"production evidence missing field: {field}"

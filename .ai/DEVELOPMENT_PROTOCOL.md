@@ -1222,6 +1222,42 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   禁止改写历史 `.ai/results/**`，禁止静默删除 blocker，禁止越过 L3/L4、
   `LIVE_TRADING=false` 与 `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
 
+## 2.22 Fresh-process 门禁证据状态文件（GOLD-051）
+
+`CONTROL_PLANE_FRESH_PROCESS_RESTART` 的证据由自由文本改为**机读、可校验、内容寻址**的
+状态文件 `.ai/ci_evidence/fresh_process_restart_evidence.json`（版本化 schema
+`fresh-process-restart-evidence-v1`）。
+
+- **schema 必需字段**：`operator_identity`、`restart_commit_sha`、`old_pid_terminated`
+  （列表，每项 `pid` / `method` 终止方式 / `terminated_at` 终止时间）、`new_process_pid`、
+  `new_process_started_at`、`head_check_cmd_and_output`、`git_fetch_or_pull_cmd_and_output`、
+  `ci_run_id`、`ci_run_conclusion_on_restart_commit`、`human_attestation`
+  （自由文本 `statement` + `attested_at` + `operator_identity`）。
+- **只读校验器** `orchestrator/fresh_process_evidence.py::verify_evidence(candidate, repo)`
+  稳定判定三态：
+  - `cleared`：最小事实集合齐全且全部 gate 条件满足；
+  - `not_cleared`：证据合法（指向正确 restart commit），但 gate 条件未满足；
+  - `invalid`：证据不可用（文件缺失 / 不可读 / schema 不匹配 / 缺字段 / 摘要不一致 /
+    `restart_commit_sha` ≠ 本地 HEAD 或 ≠ `origin/cline-agent` HEAD / 早于最小快照）。
+- **稳定 reason codes**：`HEAD_MISMATCH`、`RESTART_COMMIT_PRECEDES_MIN_SNAPSHOT`、
+  `CI_NOT_GREEN`、`MISSING_OPERATOR_IDENTITY`、`MISSING_HUMAN_ATTESTATION`、
+  `DIGEST_MISMATCH`。
+- **clear 判定最小事实集合**：`restart_commit_sha` 必须同时等于本地 `HEAD` 与
+  `origin/cline-agent` HEAD，且 `git merge-base --is-ancestor` 判定其不早于最小快照
+  `490c1decf1ba4b316019c7a272726d04601b8fab`；`ci_run_conclusion_on_restart_commit`
+  必须为 `success`；`operator_identity` 与 `human_attestation.statement` 非空。
+- **内容寻址摘要**：`compute_content_digest(data)` 对「除时间戳与自引用 `content_digest`
+  外的规范 JSON」求 sha256；`content_digest` 为可选字段，存在时校验器校验一致
+  （不一致 ⇒ `invalid` / `DIGEST_MISMATCH`）。
+- **唯一写入口** `scripts/record_fresh_process_evidence.py`：**仅非 CI 环境**（
+  `GITHUB_ACTIONS` / `CI` 环境变量未设置）且交互 TTY 或显式 `--input` 时允许写文件；
+  在 CI 环境中运行必须 fail-closed（非零退出码、不落盘）。CLI 不调用网络 / GitHub API，
+  仅校验本地文件与 git 元数据；CI run 信息以显式入参为准。
+- **GPT 判定规则**：GPT 只以 `verify_evidence` 的 `verdict` 与 `reason_codes` 为唯一判定
+  依据；`cleared` 才可据此解除该 gate，`not_cleared` / `invalid` 一律不清除。该状态文件
+  不得由 CI 或任何自动化流水线自动生成；未显式调用 CLI 时文件不存在视作 gate 未清除。
+  本证据不解除 `PHASE3_3_DATA`，不改变 Phase 3.3 blocker、L3/L4 与交易安全开关。
+
 
 
 

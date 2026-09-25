@@ -106,6 +106,9 @@ def _interactive_collect() -> dict[str, Any]:
 
     old_pid_raw = input("old_pid_terminated（逗号分隔的旧 PID 列表，留空表示无）: ").strip()
     old_pids = [int(x) for x in old_pid_raw.split(",") if x.strip().isdigit()]
+    termination_method = input(
+        "termination_method（旧进程终止方式，如 taskkill /F 或 SIGTERM）: "
+    ).strip()
 
     new_process_pid = int(input("new_process_pid（新进程 PID）: ").strip() or "0")
     new_process_started_at = _now_iso()
@@ -126,7 +129,8 @@ def _interactive_collect() -> dict[str, Any]:
         "operator_identity": operator_identity,
         "restart_commit_sha": restart_commit_sha,
         "old_pid_terminated": [
-            {"pid": pid, "terminated_at": _now_iso()} for pid in old_pids
+            {"pid": pid, "method": termination_method, "terminated_at": _now_iso()}
+            for pid in old_pids
         ],
         "new_process_pid": new_process_pid,
         "new_process_started_at": new_process_started_at,
@@ -174,6 +178,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     data["schema"] = fpe.SCHEMA_VERSION
     data["schema_version"] = 1
+    data["content_digest"] = fpe.compute_content_digest(data)
 
     EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write(EVIDENCE_PATH, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True))

@@ -1,0 +1,77 @@
+{
+  "task_id": "GOLD-051",
+  "title": "把 fresh-process / CI 状态机化为可复核的门禁状态文件与回归",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "completed",
+  "finished_at": "2026-09-26T01:48:52+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M .ai/DEVELOPMENT_PROTOCOL.md",
+    " M README.md",
+    " M orchestrator/fresh_process_evidence.py",
+    " M scripts/record_fresh_process_evidence.py",
+    " M tests/unit/test_fresh_process_evidence.py"
+  ],
+  "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md               | 36 ++++++++++++\n README.md                                 |  1 +\n orchestrator/fresh_process_evidence.py    | 72 +++++++++++++++++++++---\n scripts/record_fresh_process_evidence.py  |  7 ++-\n tests/unit/test_fresh_process_evidence.py | 93 +++++++++++++++++++++++++++++--\n 5 files changed, 195 insertions(+), 14 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-26T01:29:48+08:00",
+      "finished_at": "2026-09-26T01:48:52+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "completed",
+      "normalized_finish_reason": "completed",
+      "finish_reason": "completed",
+      "cline_finish_reason_raw": "completed",
+      "model": "deepseek-v4-pro",
+      "iterations": 37,
+      "duration_ms": 627720,
+      "usage": {
+        "inputTokens": 3586041,
+        "outputTokens": 55154,
+        "cacheReadTokens": 3476480,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.10824525499999996
+      },
+      "cline_final_text": "All edits are complete and verified. Here is my final report.\n\n## GOLD-051 执行报告\n\n### 1. 完成内容\n\n任务 `GOLD-051` 的核心代码（`orchestrator/fresh_process_evidence.py`、`scripts/record_fresh_process_evidence.py`、`tests/unit/test_fresh_process_evidence.py`）已在历史提交中落地，但对照 task JSON 的 `requirements`/`acceptance` 仍存在缺口。本次以最小改动补齐：\n\n1. **校验器三态语义对齐（req 6 case 2）**：`restart_commit_sha` ≠ 本地 HEAD / `origin/cline-agent` HEAD，或早于最小快照 `490c1de` ⇒ 现在返回 `invalid`（原为 `not_cleared`）；`CI_NOT_GREEN`、`MISSING_OPERATOR_IDENTITY`、`MISSING_HUMAN_ATTESTATION` 保持 `not_cleared`。\n2. **内容寻址摘要（goal「内容寻址」+ req 6 case 5）**：新增只读 `compute_content_digest()`（对「除时间戳与自引用 `content_digest` 外的规范 JSON」求 sha256），`content_digest` 作为可选字段由 CLI 写入、校验器存在时校验（不一致 ⇒ `invalid` / `DIGEST_MISMATCH`）。\n3. **`old_pid_terminated` 终止方式（req 1）**：交互式采集新增 `termination_method` 提示，每项写入 `{pid, method, terminated_at}`；`schema()` 明确该结构。\n4. **补回归测试（req 4 & 6）**：新增 6 项（MISSING_HUMAN_ATTESTATION、DIGEST_MISMATCH、摘要跨时间戳稳定、CLI 写入 content_digest、生产证据路径不被 CLI 触碰、生产文件若存在必须 schema 合规）。\n5. **文档（req 5）**：`DEVELOPMENT_PROTOCOL.md` 新增「## 2.22 Fresh-process 门禁证据状态文件（GOLD-051）」；`README.md`「强制约束速查」表新增一行。\n\n### 2. 修改的文件\n- `orchestrator/fresh_process_evidence.py`\n- `scripts/record_fresh_process_evidence.py`\n- `tests/unit/test_fresh_process_evidence.py`\n- `.ai/DEVELOPMENT_PROTOCOL.md`\n- `README.md`\n\n### 3. 新增的文件\n- 无（仅在既有文件内做最小改动）\n\n### 4. 执行的测试\n- `.venv\\Scripts\\python.exe -m pytest tests/unit/test_fresh_process_evidence.py -q`\n- `.venv\\Scripts\\python.exe -m ruff check .`\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts`\n- `.venv\\Scripts\\python.exe -m scripts.record_fresh_process_evidence --schema`（冒烟）\n\n### 5. 测试结果\n- **聚焦测试：16 passed**（0.18s / 4.75s）\n- **ruff：All checks passed!**\n- **mypy：Success: no issues found in 184 source files**\n- **CLI --schema 冒烟：输出合法 JSON schema**（required/verdicts/reason_codes/optional 齐全）\n- **全量 `pytest tests -q`**：已启动并在后台运行，观察到进度到 ~7% 且 **0 failures**，但本地 3000+ 测试（含 integration/DB/data_quality）运行极慢（估计 30+ 分钟），受工具 30s/命令超时限制无法在本会话内等完，已终止。**已用代码搜索确认**：`verify_evidence` / `compute_content_digest` / `VERDICT_*` / `fresh_process_evidence` 仅被本任务相关文件引用，无任何其它测试或模块依赖，故变更完全隔离、不会影响其余测试。\n\n### 6. 未解决的问题\n- 本地全量 pytest 因运行时长（约 30+ 分钟）未能在本会话内完整跑完；最终全量绿由 GitHub Actions（Python 3.12 / 3.13 / PostgreSQL 三个 job）兜底判定。\n- 该任务**不解除** `CONTROL_PLANE_FRESH_PROCESS_RESTART` 门禁本身，也不解除 `PHASE3_3_DATA`——门禁清除由 GPT 依据本状态文件规则 + 真实 fresh-process 证据 + 最终 HEAD 绿 CI 判定。\n\n### 7. 是否满足 acceptance\n- ✅ 证据具备机器可校验 schema、只读校验器与稳定 reason codes；clear 判定最小事实集合固化。\n- ✅ CI 环境不得自动创建状态文件；仅非 CI 显式 CLI 可写（测试 `test_cli_rejects_ci_environment` 强制）。\n- ✅ 既有 `.ai/ci_evidence/fresh_process_restart_evidence.md`、`.json`、`.ai/PROJECT_STATE.json` 等未被改写（`git status` 确认仅 5 个预期文件变更）。\n- ⚠️ 本地 ruff/mypy 通过、聚焦 pytest 通过；全量 pytest 本地未跑完（见上），由 CI 三 job 判定。\n- ✅ 未改写历史 result/ledger/state/adjudication，未改变 Phase 3.3 blocker、L3/L4 与交易安全开关。\n\n### 8. 建议下一步\n- 由 GPT 作为唯一 Reviewer 依据 `## 2.22` 的判定规则，对 `verify_evidence` 的 `verdict`/`reason_codes` 做明确判定（`cleared` 才可解除门禁）。\n- 等 GitHub Actions Python 3.12 / 3.13 / PostgreSQL 三 job 全绿后，由 GPT 收口 GOLD-051 的 review PASS/FAIL。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M .ai/DEVELOPMENT_PROTOCOL.md",
+        " M README.md",
+        " M orchestrator/fresh_process_evidence.py",
+        " M scripts/record_fresh_process_evidence.py",
+        " M tests/unit/test_fresh_process_evidence.py"
+      ],
+      "git_diff_stat": " .ai/DEVELOPMENT_PROTOCOL.md               | 36 ++++++++++++\n README.md                                 |  1 +\n orchestrator/fresh_process_evidence.py    | 72 +++++++++++++++++++++---\n scripts/record_fresh_process_evidence.py  |  7 ++-\n tests/unit/test_fresh_process_evidence.py | 93 +++++++++++++++++++++++++++++--\n 5 files changed, 195 insertions(+), 14 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  1%]\n........................................................................ [  3%]\n........................................................................ [  5%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 23%]\n........................................................................ [ 25%]\n........................................................................ [ 27%]\n........................................................................ [ 29%]\n........................................................................ [ 31%]\n........................................................................ [ 33%]\n........................................................................ [ 35%]\n........................................................................ [ 36%]\n........................................................................ [ 38%]\n........................................................................ [ 40%]\n........................................................................ [ 42%]\n........................................................................ [ 44%]\n........................................................................ [ 46%]\n........................................................................ [ 47%]\n........................................................................ [ 49%]\n........................................................................ [ 51%]\n........................................................................ [ 53%]\n........................................................................ [ 55%]\n........................................................................ [ 57%]\n........................................................................ [ 58%]\n........................................................................ [ 60%]\n........................................................................ [ 62%]\n........................................................................ [ 64%]\n........................................................................ [ 66%]\n........................................................................ [ 68%]\n........................................................................ [ 70%]\n........................................................................ [ 71%]\n........................................................................ [ 73%]\n........................................................................ [ 75%]\n........................................................................ [ 77%]\n........................................................................ [ 79%]\n........................................................................ [ 81%]\n........................................................................ [ 82%]\n........................................................................ [ 84%]\n........................................................................ [ 86%]\n........................................................................ [ 88%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 93%]\n........................................................................ [ 95%]\n........................................................................ [ 97%]\n..............................................s......................... [ 99%]\n...................                                                      [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3906 passed, 1 skipped in 510.71s (0:08:30)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 184 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
