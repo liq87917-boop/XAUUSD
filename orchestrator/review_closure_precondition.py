@@ -1129,6 +1129,68 @@ def candidate_ledger_facts(
 # ============================================================
 
 
+def candidate_pointer_drift_issues(
+    candidate_state: Mapping[str, Any],
+    *,
+    statuses: Mapping[str, str],
+    tasks_dir: Path,
+) -> list[dict[str, str]]:
+    """候选执行指针（``last_completed_task`` / ``current_task``）vs results 的确定性漂移。
+
+    与 :func:`orchestrator.planner_snapshot.pointer_section` 的唯一差异：``last_completed_task``
+    对齐**最新 completed result**，而不是「最新 terminal（含 blocked）」。真实仓库里 blocked
+    result 排在最后时（例如 ``PHASE3_3_DATA`` 使后续任务 blocked），``last_completed_task``
+    仍应指向最后一个 completed result，不得被误判为「落后于 results」。
+
+    ``last_reviewed_task`` 的落后 / 超前属于 formal review backlog 事实，已在上游
+    （``REASON_LAST_REVIEWED_REGRESSION`` / ``REASON_LAST_REVIEWED_AHEAD``）单独判定，
+    此处不再重复；``current_task`` 指向终态 result 仍是执行指针漂移。
+    """
+
+    candidate_payload = dict(candidate_state)
+
+    statuses_payload = dict(statuses)
+
+    prefix = planner.project_task_prefix(candidate_payload)
+
+    terminal_ids = planner.terminal_result_ids(statuses_payload, prefix)
+
+    completed_ids = [
+        task_id for task_id in terminal_ids if statuses_payload.get(task_id) == "completed"
+    ]
+
+    latest_completed = completed_ids[-1] if completed_ids else None
+
+    issues: list[dict[str, str]] = []
+
+    for issue in planner.single_pointer_issues(
+        "last_completed_task",
+        planner.pointer_value(candidate_payload, "last_completed_task"),
+        statuses_payload,
+        tasks_dir,
+        latest_completed,
+    ):
+        issues.append(
+            own_issue(
+                REASON_STATE_POINTER_DRIFT,
+                f"{issue['code']}: {issue['detail']}",
+            )
+        )
+
+    current = planner.pointer_value(candidate_payload, "current_task")
+
+    if current is not None and statuses_payload.get(current) in orch.TERMINAL_RESULT_STATUSES:
+        issues.append(
+            own_issue(
+                REASON_STATE_POINTER_DRIFT,
+                f"{planner.ISSUE_POINTER_BEHIND_RESULTS}: current_task={current} 已有终态 result="
+                f"{statuses_payload.get(current)}：PROJECT_STATE 指针落后于 results",
+            )
+        )
+
+    return issues
+
+
 def candidate_state_facts(
     candidate_state: Mapping[str, Any],
     *,
@@ -1188,19 +1250,11 @@ def candidate_state_facts(
                 )
             )
 
-    pointer_issues = planner.pointer_section(dict(candidate_state), dict(statuses), tasks_dir)[1]
-
-    for issue in pointer_issues:
-        if mutation_precondition.is_review_pointer_fact(issue):
-            # last_reviewed_task 落后于已 review/完成事实属于 backlog 事实，已单独判定。
-            continue
-
-        issues.append(
-            own_issue(
-                REASON_STATE_POINTER_DRIFT,
-                f"{issue['code']}: {issue['detail']}",
-            )
-        )
+    # last_completed_task 对齐最新 completed result（不是 latest terminal 含 blocked），
+    # current_task 指向终态 result 才算执行指针漂移；两者确定性计算、只报告，绝不代改指针。
+    issues.extend(
+        candidate_pointer_drift_issues(candidate_state, statuses=statuses, tasks_dir=tasks_dir)
+    )
 
     # history_blockers 里的归档 blocker（如 PHASE3_3_DATA）同样受只读保护：
     # 候选删除它们也必须 fail-closed，否则 GPT 归档后 PHASE3_3_DATA 失去保护。

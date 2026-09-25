@@ -1281,6 +1281,69 @@ def test_trading_safety_invariant_change_fails_closed(tmp_path: Path) -> None:
     assert not payload["candidate_ready"]
 
 
+def test_last_completed_task_aligned_with_blocked_at_end_not_drift(tmp_path: Path) -> None:
+    """blocked result 排在最后时，``last_completed_task`` 不得被误判为「落后于 results」。
+
+    GOLD-048 回归：``pointer_section`` 曾把「最新 terminal（含 blocked）」当作
+    ``last_completed_task`` 的对齐基准，导致 blocked result 排在最后时，正确指向最新
+    completed result 的候选被误判为 ``CANDIDATE_STATE_POINTER_DRIFT``。
+    """
+
+    tasks_dir = tmp_path / "tasks"
+
+    tasks_dir.mkdir()
+
+    for task_id in ("GOLD-001", "GOLD-002", "GOLD-003", "GOLD-004", "GOLD-005"):
+        (tasks_dir / f"{task_id}.json").write_text("{}", encoding="utf-8")
+
+    statuses = {
+        "GOLD-001": "completed",
+        "GOLD-002": "completed",
+        "GOLD-003": "blocked",
+        "GOLD-004": "blocked",
+    }
+
+    candidate_state = {
+        "current_task": "GOLD-005",
+        "last_completed_task": "GOLD-002",
+        "last_reviewed_task": "GOLD-001",
+    }
+
+    issues = precondition.candidate_pointer_drift_issues(
+        candidate_state, statuses=statuses, tasks_dir=tasks_dir
+    )
+
+    assert issues == []
+
+
+def test_last_completed_task_behind_completed_result_drifts(tmp_path: Path) -> None:
+    """``last_completed_task`` 落后于最新 completed result 仍是真实漂移（fail-closed）。"""
+
+    tasks_dir = tmp_path / "tasks"
+
+    tasks_dir.mkdir()
+
+    for task_id in ("GOLD-001", "GOLD-002", "GOLD-003"):
+        (tasks_dir / f"{task_id}.json").write_text("{}", encoding="utf-8")
+
+    statuses = {"GOLD-001": "completed", "GOLD-002": "completed"}
+
+    candidate_state = {
+        "current_task": "GOLD-003",
+        "last_completed_task": "GOLD-001",
+        "last_reviewed_task": "GOLD-001",
+    }
+
+    issues = precondition.candidate_pointer_drift_issues(
+        candidate_state, statuses=statuses, tasks_dir=tasks_dir
+    )
+
+    codes = {issue["code"] for issue in issues}
+
+    assert precondition.REASON_STATE_POINTER_DRIFT in codes
+    assert any("last_completed_task" in issue["detail"] for issue in issues)
+
+
 def test_phase_rank_parsing() -> None:
     assert precondition.phase_rank("Phase 3") == (3, 0)
     assert precondition.phase_rank("phase 3.4") == (3, 4)

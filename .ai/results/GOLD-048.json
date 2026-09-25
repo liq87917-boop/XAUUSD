@@ -1,0 +1,78 @@
+{
+  "task_id": "GOLD-048",
+  "title": "修复真实仓库候选状态指针漂移误报导致的 CI 失败",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "completed",
+  "finished_at": "2026-09-25T23:17:44+08:00",
+  "attempt_count": 1,
+  "max_attempts": 3,
+  "changed_files": [
+    " M orchestrator/review_closure_precondition.py",
+    " M tests/unit/test_review_closure_precondition.py"
+  ],
+  "git_diff_stat": " orchestrator/review_closure_precondition.py    | 80 +++++++++++++++++++++-----\n tests/unit/test_review_closure_precondition.py | 63 ++++++++++++++++++++\n 2 files changed, 130 insertions(+), 13 deletions(-)\n",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-25T22:52:37+08:00",
+      "finished_at": "2026-09-25T23:17:44+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "recovery_path": null,
+      "execution_outcome": "completed",
+      "normalized_finish_reason": "completed",
+      "finish_reason": "completed",
+      "cline_finish_reason_raw": "completed",
+      "model": "deepseek-v4-pro",
+      "iterations": 92,
+      "duration_ms": 947032,
+      "usage": {
+        "inputTokens": 11754194,
+        "outputTokens": 84417,
+        "cacheReadTokens": 11547136,
+        "cacheWriteTokens": 0,
+        "totalCost": 0.205371388
+      },
+      "cline_final_text": "## GOLD-048 完成总结\n\n### 1. 完成内容\n\n定位并修复了 `review_closure_precondition` 在真实仓库下对**匹配候选**误报 `CANDIDATE_STATE_POINTER_DRIFT` 的根因。\n\n**根因**：`orchestrator/review_closure_precondition.py` 的 `candidate_state_facts()` 复用了 `planner_snapshot.pointer_section()`。该函数用 `terminal_ids[-1]`（即「最新 **terminal** result，含 `blocked`」）作为 `last_completed_task` 的对齐基准。当 blocked result 排在最后时（例如 `PHASE3_3_DATA` 使后续任务 blocked），`last_completed_task` 正确指向「最新 completed result」却会被 `is_newer(latest_terminal, last_completed)` 判定为「落后于 results」，从而误触发 `CANDIDATE_STATE_POINTER_DRIFT`。\n\n这与项目既有口径不一致：`planner_refill_request.py` 明确区分 `latest_completed_id`（对 `last_completed_task`）与 `latest_terminal`（含 blocked）。\n\n**修复**：新增确定性辅助函数 `candidate_pointer_drift_issues()`，将 `last_completed_task` 对齐**最新 completed result**（而非含 blocked 的 terminal），同时保留 `current_task` 指向终态 result 的漂移检测与 `CANDIDATE_STATE_POINTER_DRIFT` reason code（未删除、未降级）。计算全程使用确定性排序（`terminal_result_ids` + `task_rank`），不依赖 cwd / 平台路径 / walk 顺序 / 临时文件相对路径。\n\n### 2. 修改的文件\n- `orchestrator/review_closure_precondition.py` — 新增 `candidate_pointer_drift_issues()`，并将 `candidate_state_facts()` 中的 `planner.pointer_section` 调用替换为该辅助函数。\n\n### 3. 新增的文件\n- 无（仅修改现有文件）。\n\n### 4. 新增的测试（修改了 `tests/unit/test_review_closure_precondition.py`）\n- `test_last_completed_task_aligned_with_blocked_at_end_not_drift`：blocked result 排在最后时，`last_completed_task` 对齐最新 completed 不误报。\n- `test_last_completed_task_behind_completed_result_drifts`：`last_completed_task` 落后于最新 completed 仍是真实漂移（fail-closed）。\n\n### 5. 执行的测试与结果\n- `.venv\\Scripts\\python.exe -m pytest tests/unit/test_review_closure_precondition.py -q` → **45 passed**\n- `.venv\\Scripts\\python.exe -m pytest tests/integration/test_review_closure_precondition_regression.py -q`（8 项，分两批）→ **8 passed**（含 `test_real_repo_matching_candidate_is_ready_and_zero_write` 与 `test_real_repo_cli_temp_file_candidate_zero_write`）\n- `.venv\\Scripts\\python.exe -m ruff check .` → **All checks passed!**\n- `.venv\\Scripts\\python.exe -m mypy config database src scripts` → **Success: no issues found in 184 source files**\n\n（全量 `pytest tests -q` 因工具 30s 超时未执行，耗时约 10 分钟；已用与改动直接相关的单测 + 集成回归 + 静态检查覆盖。）\n\n### 6. 未解决的问题\n- 全量 `pytest tests -q` 未在本机重新跑通（仅超时限制，非失败）。GitHub Actions 的 Python 3.12/3.13 全量 pytest 需由 CI 验证。\n- 未触碰 `.ai/results/*`、`.ai/GPT_REVIEW_LEDGER.json`、`.ai/PROJECT_STATE.json`、`.ai/adjudications/**`、`.github/workflows/**`（保持只读，未改写任何历史审计事实）。\n\n### 7. 是否满足 acceptance\n- ✅ 匹配候选 → EXIT_OK 且 `reason_codes=[]`，不再误报 `CANDIDATE_STATE_POINTER_DRIFT`（含 blocked-result 排在最后的潜在场景）。\n- ✅ 真实指针漂移仍稳定 fail-closed：`last_reviewed_task` 倒退/超前、删除 `PHASE3_3_DATA`、提前进入 Phase 3.4、交易安全开关变化——均复用既有测试验证 reason code 不变。\n- ✅ `CANDIDATE_STATE_POINTER_DRIFT` reason code 未删除、未降级。\n- ✅ ruff / mypy 通过；未改写任何历史 result/ledger/state/adjudication；未改变 Phase 3.3 blocker、L3/L4、GPT 独占规划权与交易安全开关。\n- ⏳ GitHub Actions Python 3.12/3.13 全量 pytest 通过需由远端 CI 最终确认（本地已通过针对性验证）。\n\n### 8. 建议下一步\n- 由 CI 在修复后的 HEAD 上跑一次 `python -m pytest -q`（py3.12/3.13）确认全绿。\n- 后续 GPT 内容绑定裁决（GOLD-050 候选包）与连续实质 review 仍由 GPT 独占完成；本任务只修复控制面指针漂移误判，不签发任何裁决、不推进 `last_reviewed_task`。",
+      "cline_error_tail": "",
+      "changed_files": [
+        " M orchestrator/review_closure_precondition.py",
+        " M tests/unit/test_review_closure_precondition.py"
+      ],
+      "git_diff_stat": " orchestrator/review_closure_precondition.py    | 80 +++++++++++++++++++++-----\n tests/unit/test_review_closure_precondition.py | 63 ++++++++++++++++++++\n 2 files changed, 130 insertions(+), 13 deletions(-)\n",
+      "validations": [
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests/integration/test_review_closure_precondition_regression.py -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........                                                                 [100%]\n8 passed in 29.55s\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m pytest tests -q",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "........................................................................ [  1%]\n........................................................................ [  3%]\n........................................................................ [  5%]\n........................................................................ [  7%]\n........................................................................ [  9%]\n........................................................................ [ 11%]\n........................................................................ [ 12%]\n........................................................................ [ 14%]\n........................................................................ [ 16%]\n........................................................................ [ 18%]\n........................................................................ [ 20%]\n........................................................................ [ 22%]\n........................................................................ [ 24%]\n........................................................................ [ 25%]\n........................................................................ [ 27%]\n........................................................................ [ 29%]\n........................................................................ [ 31%]\n........................................................................ [ 33%]\n........................................................................ [ 35%]\n........................................................................ [ 37%]\n........................................................................ [ 38%]\n........................................................................ [ 40%]\n........................................................................ [ 42%]\n........................................................................ [ 44%]\n........................................................................ [ 46%]\n........................................................................ [ 48%]\n........................................................................ [ 50%]\n........................................................................ [ 51%]\n........................................................................ [ 53%]\n........................................................................ [ 55%]\n........................................................................ [ 57%]\n........................................................................ [ 59%]\n........................................................................ [ 61%]\n........................................................................ [ 63%]\n........................................................................ [ 64%]\n........................................................................ [ 66%]\n........................................................................ [ 68%]\n........................................................................ [ 70%]\n........................................................................ [ 72%]\n........................................................................ [ 74%]\n........................................................................ [ 76%]\n........................................................................ [ 77%]\n........................................................................ [ 79%]\n........................................................................ [ 81%]\n........................................................................ [ 83%]\n........................................................................ [ 85%]\n........................................................................ [ 87%]\n........................................................................ [ 89%]\n........................................................................ [ 90%]\n........................................................................ [ 92%]\n........................................................................ [ 94%]\n........................................................................ [ 96%]\n........................................................................ [ 98%]\n.................s............................................           [100%]\n=========================== short test summary info ===========================\nSKIPPED [1] tests\\unit\\test_text_similarity.py:79: �������Ѱ�װ jieba������δ��װ��֧\n3877 passed, 1 skipped in 523.29s (0:08:43)\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m ruff check .",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "All checks passed!\n",
+          "stderr_tail": ""
+        },
+        {
+          "command": ".venv\\Scripts\\python.exe -m mypy config database src scripts",
+          "returncode": 0,
+          "timed_out": false,
+          "stdout_tail": "Success: no issues found in 184 source files\n",
+          "stderr_tail": ""
+        }
+      ]
+    }
+  ]
+}
