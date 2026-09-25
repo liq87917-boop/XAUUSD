@@ -12,34 +12,39 @@
       "code": "PHASE3_3_DATA",
       "detail": "Business Phase 3.3 evidence remains blocked pending legally authorized Author/News evidence with trustworthy independent time/availability semantics. This blocker remains independent of the control-plane review recovery queue and must not be treated as resolved by code, tests, CI, review adjudication, or ledger closure.",
       "retryable": false
-    },
-    {
-      "code": "RESULT_TERMINAL_CONSISTENCY_RECURRENCE",
-      "detail": "The immutable GOLD-047 result at commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b records status=completed and normalized_finish_reason=completed while its final attempt records cline_finish_reason_raw=aborted. GPT review of prior remote HEAD confirms GOLD-047 remains fail-closed. Historical result must remain unchanged. The CONTROL_PLANE_FRESH_PROCESS_RESTART gate was cleared by human operator override at 2026-09-25T13:55Z (commit 99f8383). Executor tasks may auto-start subject to remaining blockers.",
-      "retryable": true,
-      "moved_at": "2026-09-25T21:15:00+08:00"
-    },
-    {
-      "code": "GOLD_047_REMOTE_CI_FAILURE",
-      "detail": "Historical CI evidence: GitHub Actions runs on earlier HEADs (36026387906, 36027627116, 36034679803, 36048709353, 36055545594, 36083054452, 36124398637, 36125652989) concluded failure with stable failure categories: (A) CANDIDATE_STATE_POINTER_DRIFT in tests/integration/test_review_closure_precondition_regression.py; (B) queue_status expected ACTIVE but observed BLOCKED in 4 regression files. Newer runs on HEAD 439f81c (36130656107, success), HEAD a98e7dd (36131680799, success), HEAD db41637 (36133733460, success), and HEAD 4838d0f (36136380151, success) have superseded the historical failures, and the queue_status failure category has been formally repaired by 4838d0f. GOLD-047 still cannot be accepted until GPT-only content-bound adjudication is completed (GOLD-050 candidate packet) and a downstream recovery task demonstrates green CI on the relevant repaired HEAD. Retained as fail-closed pending GPT adjudication of history.",
-      "retryable": true,
-      "moved_at": "2026-09-25T21:15:00+08:00"
-    },
-    {
-      "code": "GPT_REVIEW_TERMINAL_HISTORY",
-      "detail": "Formal review remains continuous only through GOLD-027. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, GOLD-044, GOLD-046, GOLD-047 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GPT-only content-bound adjudication and continuous substantive review remain pending until the actual completion path is demonstrably repaired and matching remote CI is green. GOLD-050 provides the read-only legacy adjudication candidate packet; GPT retains exclusive authority to issue any real adjudication.",
-      "retryable": true,
-      "moved_at": "2026-09-25T21:15:00+08:00"
     }
   ],
   "history_blockers": [
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
-      "aliases": ["CONTROL_PLANE_FRESH_PROCESS_REQUIRED"],
+      "aliases": [
+        "CONTROL_PLANE_FRESH_PROCESS_REQUIRED"
+      ],
       "cleared_at": "2026-09-25T13:55Z",
       "details": {
         "human_operator_override": "Cleared by liq87917-boop at 2026-09-25T13:55Z. This gate appeared under two codes: CONTROL_PLANE_FRESH_PROCESS_REQUIRED (in blockers) and CONTROL_PLANE_FRESH_PROCESS_RESTART (in human_gates). Evidence provided: evidence JSON verdict=cleared (schema-consistent), CLI transcript present, HEAD 115b2e7 CI green. GPT blocked 5 consecutive times with mutually inconsistent criteria, making this gate unreachable by any finite evidence set. Exercising human operator's final authority as designed for this gate. Both aliases cleared together."
       }
+    },
+    {
+      "code": "RESULT_TERMINAL_CONSISTENCY_RECURRENCE",
+      "detail": "The immutable GOLD-047 result at commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b records status=completed and normalized_finish_reason=completed while its final attempt records cline_finish_reason_raw=aborted. GPT review of prior remote HEAD confirms GOLD-047 remains fail-closed. Historical result must remain unchanged. The CONTROL_PLANE_FRESH_PROCESS_RESTART gate was cleared by human operator override at 2026-09-25T13:55Z (commit 99f8383). Executor tasks may auto-start subject to remaining blockers.",
+      "retryable": true,
+      "moved_at": "2026-09-25T21:15:00+08:00",
+      "frozen_reason": "Frozen by human operator liq87917-boop at 2026-09-25T14:05Z. GOLD-047 terminal-state inconsistency (completed + raw aborted) is an immutable historical record; correcting it would require rewriting history, which is prohibited by protocol. GPT fail-closed on this irreconcilable history blocks all forward progress. Human operator accepts this as a documented technical debt and freezes it to allow the rolling task mechanism to proceed. Historical result/ledger/adjudication remain unchanged and read-only."
+    },
+    {
+      "code": "GOLD_047_REMOTE_CI_FAILURE",
+      "detail": "Historical CI evidence: GitHub Actions runs on earlier HEADs (36026387906, 36027627116, 36034679803, 36048709353, 36055545594, 36083054452, 36124398637, 36125652989) concluded failure with stable failure categories: (A) CANDIDATE_STATE_POINTER_DRIFT in tests/integration/test_review_closure_precondition_regression.py; (B) queue_status expected ACTIVE but observed BLOCKED in 4 regression files. Newer runs on HEAD 439f81c (36130656107, success), HEAD a98e7dd (36131680799, success), HEAD db41637 (36133733460, success), and HEAD 4838d0f (36136380151, success) have superseded the historical failures, and the queue_status failure category has been formally repaired by 4838d0f. GOLD-047 still cannot be accepted until GPT-only content-bound adjudication is completed (GOLD-050 candidate packet) and a downstream recovery task demonstrates green CI on the relevant repaired HEAD. Retained as fail-closed pending GPT adjudication of history.",
+      "retryable": true,
+      "moved_at": "2026-09-25T21:15:00+08:00",
+      "frozen_reason": "Frozen by human operator liq87917-boop at 2026-09-25T14:05Z. GOLD-047 terminal-state inconsistency (completed + raw aborted) is an immutable historical record; correcting it would require rewriting history, which is prohibited by protocol. GPT fail-closed on this irreconcilable history blocks all forward progress. Human operator accepts this as a documented technical debt and freezes it to allow the rolling task mechanism to proceed. Historical result/ledger/adjudication remain unchanged and read-only."
+    },
+    {
+      "code": "GPT_REVIEW_TERMINAL_HISTORY",
+      "detail": "Formal review remains continuous only through GOLD-027. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, GOLD-044, GOLD-046, GOLD-047 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GPT-only content-bound adjudication and continuous substantive review remain pending until the actual completion path is demonstrably repaired and matching remote CI is green. GOLD-050 provides the read-only legacy adjudication candidate packet; GPT retains exclusive authority to issue any real adjudication.",
+      "retryable": true,
+      "moved_at": "2026-09-25T21:15:00+08:00",
+      "frozen_reason": "Frozen by human operator liq87917-boop at 2026-09-25T14:05Z. GOLD-047 terminal-state inconsistency (completed + raw aborted) is an immutable historical record; correcting it would require rewriting history, which is prohibited by protocol. GPT fail-closed on this irreconcilable history blocks all forward progress. Human operator accepts this as a documented technical debt and freezes it to allow the rolling task mechanism to proceed. Historical result/ledger/adjudication remain unchanged and read-only."
     }
   ],
   "resolved_blockers": [
@@ -76,7 +81,7 @@
       "resolved_by": "2026-09-25: GOLD-051 code delivery landed on cline-agent (commits 4b3be98 / 4838d0f / 8616563): orchestrator/fresh_process_evidence.py provides a read-only schema/verifier with verdicts cleared|not_cleared|invalid and stable reason codes (HEAD_MISMATCH, RESTART_COMMIT_PRECEDES_MIN_SNAPSHOT, CI_NOT_GREEN, MISSING_OPERATOR_IDENTITY, MISSING_HUMAN_ATTESTATION), and scripts/record_fresh_process_evidence.py is fail-closed in CI. This resolves only the schema/CLI landing requirement; it does NOT clear the CONTROL_PLANE_FRESH_PROCESS_RESTART gate and does NOT constitute a GPT review PASS for GOLD-051, which remains pending genuine human fresh-process evidence and green CI on the final HEAD."
     }
   ],
-  "next_action": "Fresh-process gate cleared by human operator override at 2026-09-25T13:55Z (commit 99f8383). Next: GPT to adjudicate GOLD-047 terminal consistency via GOLD-050 candidate packet and issue a REPAIR task for RESULT_TERMINAL_CONSISTENCY_RECURRENCE. PHASE3_3_DATA remains BLOCKED pending legally authorized Author/News evidence. LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "next_action": "Historical GOLD-047 blockers frozen by human operator at 2026-09-25T14:05Z. PHASE3_3_DATA remains the only active blocker (business authorization, non-blocking for control-plane rolling tasks). GPT is now expected to replenish the queue with new forward-looking tasks or mark current tasks as executable. LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -110,9 +115,24 @@
     {
       "at": "2026-09-25T13:55Z",
       "operator": "liq87917-boop",
-      "gate_codes": ["CONTROL_PLANE_FRESH_PROCESS_REQUIRED", "CONTROL_PLANE_FRESH_PROCESS_RESTART"],
+      "gate_codes": [
+        "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
+        "CONTROL_PLANE_FRESH_PROCESS_RESTART"
+      ],
       "reason": "GPT infinite fail-closed across 5 rounds with mutually inconsistent criteria",
       "evidence_commit": "115b2e7"
+    },
+    {
+      "at": "2026-09-25T14:05Z",
+      "operator": "liq87917-boop",
+      "action": "freeze_historical_blockers",
+      "codes": [
+        "RESULT_TERMINAL_CONSISTENCY_RECURRENCE",
+        "GOLD_047_REMOTE_CI_FAILURE",
+        "GPT_REVIEW_TERMINAL_HISTORY"
+      ],
+      "reason": "Irreconcilable historical immutable result conflict; frozen to allow forward progress",
+      "evidence_commit": "f48c433"
     }
   ]
 }
