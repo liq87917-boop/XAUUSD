@@ -1,18 +1,18 @@
 {
   "ci_run_conclusion_on_restart_commit": "success",
-  "ci_run_id": "36136380151",
-  "git_fetch_or_pull_cmd_and_output": "$ git fetch origin",
-  "head_check_cmd_and_output": "git rev-parse HEAD\nHEAD=8616563d5f5e69f837d135e8d3893cfa8929b0e3",
+  "ci_run_id": "36139244119",
+  "git_fetch_or_pull_cmd_and_output": "$ git pull --ff-only origin cline-agent",
+  "head_check_cmd_and_output": "git rev-parse HEAD\nHEAD=699b0374fdd8f1cca02e7537c138940376ef2acf",
   "human_attestation": {
-    "attested_at": "2026-09-25T13:08:30.154307+00:00",
+    "attested_at": "2026-09-25T13:32:11.436543+00:00",
     "operator_identity": "liq87917-boop",
-    "statement": "I, liq87917-boop, have terminated the old orchestrator, fetched origin, verified local HEAD == origin/cline-agent HEAD (both 4838d0f), and started a fresh interactive process. I authorize this evidence for clearing the CONTROL_PLANE_FRESH_PROCESS_RESTART human gate."
+    "statement": "I, liq87917-boop, have terminated the old orchestrator, fetched origin, verified local HEAD == origin/cline-agent HEAD (both 699b0374), and started a fresh interactive process. I authorize this evidence for clearing the CONTROL_PLANE_FRESH_PROCESS_RESTART human gate."
   },
-  "new_process_pid": 44684,
-  "new_process_started_at": "2026-09-25T13:05:02.098012+00:00",
+  "new_process_pid": 42192,
+  "new_process_started_at": "2026-09-25T13:28:29.510340+00:00",
   "old_pid_terminated": [],
   "operator_identity": "liq87917-boop",
-  "restart_commit_sha": "8616563d5f5e69f837d135e8d3893cfa8929b0e3",
+  "restart_commit_sha": "699b0374fdd8f1cca02e7537c138940376ef2acf",
   "schema": "fresh-process-restart-evidence-v1",
   "schema_version": 1
 }

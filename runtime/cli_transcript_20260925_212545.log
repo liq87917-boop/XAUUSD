@@ -1,0 +1,47 @@
+﻿**********************
+Windows PowerShell 脚本开始
+开始时间: 20260925212545
+用户名: ADMIN-TIAN\Admin
+RunAs 用户: ADMIN-TIAN\Admin
+配置名称: 
+计算机: ADMIN-TIAN (Microsoft Windows NT 10.0.22631.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+进程 ID: 49296
+PSVersion: 5.1.22621.2506
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.2506
+BuildVersion: 10.0.22621.2506
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+已启动脚本，输出文件为 D:\VSCodeProject\XAUUSD\runtime\cli_transcript_20260925_212545.log
+PS D:\VSCodeProject\XAUUSD> Remove-Item .ai\ci_evidence\fresh_process_restart_evidence.json -Force
+Remove-Item : 找不到路径“D:\VSCodeProject\XAUUSD\.ai\ci_evidence\fresh_process_restart_evidence.json”，因为该路径不存在。
+所在位置 行:1 字符: 1
++ Remove-Item .ai\ci_evidence\fresh_process_restart_evidence.json -Forc ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (D:\VSCodeProjec...t_evidence.json:String) [Remove-Item], ItemNotFoundExce
+ption
+    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.RemoveItemCommand
+Remove-Item : 找不到路径“D:\VSCodeProject\XAUUSD\.ai\ci_evidence\fresh_process_restart_evidence.json”，因为该路径不存
+在。
+所在位置 行:1 字符: 1
++ Remove-Item .ai\ci_evidence\fresh_process_restart_evidence.json -Forc ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (D:\VSCodeProjec...t_evidence.json:String) [Remove-Item], ItemNotFoundEx
+   ception
+    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.RemoveItemCommand
+
+PS D:\VSCodeProject\XAUUSD> git rev-parse HEAD
+
+PS D:\VSCodeProject\XAUUSD> git rev-parse origin/cline-agent
+
+PS D:\VSCodeProject\XAUUSD> .venv\Scripts\python.exe -m scripts.record_fresh_process_evidence
+
+PS D:\VSCodeProject\XAUUSD> Stop-Transcript
+**********************
+Windows PowerShell 脚本结束
+结束时间: 20260925213317
+**********************

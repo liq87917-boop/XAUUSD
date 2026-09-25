@@ -1,0 +1,25 @@
+﻿**********************
+Windows PowerShell 脚本开始
+开始时间: 20260925211121
+用户名: ADMIN-TIAN\Admin
+RunAs 用户: ADMIN-TIAN\Admin
+配置名称: 
+计算机: ADMIN-TIAN (Microsoft Windows NT 10.0.22631.0)
+主机应用程序: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+进程 ID: 44460
+PSVersion: 5.1.22621.2506
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.2506
+BuildVersion: 10.0.22621.2506
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+已启动脚本，输出文件为 D:\VSCodeProject\XAUUSD\runtime\cli_transcript_20260925_211121.log
+PS C:\Users\Admin> cd D:\VSCodeProject\XAUUSD
+PS D:\VSCodeProject\XAUUSD> Remove-Item .ai\ci_evidence\fresh_process_restart_evidence.json -Force
+PS D:\VSCodeProject\XAUUSD> git rev-parse HEAD
+a4a23c02493a3820dc0aae63cc42b0c9b01c3a80
+PS D:\VSCodeProject\XAUUSD> git rev-parse origin/cline-agent
+a4a23c02493a3820dc0aae63cc42b0c9b01c3a80
