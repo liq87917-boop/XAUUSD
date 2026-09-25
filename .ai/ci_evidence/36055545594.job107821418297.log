@@ -1,0 +1,648 @@
+﻿PostgreSQL native schema + seeds	UNKNOWN STEP	锘?026-09-24T20:32:24.8969668Z Current runner version: '2.337.0'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.8998860Z ##[group]Runner Image Provisioner
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.8999798Z Hosted Compute Agent
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9000402Z Version: 20260828.587
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9001483Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9002324Z Build Date: 2026-08-28T16:44:25Z
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9003020Z Worker ID: {4fab8ded-b661-4db1-9e0d-9de8d562dd38}
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9003805Z Azure Region: centralus
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9004402Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9005921Z ##[group]Operating System
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9006707Z Ubuntu
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9007242Z 24.04.5
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9007792Z LTS
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9008319Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9008875Z ##[group]Runner Image
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9009987Z Image: ubuntu-24.04
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9010577Z Version: 20260920.314.1
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9012236Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260920.314/images/ubuntu/Ubuntu2404-Readme.md
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9013852Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260920.314
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9014907Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9016062Z ##[group]GITHUB_TOKEN Permissions
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9018272Z Contents: read
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9018935Z Metadata: read
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9019564Z Packages: read
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9020146Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9022649Z Secret source: Actions
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9023715Z Cache mode: write
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9024721Z Prepare workflow directory
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9474382Z Prepare all required actions
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:24.9524080Z Getting action download info
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.2115097Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.3332496Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.5204710Z Complete job name: PostgreSQL native schema + seeds
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.5731627Z ##[group]Checking docker version
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.5744968Z ##[command]/usr/bin/docker version --format '{{.Server.APIVersion}}'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.6842623Z '1.48'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.6863644Z Docker daemon API version: '1.48'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.6864655Z ##[command]/usr/bin/docker version --format '{{.Client.APIVersion}}'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7032750Z '1.48'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7046557Z Docker client API version: '1.48'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7052194Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7055359Z ##[group]Clean up resources from previous jobs
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7060806Z ##[command]/usr/bin/docker ps --all --quiet --no-trunc --filter "label=b99f8f"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7204305Z ##[command]/usr/bin/docker network prune --force --filter "label=b99f8f"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7360073Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7360707Z ##[group]Create local container network
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7372127Z ##[command]/usr/bin/docker network create --label b99f8f github_network_3b252f58848748c7bbccca616fc2b89d
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7899510Z 5a93435b471ebe2071942da2f622ec2892276e0b2298c8375928fab6cb18a3fb
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7918214Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7943941Z ##[group]Starting postgres service container
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:25.7965079Z ##[command]/usr/bin/docker pull postgres:16
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.3473608Z 16: Pulling from library/postgres
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5295572Z 6b37362b3da7: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5297499Z b1fdda8975a0: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5298996Z 106e7e3cf19a: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5300509Z ba0e979d0818: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5302280Z ad29720ebbb9: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5303244Z 3a749597affc: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5304109Z 483fb6941c15: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5304970Z 359ae0fc975d: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5305812Z 56d4d190ef07: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5306633Z 74156cf9f063: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5307452Z f7c7d4dd80ba: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5308355Z 749acf6dc637: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5309583Z 4d848243a73e: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5310477Z 6ad4758748c1: Pulling fs layer
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5311716Z 483fb6941c15: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5312999Z 359ae0fc975d: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5314216Z 56d4d190ef07: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5315408Z 74156cf9f063: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5316626Z f7c7d4dd80ba: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5317866Z 749acf6dc637: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5319073Z 4d848243a73e: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5320282Z 6ad4758748c1: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5321726Z ba0e979d0818: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.5322953Z 3a749597affc: Waiting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.6710160Z b1fdda8975a0: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.6712245Z b1fdda8975a0: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.8045524Z 106e7e3cf19a: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.8047331Z 106e7e3cf19a: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.8709309Z 6b37362b3da7: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.8866219Z ba0e979d0818: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:26.8869481Z ba0e979d0818: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.0380154Z 483fb6941c15: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.0382991Z 483fb6941c15: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.0673196Z ad29720ebbb9: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.0675220Z ad29720ebbb9: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.0915448Z 3a749597affc: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.0916548Z 3a749597affc: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.1780841Z 359ae0fc975d: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.1782892Z 359ae0fc975d: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.2125104Z 74156cf9f063: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.2992767Z f7c7d4dd80ba: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.3003925Z f7c7d4dd80ba: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.3318653Z 749acf6dc637: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.4278099Z 4d848243a73e: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.4279291Z 4d848243a73e: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.4553646Z 6ad4758748c1: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.4555496Z 6ad4758748c1: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.6840653Z 56d4d190ef07: Verifying Checksum
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:27.6841995Z 56d4d190ef07: Download complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:28.0289907Z 6b37362b3da7: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:30.9716987Z b1fdda8975a0: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:31.1489298Z 106e7e3cf19a: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:31.1885344Z ba0e979d0818: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:31.4954718Z ad29720ebbb9: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:31.5757649Z 3a749597affc: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:31.5833598Z 483fb6941c15: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:31.5925167Z 359ae0fc975d: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6406332Z 56d4d190ef07: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6547776Z 74156cf9f063: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6637157Z f7c7d4dd80ba: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6737002Z 749acf6dc637: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6818149Z 4d848243a73e: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6905262Z 6ad4758748c1: Pull complete
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6946736Z Digest: sha256:1a6ab3f5345eb6dbe04a1349529caabdb0ab09293a09590fad07b2246bfa4b54
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6958975Z Status: Downloaded newer image for postgres:16
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.6966397Z docker.io/library/postgres:16
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.7026806Z ##[command]/usr/bin/docker create --name dc361f3b6b8e4982986624b75455ada7_postgres16_79cfbc --label b99f8f --network github_network_3b252f58848748c7bbccca616fc2b89d --network-alias postgres -p 5432:5432 --health-cmd "pg_isready -U gold_ai -d gold_ai" --health-interval 5s --health-timeout 5s --health-retries 20 -e "POSTGRES_USER=gold_ai" -e "POSTGRES_PASSWORD=gold_ai" -e "POSTGRES_DB=gold_ai" -e GITHUB_ACTIONS=true -e CI=true postgres:16
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.7268406Z 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.7291569Z ##[command]/usr/bin/docker start 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.9679996Z 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.9716675Z ##[command]/usr/bin/docker ps --all --filter id=12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744 --filter status=running --no-trunc --format "{{.ID}} {{.Status}}"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.9863388Z 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744 Up Less than a second (health: starting)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:34.9886929Z ##[command]/usr/bin/docker port 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:35.0025286Z 5432/tcp -> 0.0.0.0:5432
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:35.0026232Z 5432/tcp -> [::]:5432
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:35.0076827Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:35.0085865Z ##[group]Waiting for all services to be ready
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:35.0100540Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:35.0247609Z starting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:35.0268467Z postgres service is starting, waiting 2 seconds before checking again.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:37.0264955Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:37.0398687Z starting
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:37.0414339Z postgres service is starting, waiting 3 seconds before checking again.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:40.9625297Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:40.9757423Z healthy
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:40.9773041Z postgres service is healthy.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:40.9773554Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0065440Z ##[group]Run actions/checkout@v4
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0066015Z with:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0066229Z   fetch-depth: 0
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0066451Z   repository: liq87917-boop/XAUUSD
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0068834Z   token: ***
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0069038Z   ssh-strict: true
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0069240Z   ssh-user: git
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0069446Z   persist-credentials: true
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0069702Z   clean: true
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0069913Z   sparse-checkout-cone-mode: true
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0070160Z   fetch-tags: false
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0070361Z   show-progress: true
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0070571Z   lfs: false
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0070760Z   submodules: false
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0070973Z   set-safe-directory: true
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0071509Z   allow-unsafe-pr-checkout: false
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0072010Z env:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0072503Z   DATABASE_URL: ***localhost:5432/gold_ai
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.0072793Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1179345Z Syncing repository: liq87917-boop/XAUUSD
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1181463Z ##[group]Getting Git version info
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1182067Z Working directory is '/home/runner/work/XAUUSD/XAUUSD'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1182936Z [command]/usr/bin/git version
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1266817Z git version 2.55.0
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1288603Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1304790Z Temporarily overriding HOME='/home/runner/work/_temp/a1948470-e095-4a0d-a4ed-11e293f44725' before making global git config changes
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1306157Z Adding repository directory to the temporary git global config as a safe directory
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1311751Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/XAUUSD/XAUUSD
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1369557Z Deleting the contents of '/home/runner/work/XAUUSD/XAUUSD'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1374134Z ##[group]Initializing the repository
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1378555Z [command]/usr/bin/git init /home/runner/work/XAUUSD/XAUUSD
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1523666Z hint: Using 'master' as the name for the initial branch. This default branch name
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1524576Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1525438Z hint: to use in all of your new repositories, which will suppress this warning,
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1526094Z hint: call:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1526396Z hint:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1526912Z hint: 	git config --global init.defaultBranch <name>
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1527741Z hint:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1528298Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1529199Z hint: 'development'. The just-created branch can be renamed via this command:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1529866Z hint:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1530186Z hint: 	git branch -m <name>
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1530562Z hint:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1531340Z hint: Disable this message with "git config set advice.defaultBranchName false"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1532283Z Initialized empty Git repository in /home/runner/work/XAUUSD/XAUUSD/.git/
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1543516Z [command]/usr/bin/git remote add origin https://github.com/liq87917-boop/XAUUSD
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1596111Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1596788Z ##[group]Disabling automatic garbage collection
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1600085Z [command]/usr/bin/git config --local gc.auto 0
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1648663Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1649469Z ##[group]Setting up auth
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1656219Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.1693929Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.2177631Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.2216428Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.2446587Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.2483875Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.2722677Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.2764661Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.2765269Z ##[group]Fetching the repository
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:41.2775681Z [command]/usr/bin/git -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5040952Z From https://github.com/liq87917-boop/XAUUSD
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5042056Z  * [new branch]      cline-agent -> origin/cline-agent
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5055351Z [command]/usr/bin/git branch --list --remote origin/cline-agent
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5084140Z   origin/cline-agent
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5093555Z [command]/usr/bin/git rev-parse refs/remotes/origin/cline-agent
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5119357Z 6d7c7ecb5a8ef75e5317df6e5f7f37a6b4b2d545
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5125043Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5125690Z ##[group]Determining the checkout info
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5126521Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5151958Z [command]/usr/bin/git sparse-checkout disable
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5205298Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5237840Z ##[group]Checking out the ref
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5243139Z [command]/usr/bin/git checkout --progress --force -B cline-agent refs/remotes/origin/cline-agent
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5854922Z Switched to a new branch 'cline-agent'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5861460Z branch 'cline-agent' set up to track 'origin/cline-agent'.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5870771Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5920698Z [command]/usr/bin/git log -1 --format=%H
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.5949819Z 6d7c7ecb5a8ef75e5317df6e5f7f37a6b4b2d545
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6220443Z ##[group]Run actions/setup-python@v5
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6220749Z with:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6220952Z   python-version: 3.13
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6221505Z   cache: pip
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6221717Z   check-latest: false
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6224152Z   token: ***
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6224372Z   update-environment: true
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6224625Z   allow-prereleases: false
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6225054Z   freethreaded: false
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6225265Z env:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6225718Z   DATABASE_URL: ***localhost:5432/gold_ai
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.6225998Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.7564113Z ##[group]Installed versions
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.7681577Z (node:2664) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.7682328Z (Use `node --trace-deprecation ...` to show where the warning was created)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.7683223Z Successfully set up CPython (3.13.15)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.7683970Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:42.9566258Z [command]/opt/hostedtoolcache/Python/3.13.15/x64/bin/pip cache dir
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:43.2736725Z /home/runner/.cache/pip
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:43.4284879Z Cache hit for: setup-python-Linux-x64-24.04-Ubuntu-python-3.13.15-pip-99b428ef1de79221bf7db326db48be795a0649224efb6fac12f7835098d359f1
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:43.4397843Z (node:2664) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:44.5996980Z Received 46137344 of 205242726 (22.5%), 44.0 MBs/sec
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.5688019Z Received 205242726 of 205242726 (100.0%), 99.4 MBs/sec
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.5688762Z Cache Size: ~196 MB (205242726 B)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.5816504Z [command]/usr/bin/tar -xf /home/runner/work/_temp/bd437e07-fc19-4630-88ca-c25e952390e3/cache.tzst -P -C /home/runner/work/XAUUSD/XAUUSD --use-compress-program unzstd
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.8887889Z Cache restored successfully
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.8988695Z Cache restored from key: setup-python-Linux-x64-24.04-Ubuntu-python-3.13.15-pip-99b428ef1de79221bf7db326db48be795a0649224efb6fac12f7835098d359f1
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9199380Z ##[group]Run python -m pip install --upgrade pip
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9199893Z ^[[36;1mpython -m pip install --upgrade pip^[[0m
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9200288Z ^[[36;1mpython -m pip install -e ".[dev]"^[[0m
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9492101Z shell: /usr/bin/bash -e {0}
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9492606Z env:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9493428Z   DATABASE_URL: ***localhost:5432/gold_ai
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9494086Z   pythonLocation: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9494845Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.13.15/x64/lib/pkgconfig
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9495600Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9496244Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9496893Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9497550Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.13.15/x64/lib
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:45.9498135Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:46.5283592Z Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.13.15/x64/lib/python3.13/site-packages (26.2.1)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:47.0255717Z Obtaining file:///home/runner/work/XAUUSD/XAUUSD
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:47.0274568Z   Installing build dependencies: started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:47.6402205Z   Installing build dependencies: finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:47.6409697Z   Checking if build backend supports build_editable: started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:47.9685995Z   Checking if build backend supports build_editable: finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:47.9695033Z   Getting requirements to build editable: started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:48.3629752Z   Getting requirements to build editable: finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:48.3639166Z   Preparing editable metadata (pyproject.toml): started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:48.5678495Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:48.9670266Z Collecting sqlalchemy>=2.0.30 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:49.0514240Z   Downloading sqlalchemy-2.1.0.tar.gz (10.5 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:49.5638076Z      鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣鈹佲攣 10.5/10.5 MB 22.2 MB/s  0:00:00
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:50.2364670Z   Installing build dependencies: started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:51.3951549Z   Installing build dependencies: finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:51.3957897Z   Getting requirements to build wheel: started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.1610359Z   Getting requirements to build wheel: finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.1619706Z   Preparing metadata (pyproject.toml): started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.5246850Z   Preparing metadata (pyproject.toml): finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.5546779Z Collecting alembic>=1.13.1 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.5559291Z   Using cached alembic-1.20.0-py3-none-any.whl.metadata (7.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.6520457Z Collecting pydantic>=2.7.0 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.6534010Z   Using cached pydantic-2.13.5-py3-none-any.whl.metadata (110 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.6760894Z Collecting pydantic-settings>=2.3.0 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.6772994Z   Using cached pydantic_settings-2.15.0-py3-none-any.whl.metadata (3.9 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.6985800Z Collecting psycopg>=3.1.19 (from psycopg[binary]>=3.1.19->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.6997148Z   Using cached psycopg-3.3.6-py3-none-any.whl.metadata (4.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.7199262Z Collecting tzdata>=2024.1 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:52.7211058Z   Using cached tzdata-2026.4-py2.py3-none-any.whl.metadata (1.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.1755707Z Collecting aiohttp>=3.9.5 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.1770507Z   Using cached aiohttp-3.14.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.2164643Z Collecting PyYAML>=6.0.1 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.2177450Z   Using cached pyyaml-6.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.3993313Z Collecting numpy>=1.26 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.4008049Z   Using cached numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.5103889Z Collecting pandas>=2.2 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.5117720Z   Using cached pandas-3.0.6-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.6138622Z Collecting scikit-learn>=1.4 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.6151868Z   Using cached scikit_learn-1.9.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.6377832Z Collecting httpx>=0.27 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.6389751Z   Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.6557704Z Collecting jieba>=0.42.1 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.6558720Z   Using cached jieba-0.42.1-py3-none-any.whl
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.6760118Z Collecting feedparser>=6.0.11 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.6772152Z   Using cached feedparser-6.0.14-py3-none-any.whl.metadata (2.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.7382281Z Collecting akshare>=1.14.0 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.7395357Z   Using cached akshare-1.18.97-py3-none-any.whl.metadata (14 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.7813089Z Collecting dbnomics>=1.2.0 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.7824923Z   Using cached dbnomics-1.2.7-py3-none-any.whl.metadata (42 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.8199187Z Collecting pytest>=8.2.0 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.8211082Z   Using cached pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.8441941Z Collecting pytest-asyncio>=0.23.0 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:53.8454148Z   Using cached pytest_asyncio-1.4.0-py3-none-any.whl.metadata (4.1 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.1504070Z Collecting ruff==0.16.7 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.1517816Z   Using cached ruff-0.16.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.2509341Z Collecting mypy>=1.10.0 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.2523573Z   Using cached mypy-2.3.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.2729184Z Collecting openpyxl>=3.1 (from gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.2741135Z   Using cached openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.2943109Z Collecting aiohappyeyeballs>=2.5.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.2954639Z   Using cached aiohappyeyeballs-2.7.1-py3-none-any.whl.metadata (5.9 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.3111232Z Collecting aiosignal>=1.4.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.3122983Z   Using cached aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.3304061Z Collecting attrs>=17.3.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.3315628Z   Using cached attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.3966479Z Collecting frozenlist>=1.1.1 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.3979947Z   Using cached frozenlist-1.8.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.6313966Z Collecting multidict<7.0,>=4.5 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.6328525Z   Using cached multidict-6.9.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.7032464Z Collecting propcache>=0.2.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.7047454Z   Using cached propcache-0.5.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (25 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.9418801Z Collecting yarl<2.0,>=1.17.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.9434124Z   Using cached yarl-1.25.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (111 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.9698910Z Collecting idna>=2.0 (from yarl<2.0,>=1.17.0->aiohttp>=3.9.5->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.9710563Z   Using cached idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.9983262Z Collecting beautifulsoup4>=4.9.1 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:54.9995209Z   Using cached beautifulsoup4-4.15.0-py3-none-any.whl.metadata (3.8 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.2405390Z Collecting lxml>=4.2.1 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.2420169Z   Using cached lxml-6.1.3-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (3.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.2694223Z Collecting requests>=2.22.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.2706937Z   Using cached requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.3446862Z Collecting curl_cffi>=0.13.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.3459999Z   Using cached curl_cffi-0.16.3-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (17 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.3648610Z Collecting html5lib>=1.0.1 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.3660149Z   Using cached html5lib-1.1-py2.py3-none-any.whl.metadata (16 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.3831562Z Collecting xlrd>=1.2.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.3843413Z   Using cached xlrd-2.0.2-py2.py3-none-any.whl.metadata (3.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4093820Z Collecting urllib3>=1.25.8 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4105439Z   Using cached urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4413177Z Collecting tqdm>=4.43.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4424483Z   Using cached tqdm-4.70.1-py3-none-any.whl.metadata (57 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4621497Z Collecting jsonpath>=0.82 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4623243Z   Using cached jsonpath-0.82.2-py3-none-any.whl
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4778962Z Collecting tabulate>=0.8.6 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4790708Z   Using cached tabulate-0.10.0-py3-none-any.whl.metadata (40 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.4996196Z Collecting decorator>=4.4.2 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.5007646Z   Using cached decorator-5.3.1-py3-none-any.whl.metadata (3.9 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.5280754Z Collecting py-mini-racer>=0.6.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.5292852Z   Using cached py_mini_racer-0.6.0-py2.py3-none-manylinux1_x86_64.whl.metadata (8.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.5449813Z Collecting akracer>=0.0.13 (from akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.5462822Z   Using cached akracer-0.0.14-py3-none-any.whl.metadata (3.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.5712979Z Collecting Mako (from alembic>=1.13.1->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.5844230Z   Downloading mako-1.4.3-py3-none-any.whl.metadata (2.9 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.6059859Z Collecting typing-extensions>=4.12 (from alembic>=1.13.1->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.6071778Z   Using cached typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.6306255Z Collecting soupsieve>=1.6.1 (from beautifulsoup4>=4.9.1->akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.6434892Z   Downloading soupsieve-2.10-py3-none-any.whl.metadata (4.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.7495153Z Collecting cffi>=2.0.0 (from curl_cffi>=0.13.0->akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.7510181Z   Using cached cffi-2.1.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.7726738Z Collecting certifi>=2024.2.2 (from curl_cffi>=0.13.0->akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.7739570Z   Using cached certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.7915817Z Collecting pycparser (from cffi>=2.0.0->curl_cffi>=0.13.0->akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.7928350Z   Using cached pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8154651Z Collecting tenacity>=9.0.0 (from dbnomics>=1.2.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8168394Z   Using cached tenacity-9.1.4-py3-none-any.whl.metadata (1.2 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8343650Z Collecting feedparser-sgmllib<3,>=2 (from feedparser>=6.0.11->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8356118Z   Using cached feedparser_sgmllib-2.1.0-py3-none-any.whl.metadata (926 bytes)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8542219Z Collecting six>=1.9 (from html5lib>=1.0.1->akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8555609Z   Using cached six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8708479Z Collecting webencodings (from html5lib>=1.0.1->akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8720930Z   Using cached webencodings-0.6.1-py3-none-any.whl.metadata (3.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8958656Z Collecting anyio (from httpx>=0.27->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.8972064Z   Using cached anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.9174316Z Collecting httpcore==1.* (from httpx>=0.27->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.9186452Z   Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.9366816Z Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.27->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.9378830Z   Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.9577823Z Collecting mypy_extensions>=1.0.0 (from mypy>=1.10.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.9590249Z   Using cached mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.9760758Z Collecting pathspec>=1.0.0 (from mypy>=1.10.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:55.9774210Z   Using cached pathspec-1.1.1-py3-none-any.whl.metadata (14 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.0978641Z Collecting librt>=0.13.0 (from mypy>=1.10.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.0992604Z   Using cached librt-0.15.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.1440661Z Collecting ast-serialize<1.0.0,>=0.6.0 (from mypy>=1.10.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.1453994Z   Using cached ast_serialize-0.11.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.1628103Z Collecting et-xmlfile (from openpyxl>=3.1->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.1640321Z   Using cached et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.1813314Z Collecting python-dateutil>=2.8.2 (from pandas>=2.2->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.1825159Z   Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.3716429Z Collecting psycopg-binary==3.3.6 (from psycopg[binary]>=3.1.19->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.3730445Z   Using cached psycopg_binary-3.3.6-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.3949622Z Collecting annotated-types>=0.6.0 (from pydantic>=2.7.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.3962194Z   Using cached annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.9942988Z Collecting pydantic-core==2.46.5 (from pydantic>=2.7.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:56.9957665Z   Using cached pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0123883Z Collecting typing-inspection>=0.4.2 (from pydantic>=2.7.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0135928Z   Using cached typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0342320Z Collecting python-dotenv>=0.21.0 (from pydantic-settings>=2.3.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0354603Z   Using cached python_dotenv-1.2.3-py3-none-any.whl.metadata (29 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0537490Z Collecting iniconfig>=1.0.1 (from pytest>=8.2.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0549587Z   Using cached iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0738442Z Collecting packaging>=22 (from pytest>=8.2.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0750163Z   Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0911763Z Collecting pluggy<2,>=1.5 (from pytest>=8.2.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.0924286Z   Using cached pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.1149769Z Collecting pygments>=2.7.2 (from pytest>=8.2.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.1162127Z   Using cached pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.2367703Z Collecting charset_normalizer<4,>=2 (from requests>=2.22.0->akshare>=1.14.0->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.2382460Z   Using cached charset_normalizer-3.5.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (45 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.3734022Z Collecting scipy>=1.10.0 (from scikit-learn>=1.4->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.3748688Z   Using cached scipy-1.18.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (62 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.4100554Z Collecting joblib>=1.4.0 (from scikit-learn>=1.4->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.4113684Z   Using cached joblib-1.6.0-py3-none-any.whl.metadata (6.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.4459571Z Collecting narwhals>=2.0.1 (from scikit-learn>=1.4->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.4471647Z   Using cached narwhals-2.26.0-py3-none-any.whl.metadata (15 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.4647209Z Collecting threadpoolctl>=3.5.0 (from scikit-learn>=1.4->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.4659123Z   Using cached threadpoolctl-3.7.0-py3-none-any.whl.metadata (24 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.4853370Z Collecting cloudpickle>=3.0 (from joblib>=1.4.0->scikit-learn>=1.4->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.4865315Z   Using cached cloudpickle-3.1.2-py3-none-any.whl.metadata (7.1 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5532015Z Collecting MarkupSafe>=2.0 (from Mako->alembic>=1.13.1->gold-ai==0.2.0)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5545177Z   Using cached markupsafe-3.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5600655Z Using cached ruff-0.16.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5653086Z Using cached aiohttp-3.14.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.8 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5671356Z Using cached multidict-6.9.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (336 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5683598Z Using cached yarl-1.25.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (117 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5695021Z Using cached aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5706433Z Using cached aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5743809Z Using cached akshare-1.18.97-py3-none-any.whl (1.3 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5744592Z Using cached akracer-0.0.14-py3-none-any.whl (10.1 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5784119Z Using cached alembic-1.20.0-py3-none-any.whl (268 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5796621Z Using cached attrs-26.1.0-py3-none-any.whl (67 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5808321Z Using cached beautifulsoup4-4.15.0-py3-none-any.whl (109 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5821366Z Using cached curl_cffi-0.16.3-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (13.5 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5881248Z Using cached certifi-2026.7.22-py3-none-any.whl (136 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5893843Z Using cached cffi-2.1.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5905921Z Using cached dbnomics-1.2.7-py3-none-any.whl (32 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5917666Z Using cached decorator-5.3.1-py3-none-any.whl (10 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5929194Z Using cached feedparser-6.0.14-py3-none-any.whl (80 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5940994Z Using cached feedparser_sgmllib-2.1.0-py3-none-any.whl (11 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5953331Z Using cached frozenlist-1.8.0-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (234 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5965259Z Using cached html5lib-1.1-py2.py3-none-any.whl (112 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5977731Z Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.5989512Z Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6001212Z Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6013404Z Using cached idna-3.20-py3-none-any.whl (69 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6025668Z Using cached lxml-6.1.3-cp313-cp313-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (5.2 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6055855Z Using cached mypy-2.3.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.2 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6121433Z Using cached ast_serialize-0.11.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6137416Z Using cached librt-0.15.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (531 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6150186Z Using cached mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6161425Z Using cached numpy-2.5.3-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6232230Z Using cached openpyxl-3.1.5-py2.py3-none-any.whl (250 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6244587Z Using cached pandas-3.0.6-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (10.8 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6293579Z Using cached pathspec-1.1.1-py3-none-any.whl (57 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6305310Z Using cached propcache-0.5.4-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (234 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6316269Z Using cached psycopg-3.3.6-py3-none-any.whl (215 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6328373Z Using cached psycopg_binary-3.3.6-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (5.2 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6358048Z Using cached py_mini_racer-0.6.0-py2.py3-none-manylinux1_x86_64.whl (5.4 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6388251Z Using cached pydantic-2.13.5-py3-none-any.whl (472 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6401240Z Using cached pydantic_core-2.46.5-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6420075Z Using cached annotated_types-0.8.0-py3-none-any.whl (13 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6431157Z Using cached pydantic_settings-2.15.0-py3-none-any.whl (69 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6442610Z Using cached pytest-9.1.1-py3-none-any.whl (386 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6455006Z Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6466043Z Using cached iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6476933Z Using cached packaging-26.3-py3-none-any.whl (129 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6490043Z Using cached pygments-2.21.0-py3-none-any.whl (1.3 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6505691Z Using cached pytest_asyncio-1.4.0-py3-none-any.whl (16 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6516953Z Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6528444Z Using cached python_dotenv-1.2.3-py3-none-any.whl (22 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6540193Z Using cached pyyaml-6.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (801 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6553863Z Using cached requests-2.34.2-py3-none-any.whl (73 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6565846Z Using cached charset_normalizer-3.5.1-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (250 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6576918Z Using cached urllib3-2.8.0-py3-none-any.whl (135 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6588674Z Using cached scikit_learn-1.9.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (9.1 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6632419Z Using cached joblib-1.6.0-py3-none-any.whl (306 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6644416Z Using cached cloudpickle-3.1.2-py3-none-any.whl (22 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6655536Z Using cached narwhals-2.26.0-py3-none-any.whl (474 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6670203Z Using cached scipy-1.18.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (35.3 MB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6817784Z Using cached six-1.17.0-py2.py3-none-any.whl (11 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6949411Z Downloading soupsieve-2.10-py3-none-any.whl (38 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6984362Z Using cached tabulate-0.10.0-py3-none-any.whl (39 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.6995769Z Using cached tenacity-9.1.4-py3-none-any.whl (28 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7007131Z Using cached threadpoolctl-3.7.0-py3-none-any.whl (26 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7018581Z Using cached tqdm-4.70.1-py3-none-any.whl (80 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7030977Z Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7042573Z Using cached typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7053531Z Using cached tzdata-2026.4-py2.py3-none-any.whl (347 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7065667Z Using cached xlrd-2.0.2-py2.py3-none-any.whl (96 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7077010Z Using cached anyio-4.15.1-py3-none-any.whl (132 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7088267Z Using cached et_xmlfile-2.0.0-py3-none-any.whl (18 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7221007Z Downloading mako-1.4.3-py3-none-any.whl (80 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7254580Z Using cached markupsafe-3.0.3-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7265214Z Using cached pycparser-3.0-py3-none-any.whl (48 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:57.7276897Z Using cached webencodings-0.6.1-py3-none-any.whl (8.7 kB)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:58.0865513Z Building wheels for collected packages: gold-ai, sqlalchemy
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:58.0874184Z   Building editable for gold-ai (pyproject.toml): started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:58.3356306Z   Building editable for gold-ai (pyproject.toml): finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:58.3364667Z   Created wheel for gold-ai: filename=gold_ai-0.2.0-0.editable-py3-none-any.whl size=68588 sha256=c9e567bc30d19e4c91450d7020cb0301e581336b9cf049b5efdf808e7b32518a
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:58.3366872Z   Stored in directory: /tmp/pip-ephem-wheel-cache-ruy72k2m/wheels/b9/5c/54/a93df2da7182017cd55cc1bfdbe1f75bcf1e62c60d95c771da
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:32:58.3462077Z   Building wheel for sqlalchemy (pyproject.toml): started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:27.5471840Z   Building wheel for sqlalchemy (pyproject.toml): finished with status 'done'
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:27.5513032Z   Created wheel for sqlalchemy: filename=sqlalchemy-2.1.0-cp313-cp313-linux_x86_64.whl size=4527655 sha256=05dfddc9f77bdef58002c63d1a216d2176422273ee5aec96e4631b0b4d40ad6d
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:27.5516227Z   Stored in directory: /home/runner/.cache/pip/wheels/dd/13/02/75de3590c57da2670b67b8fcc8ff21ec9dcdc10785162f7d50
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:27.5554483Z Successfully built gold-ai sqlalchemy
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:27.7462102Z Installing collected packages: py-mini-racer, jsonpath, jieba, xlrd, webencodings, urllib3, tzdata, typing-extensions, tqdm, threadpoolctl, tenacity, tabulate, soupsieve, six, ruff, PyYAML, python-dotenv, pygments, pycparser, psycopg-binary, psycopg, propcache, pluggy, pathspec, packaging, numpy, narwhals, mypy_extensions, multidict, MarkupSafe, lxml, librt, iniconfig, idna, h11, frozenlist, feedparser-sgmllib, et-xmlfile, decorator, cloudpickle, charset_normalizer, certifi, attrs, ast-serialize, annotated-types, akracer, aiohappyeyeballs, yarl, typing-inspection, sqlalchemy, scipy, requests, python-dateutil, pytest, pydantic-core, openpyxl, mypy, Mako, joblib, httpcore, html5lib, feedparser, cffi, beautifulsoup4, anyio, aiosignal, scikit-learn, pytest-asyncio, pydantic, pandas, httpx, curl_cffi, alembic, aiohttp, pydantic-settings, dbnomics, akshare, gold-ai
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:50.8351443Z 
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:50.8430296Z Successfully installed Mako-1.4.3 MarkupSafe-3.0.3 PyYAML-6.0.3 aiohappyeyeballs-2.7.1 aiohttp-3.14.3 aiosignal-1.4.0 akracer-0.0.14 akshare-1.18.97 alembic-1.20.0 annotated-types-0.8.0 anyio-4.15.1 ast-serialize-0.11.2 attrs-26.1.0 beautifulsoup4-4.15.0 certifi-2026.7.22 cffi-2.1.1 charset_normalizer-3.5.1 cloudpickle-3.1.2 curl_cffi-0.16.3 dbnomics-1.2.7 decorator-5.3.1 et-xmlfile-2.0.0 feedparser-6.0.14 feedparser-sgmllib-2.1.0 frozenlist-1.8.0 gold-ai-0.2.0 h11-0.16.0 html5lib-1.1 httpcore-1.0.9 httpx-0.28.1 idna-3.20 iniconfig-2.3.0 jieba-0.42.1 joblib-1.6.0 jsonpath-0.82.2 librt-0.15.0 lxml-6.1.3 multidict-6.9.1 mypy-2.3.1 mypy_extensions-1.1.0 narwhals-2.26.0 numpy-2.5.3 openpyxl-3.1.5 packaging-26.3 pandas-3.0.6 pathspec-1.1.1 pluggy-1.6.0 propcache-0.5.4 psycopg-3.3.6 psycopg-binary-3.3.6 py-mini-racer-0.6.0 pycparser-3.0 pydantic-2.13.5 pydantic-core-2.46.5 pydantic-settings-2.15.0 pygments-2.21.0 pytest-9.1.1 pytest-asyncio-1.4.0 python-dateutil-2.9.0.post0 python-dotenv-1.2.3 requests-2.34.2 ruff-0.16.7 scikit-learn-1.9.1 scipy-1.18.1 six-1.17.0 soupsieve-2.10 sqlalchemy-2.1.0 tabulate-0.10.0 tenacity-9.1.4 threadpoolctl-3.7.0 tqdm-4.70.1 typing-extensions-4.16.0 typing-inspection-0.4.4 tzdata-2026.4 urllib3-2.8.0 webencodings-0.6.1 xlrd-2.0.2 yarl-1.25.1
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.3967248Z ##[group]Run python -m alembic upgrade head
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.3967688Z ^[[36;1mpython -m alembic upgrade head^[[0m
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4034072Z shell: /usr/bin/bash -e {0}
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4034418Z env:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4035038Z   DATABASE_URL: ***localhost:5432/gold_ai
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4035537Z   pythonLocation: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4036164Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.13.15/x64/lib/pkgconfig
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4036789Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4037336Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4037887Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4038440Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.13.15/x64/lib
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:51.4038917Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.1980426Z INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.1981901Z INFO  [alembic.runtime.migration] Will assume transactional DDL.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.2203589Z INFO  [alembic.runtime.migration] Running upgrade  -> 0001_phase1_core_tables, Phase 1 鏍稿績琛ㄧ粨鏋勶紙Gold Intelligence Database锛?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.3144899Z INFO  [alembic.runtime.migration] Running upgrade 0001_phase1_core_tables -> 0002_collector_run_retry_count, collector_runs.retry_count锛堝洟闃熸壒澶嶏細鎸佷箙鍖栬秴鏃?闄愭祦閲嶈瘯娆℃暟锛?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.3171917Z INFO  [alembic.runtime.migration] Running upgrade 0002_collector_run_retry_count -> 0003_market_bars_source_unique, market_bars 澧炲姞鎸夋潵婧愮殑鍞竴绱㈠紩锛堝洟闃熸壒澶嶏級
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.3194051Z INFO  [alembic.runtime.migration] Running upgrade 0003_market_bars_source_unique -> 0004_collector_run_warnings, collector_runs.warnings_json锛堝洟闃熸壒澶嶏細鏁版嵁璐ㄩ噺鍛婅鎸佷箙鍖栵級
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.3206515Z INFO  [alembic.runtime.migration] Running upgrade 0004_collector_run_warnings -> 0005_phase2_author_lab_tables, Phase 2锛圓uthor Lab锛夊洓寮犵爺绌朵簨瀹炶〃
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.3512512Z INFO  [alembic.runtime.migration] Running upgrade 0005_phase2_author_lab_tables -> 0006_macro_event_vintages, Phase 3.0 W0-2锛歮acro_events 澧炲姞 ALFRED vintage 鏃堕棿璇箟銆?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.3590051Z INFO  [alembic.runtime.migration] Running upgrade 0006_macro_event_vintages -> 0007_phase3_feature_tables, Phase 3.0 W0-5锛氱壒寰佸畾涔夈€佸揩鐓с€佽鑼冨寲鍊间笌 Regime 杩芥函琛ㄣ€?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.3819950Z INFO  [alembic.runtime.migration] Running upgrade 0007_phase3_feature_tables -> 0008_collector_status_degraded, collector_runs.status 澧炲姞 DEGRADED锛坧rovider 闄嶇骇鐘舵€侊級銆?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5019795Z ##[group]Run python scripts/check_pg_schema.py
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5020248Z ^[[36;1mpython scripts/check_pg_schema.py^[[0m
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5084884Z shell: /usr/bin/bash -e {0}
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5085232Z env:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5085859Z   DATABASE_URL: ***localhost:5432/gold_ai
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5086359Z   pythonLocation: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5086981Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.13.15/x64/lib/pkgconfig
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5087634Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5088182Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5088734Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5089301Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.13.15/x64/lib
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:52.5089774Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.5470000Z [pg-check] 鐩爣搴擄細***localhost:5432/gold_ai
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.5471548Z [pg-check] PASS锛?3 寮犺〃銆佸師鐢熺被鍨嬨€佺瀛愬箓绛夊叏閮ㄩ€氳繃
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6767564Z ##[group]Run python -m alembic downgrade base
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6767961Z ^[[36;1mpython -m alembic downgrade base^[[0m
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6832899Z shell: /usr/bin/bash -e {0}
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6833192Z env:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6833711Z   DATABASE_URL: ***localhost:5432/gold_ai
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6834104Z   pythonLocation: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6834599Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.13.15/x64/lib/pkgconfig
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6835100Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6835533Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6835966Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.13.15/x64
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6836406Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.13.15/x64/lib
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:53.6836782Z ##[endgroup]
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3249667Z INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3250593Z INFO  [alembic.runtime.migration] Will assume transactional DDL.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3321925Z INFO  [alembic.runtime.migration] Running downgrade 0008_collector_status_degraded -> 0007_phase3_feature_tables, collector_runs.status 澧炲姞 DEGRADED锛坧rovider 闄嶇骇鐘舵€侊級銆?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3354432Z INFO  [alembic.runtime.migration] Running downgrade 0007_phase3_feature_tables -> 0006_macro_event_vintages, Phase 3.0 W0-5锛氱壒寰佸畾涔夈€佸揩鐓с€佽鑼冨寲鍊间笌 Regime 杩芥函琛ㄣ€?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3432334Z INFO  [alembic.runtime.migration] Running downgrade 0006_macro_event_vintages -> 0005_phase2_author_lab_tables, Phase 3.0 W0-2锛歮acro_events 澧炲姞 ALFRED vintage 鏃堕棿璇箟銆?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3519249Z INFO  [alembic.runtime.migration] Running downgrade 0005_phase2_author_lab_tables -> 0004_collector_run_warnings, Phase 2锛圓uthor Lab锛夊洓寮犵爺绌朵簨瀹炶〃
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3609151Z INFO  [alembic.runtime.migration] Running downgrade 0004_collector_run_warnings -> 0003_market_bars_source_unique, collector_runs.warnings_json锛堝洟闃熸壒澶嶏細鏁版嵁璐ㄩ噺鍛婅鎸佷箙鍖栵級
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3620446Z INFO  [alembic.runtime.migration] Running downgrade 0003_market_bars_source_unique -> 0002_collector_run_retry_count, market_bars 澧炲姞鎸夋潵婧愮殑鍞竴绱㈠紩锛堝洟闃熸壒澶嶏級
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3634453Z INFO  [alembic.runtime.migration] Running downgrade 0002_collector_run_retry_count -> 0001_phase1_core_tables, collector_runs.retry_count锛堝洟闃熸壒澶嶏細鎸佷箙鍖栬秴鏃?闄愭祦閲嶈瘯娆℃暟锛?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.3652595Z INFO  [alembic.runtime.migration] Running downgrade 0001_phase1_core_tables -> , Phase 1 鏍稿績琛ㄧ粨鏋勶紙Gold Intelligence Database锛?PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.5217544Z Post job cleanup.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.6440964Z Cache hit occurred on the primary key setup-python-Linux-x64-24.04-Ubuntu-python-3.13.15-pip-99b428ef1de79221bf7db326db48be795a0649224efb6fac12f7835098d359f1, not saving cache.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.6444339Z (node:3172) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.6445638Z (Use `node --trace-deprecation ...` to show where the warning was created)
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.6577959Z Post job cleanup.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7431717Z [command]/usr/bin/git version
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7472012Z git version 2.55.0
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7514191Z Temporarily overriding HOME='/home/runner/work/_temp/3b5da245-22dc-4403-965d-9a60bd9c08fd' before making global git config changes
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7517678Z Adding repository directory to the temporary git global config as a safe directory
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7518917Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/XAUUSD/XAUUSD
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7557237Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7593749Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7851507Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7882488Z http.https://github.com/.extraheader
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7892868Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.7929129Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8262424Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8282757Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8716679Z Print service container logs: dc361f3b6b8e4982986624b75455ada7_postgres16_79cfbc
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8721602Z ##[command]/usr/bin/docker logs --details 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8857575Z  initdb: warning: enabling "trust" authentication for local connections
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8858432Z  The files belonging to this database system will be owned by user "postgres".
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8859685Z  initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8860422Z  This user must also own the server process.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8861730Z  2026-09-24 20:32:35.915 UTC [1] LOG:  starting PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8862521Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8863205Z  2026-09-24 20:32:35.916 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8863810Z  The database cluster will be initialized with locale "en_US.utf8".
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8864647Z  2026-09-24 20:32:35.916 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8865231Z  The default database encoding has accordingly been set to "UTF8".
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8866139Z  2026-09-24 20:32:35.916 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8866809Z  The default text search configuration will be set to "english".
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8867692Z  2026-09-24 20:32:35.919 UTC [64] LOG:  database system was shut down at 2026-09-24 20:32:35 UTC
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8868216Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8868816Z  2026-09-24 20:32:35.924 UTC [1] LOG:  database system is ready to accept connections
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8869350Z  Data page checksums are disabled.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8870018Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8870493Z  fixing permissions on existing directory /var/lib/postgresql/data ... ok
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8871301Z  creating subdirectories ... ok
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8871928Z  selecting dynamic shared memory implementation ... posix
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8872475Z  selecting default max_connections ... 100
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8872952Z  selecting default shared_buffers ... 128MB
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8873395Z  selecting default time zone ... Etc/UTC
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8873830Z  creating configuration files ... ok
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8874255Z  running bootstrap script ... ok
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8874703Z  performing post-bootstrap initialization ... ok
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8875178Z  syncing data to disk ... ok
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8875566Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8875887Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8876272Z  Success. You can now start the database server using:
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8876714Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8877091Z      pg_ctl -D /var/lib/postgresql/data -l logfile start
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8877543Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8878338Z  waiting for server to start....2026-09-24 20:32:35.609 UTC [48] LOG:  starting PostgreSQL 16.15 (Debian 16.15-1.pgdg13+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8879386Z  2026-09-24 20:32:35.610 UTC [48] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8880098Z  2026-09-24 20:32:35.612 UTC [51] LOG:  database system was shut down at 2026-09-24 20:32:35 UTC
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8880739Z  2026-09-24 20:32:35.616 UTC [48] LOG:  database system is ready to accept connections
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8881747Z   done
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8882331Z  server started
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8882881Z  CREATE DATABASE
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8883446Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8883896Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8884338Z  /usr/local/bin/docker-entrypoint.sh: ignoring /docker-entrypoint-initdb.d/*
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8884841Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8885163Z  2026-09-24 20:32:35.795 UTC [48] LOG:  received fast shutdown request
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8886103Z  waiting for server to shut down....2026-09-24 20:32:35.795 UTC [48] LOG:  aborting any active transactions
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8886967Z  2026-09-24 20:32:35.797 UTC [48] LOG:  background worker "logical replication launcher" (PID 54) exited with exit code 1
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8887647Z  2026-09-24 20:32:35.798 UTC [49] LOG:  shutting down
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8888152Z  2026-09-24 20:32:35.798 UTC [49] LOG:  checkpoint starting: shutdown immediate
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8889570Z  2026-09-24 20:32:35.813 UTC [49] LOG:  checkpoint complete: wrote 926 buffers (5.7%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.012 s, sync=0.002 s, total=0.016 s; sync files=301, longest=0.001 s, average=0.001 s; distance=4273 kB, estimate=4273 kB; lsn=0/191F0E0, redo lsn=0/191F0E0
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8890901Z  2026-09-24 20:32:35.819 UTC [48] LOG:  database system is shut down
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8891668Z   done
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8891891Z  server stopped
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8892132Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8892429Z  PostgreSQL init process complete; ready for start up.
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8892797Z  
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8900755Z Stop and remove container: dc361f3b6b8e4982986624b75455ada7_postgres16_79cfbc
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:54.8906027Z ##[command]/usr/bin/docker rm --force 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:56.5307285Z 12867699ea7540af8f432d26dfc836dafe43bc8f38843c25d9d453c17c713744
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:56.5337706Z Remove container network: github_network_3b252f58848748c7bbccca616fc2b89d
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:56.5342742Z ##[command]/usr/bin/docker network rm github_network_3b252f58848748c7bbccca616fc2b89d
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:56.6371372Z github_network_3b252f58848748c7bbccca616fc2b89d
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:56.6451004Z Cleaning up orphan processes
+PostgreSQL native schema + seeds	UNKNOWN STEP	2026-09-24T20:33:56.6841431Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

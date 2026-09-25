@@ -1,0 +1,588 @@
+﻿lint + type check + tests (py3.12)	UNKNOWN STEP	锘?026-09-24T16:18:07.0980068Z Current runner version: '2.337.0'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0995222Z ##[group]Runner Image Provisioner
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0995772Z Hosted Compute Agent
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0996320Z Version: 20260828.587
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0996706Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0997240Z Build Date: 2026-08-28T16:44:25Z
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0997651Z Worker ID: {df4410c3-8b03-4566-be06-7624e8d37cca}
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0998064Z Azure Region: centralus
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0998462Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0999225Z ##[group]Operating System
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0999612Z Ubuntu
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.0999936Z 24.04.5
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1000251Z LTS
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1000600Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1000931Z ##[group]Runner Image
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1001368Z Image: ubuntu-24.04
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1001723Z Version: 20260920.314.1
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1002477Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260920.314/images/ubuntu/Ubuntu2404-Readme.md
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1003383Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260920.314
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1003959Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1004660Z ##[group]GITHUB_TOKEN Permissions
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1006089Z Contents: read
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1006725Z Metadata: read
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1007064Z Packages: read
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1007439Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1008723Z Secret source: Actions
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1009320Z Cache mode: write
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1009760Z Prepare workflow directory
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1229665Z Prepare all required actions
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.1261345Z Getting action download info
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.3815650Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:07.7922224Z Download action repository 'actions/setup-python@v5' (SHA:a26af69be951a213d495a4c3e4e4022e16d87065)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1026585Z Complete job name: lint + type check + tests (py3.12)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1598361Z ##[group]Run actions/checkout@v4
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1598776Z with:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1599010Z   fetch-depth: 0
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1599269Z   repository: liq87917-boop/XAUUSD
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1601313Z   token: ***
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1601545Z   ssh-strict: true
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1601789Z   ssh-user: git
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1602035Z   persist-credentials: true
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1602303Z   clean: true
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1602550Z   sparse-checkout-cone-mode: true
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1602841Z   fetch-tags: false
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1603087Z   show-progress: true
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1603334Z   lfs: false
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1603575Z   submodules: false
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1603836Z   set-safe-directory: true
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1604120Z   allow-unsafe-pr-checkout: false
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.1604480Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2243263Z Syncing repository: liq87917-boop/XAUUSD
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2244322Z ##[group]Getting Git version info
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2244776Z Working directory is '/home/runner/work/XAUUSD/XAUUSD'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2245357Z [command]/usr/bin/git version
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2466605Z git version 2.55.0
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2480821Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2492474Z Temporarily overriding HOME='/home/runner/work/_temp/14fafea1-e246-48bc-865e-9ec3f7893cd3' before making global git config changes
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2493715Z Adding repository directory to the temporary git global config as a safe directory
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2497019Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/XAUUSD/XAUUSD
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2569365Z Deleting the contents of '/home/runner/work/XAUUSD/XAUUSD'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2570359Z ##[group]Initializing the repository
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2574938Z [command]/usr/bin/git init /home/runner/work/XAUUSD/XAUUSD
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2675480Z hint: Using 'master' as the name for the initial branch. This default branch name
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2676656Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2677713Z hint: to use in all of your new repositories, which will suppress this warning,
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2678755Z hint: call:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2679104Z hint:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2679656Z hint: 	git config --global init.defaultBranch <name>
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2680179Z hint:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2680679Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2681473Z hint: 'development'. The just-created branch can be renamed via this command:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2682166Z hint:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2682519Z hint: 	git branch -m <name>
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2682925Z hint:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2683460Z hint: Disable this message with "git config set advice.defaultBranchName false"
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2688641Z Initialized empty Git repository in /home/runner/work/XAUUSD/XAUUSD/.git/
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2695900Z [command]/usr/bin/git remote add origin https://github.com/liq87917-boop/XAUUSD
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2763337Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2763827Z ##[group]Disabling automatic garbage collection
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2767342Z [command]/usr/bin/git config --local gc.auto 0
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2861165Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2861790Z ##[group]Setting up auth
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2866375Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.2897325Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.3206449Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.3232383Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.3406456Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.3433817Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.3603792Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.3748693Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.3749573Z ##[group]Fetching the repository
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:08.3755337Z [command]/usr/bin/git -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1050237Z From https://github.com/liq87917-boop/XAUUSD
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1050817Z  * [new branch]      cline-agent -> origin/cline-agent
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1060476Z [command]/usr/bin/git branch --list --remote origin/cline-agent
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1084708Z   origin/cline-agent
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1095809Z [command]/usr/bin/git rev-parse refs/remotes/origin/cline-agent
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1114577Z 3ea96d44058f65241fcf22c0ef917877f9b47b5b
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1117826Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1118382Z ##[group]Determining the checkout info
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1118881Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1123662Z [command]/usr/bin/git sparse-checkout disable
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1439351Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1469825Z ##[group]Checking out the ref
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.1472307Z [command]/usr/bin/git checkout --progress --force -B cline-agent refs/remotes/origin/cline-agent
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2246269Z Switched to a new branch 'cline-agent'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2251403Z branch 'cline-agent' set up to track 'origin/cline-agent'.
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2258551Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2297533Z [command]/usr/bin/git log -1 --format=%H
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2321141Z 3ea96d44058f65241fcf22c0ef917877f9b47b5b
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2513232Z ##[group]Run actions/setup-python@v5
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2513402Z with:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2513520Z   python-version: 3.12
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2513799Z   cache: pip
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2513911Z   check-latest: false
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2515145Z   token: ***
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2515262Z   update-environment: true
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2515404Z   allow-prereleases: false
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2515535Z   freethreaded: false
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.2515656Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.3299078Z ##[group]Installed versions
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.3450914Z (node:2017) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.3451548Z (Use `node --trace-deprecation ...` to show where the warning was created)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.3451972Z Successfully set up CPython (3.12.14)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.3452370Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.4447698Z [command]/opt/hostedtoolcache/Python/3.12.14/x64/bin/pip cache dir
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.8166946Z /home/runner/.cache/pip
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.9712958Z Cache hit for: setup-python-Linux-x64-24.04-Ubuntu-python-3.12.14-pip-99b428ef1de79221bf7db326db48be795a0649224efb6fac12f7835098d359f1
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:10.9774711Z (node:2017) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:12.1334907Z Received 83886080 of 205490308 (40.8%), 80.0 MBs/sec
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:12.8149281Z Received 205490308 of 205490308 (100.0%), 116.6 MBs/sec
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:12.8149627Z Cache Size: ~196 MB (205490308 B)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:12.8232233Z [command]/usr/bin/tar -xf /home/runner/work/_temp/cfc71b90-3939-4587-ab1e-331d91c09a47/cache.tzst -P -C /home/runner/work/XAUUSD/XAUUSD --use-compress-program unzstd
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0145014Z Cache restored successfully
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0228193Z Cache restored from key: setup-python-Linux-x64-24.04-Ubuntu-python-3.12.14-pip-99b428ef1de79221bf7db326db48be795a0649224efb6fac12f7835098d359f1
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0387945Z ##[group]Run python -m pip install --upgrade pip
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0388213Z ^[[36;1mpython -m pip install --upgrade pip^[[0m
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0388397Z ^[[36;1mpython -m pip install -e ".[dev]"^[[0m
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0625651Z shell: /usr/bin/bash -e {0}
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0625808Z env:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0625964Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0626353Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0626591Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0626805Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0627016Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0627226Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.0627404Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.4571312Z Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.12.14/x64/lib/python3.12/site-packages (26.2.1)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.8025826Z Obtaining file:///home/runner/work/XAUUSD/XAUUSD
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:13.8037033Z   Installing build dependencies: started
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:14.1892776Z   Installing build dependencies: finished with status 'done'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:14.1897042Z   Checking if build backend supports build_editable: started
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:14.3761943Z   Checking if build backend supports build_editable: finished with status 'done'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:14.3768944Z   Getting requirements to build editable: started
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:14.5825214Z   Getting requirements to build editable: finished with status 'done'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:14.5831587Z   Preparing editable metadata (pyproject.toml): started
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:14.8233471Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.1521416Z Collecting sqlalchemy>=2.0.30 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.1533021Z   Using cached sqlalchemy-2.0.54-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.1756861Z Collecting alembic>=1.13.1 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.1764659Z   Using cached alembic-1.20.0-py3-none-any.whl.metadata (7.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.2331392Z Collecting pydantic>=2.7.0 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.2339099Z   Using cached pydantic-2.13.5-py3-none-any.whl.metadata (110 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.2548573Z Collecting pydantic-settings>=2.3.0 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.2555916Z   Using cached pydantic_settings-2.15.0-py3-none-any.whl.metadata (3.9 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.2737344Z Collecting psycopg>=3.1.19 (from psycopg[binary]>=3.1.19->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.2744324Z   Using cached psycopg-3.3.6-py3-none-any.whl.metadata (4.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.2921996Z Collecting tzdata>=2024.1 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.2931617Z   Using cached tzdata-2026.4-py2.py3-none-any.whl.metadata (1.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.5452450Z Collecting aiohttp>=3.9.5 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.5461491Z   Using cached aiohttp-3.14.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.5734077Z Collecting PyYAML>=6.0.1 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.5741308Z   Using cached pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.6690707Z Collecting numpy>=1.26 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.6698943Z   Using cached numpy-2.5.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.7300741Z Collecting pandas>=2.2 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.7308228Z   Using cached pandas-3.0.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (79 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.7977071Z Collecting scikit-learn>=1.4 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.7985024Z   Using cached scikit_learn-1.9.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (9.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.8164460Z Collecting httpx>=0.27 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.8171972Z   Using cached httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.8332025Z Collecting jieba>=0.42.1 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.8332620Z   Using cached jieba-0.42.1-py3-none-any.whl
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.8518433Z Collecting feedparser>=6.0.11 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.8525169Z   Using cached feedparser-6.0.14-py3-none-any.whl.metadata (2.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.8988699Z Collecting akshare>=1.14.0 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.8995663Z   Using cached akshare-1.18.97-py3-none-any.whl.metadata (14 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.9375293Z Collecting dbnomics>=1.2.0 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.9382349Z   Using cached dbnomics-1.2.7-py3-none-any.whl.metadata (42 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.9643077Z Collecting pytest>=8.2.0 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.9650143Z   Using cached pytest-9.1.1-py3-none-any.whl.metadata (7.6 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.9839155Z Collecting pytest-asyncio>=0.23.0 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:15.9846247Z   Using cached pytest_asyncio-1.4.0-py3-none-any.whl.metadata (4.1 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.1690739Z Collecting ruff==0.16.7 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.1700439Z   Using cached ruff-0.16.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.2284614Z Collecting mypy>=1.10.0 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.2292335Z   Using cached mypy-2.3.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.2491243Z Collecting openpyxl>=3.1 (from gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.2498815Z   Using cached openpyxl-3.1.5-py2.py3-none-any.whl.metadata (2.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.2668512Z Collecting aiohappyeyeballs>=2.5.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.2675691Z   Using cached aiohappyeyeballs-2.7.1-py3-none-any.whl.metadata (5.9 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.2830398Z Collecting aiosignal>=1.4.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.2837538Z   Using cached aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.3004897Z Collecting attrs>=17.3.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.3012235Z   Using cached attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.3393573Z Collecting frozenlist>=1.1.1 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.3401395Z   Using cached frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.4990843Z Collecting multidict<7.0,>=4.5 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.5000377Z   Using cached multidict-6.9.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.5412916Z Collecting propcache>=0.2.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.5420964Z   Using cached propcache-0.5.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (25 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.5605230Z Collecting typing_extensions>=4.4 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.5612428Z   Using cached typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.6975759Z Collecting yarl<2.0,>=1.17.0 (from aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.6984907Z   Using cached yarl-1.25.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (111 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.7203897Z Collecting idna>=2.0 (from yarl<2.0,>=1.17.0->aiohttp>=3.9.5->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.7210993Z   Using cached idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.7428044Z Collecting beautifulsoup4>=4.9.1 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.7435199Z   Using cached beautifulsoup4-4.15.0-py3-none-any.whl.metadata (3.8 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.8598802Z Collecting lxml>=4.2.1 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.8608801Z   Using cached lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (3.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.8821754Z Collecting requests>=2.22.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.8829348Z   Using cached requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.9304650Z Collecting curl_cffi>=0.13.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.9312524Z   Using cached curl_cffi-0.16.3-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (17 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.9492054Z Collecting html5lib>=1.0.1 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.9499432Z   Using cached html5lib-1.1-py2.py3-none-any.whl.metadata (16 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.9685025Z Collecting xlrd>=1.2.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.9692539Z   Using cached xlrd-2.0.2-py2.py3-none-any.whl.metadata (3.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.9892026Z Collecting urllib3>=1.25.8 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:16.9899635Z   Using cached urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.0510347Z Collecting tqdm>=4.43.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.0518898Z   Using cached tqdm-4.70.1-py3-none-any.whl.metadata (57 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.0711043Z Collecting jsonpath>=0.82 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.0711723Z   Using cached jsonpath-0.82.2-py3-none-any.whl
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.0866412Z Collecting tabulate>=0.8.6 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.0873734Z   Using cached tabulate-0.10.0-py3-none-any.whl.metadata (40 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.1059388Z Collecting decorator>=4.4.2 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.1066990Z   Using cached decorator-5.3.1-py3-none-any.whl.metadata (3.9 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.1330780Z Collecting py-mini-racer>=0.6.0 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.1338405Z   Using cached py_mini_racer-0.6.0-py2.py3-none-manylinux1_x86_64.whl.metadata (8.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.1504104Z Collecting akracer>=0.0.13 (from akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.1511404Z   Using cached akracer-0.0.14-py3-none-any.whl.metadata (3.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.1756055Z Collecting Mako (from alembic>=1.13.1->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.2420463Z   Downloading mako-1.4.3-py3-none-any.whl.metadata (2.9 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.2673682Z Collecting soupsieve>=1.6.1 (from beautifulsoup4>=4.9.1->akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.2799113Z   Downloading soupsieve-2.10-py3-none-any.whl.metadata (4.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.3410454Z Collecting cffi>=2.0.0 (from curl_cffi>=0.13.0->akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.3418197Z   Using cached cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.3596666Z Collecting certifi>=2024.2.2 (from curl_cffi>=0.13.0->akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.3603824Z   Using cached certifi-2026.7.22-py3-none-any.whl.metadata (2.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.3767944Z Collecting pycparser (from cffi>=2.0.0->curl_cffi>=0.13.0->akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.3774613Z   Using cached pycparser-3.0-py3-none-any.whl.metadata (8.2 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.3959147Z Collecting tenacity>=9.0.0 (from dbnomics>=1.2.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.3966737Z   Using cached tenacity-9.1.4-py3-none-any.whl.metadata (1.2 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4128924Z Collecting feedparser-sgmllib<3,>=2 (from feedparser>=6.0.11->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4135632Z   Using cached feedparser_sgmllib-2.1.0-py3-none-any.whl.metadata (926 bytes)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4303924Z Collecting six>=1.9 (from html5lib>=1.0.1->akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4310822Z   Using cached six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4564446Z Collecting webencodings (from html5lib>=1.0.1->akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4571793Z   Using cached webencodings-0.6.1-py3-none-any.whl.metadata (3.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4765750Z Collecting anyio (from httpx>=0.27->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4773156Z   Using cached anyio-4.15.1-py3-none-any.whl.metadata (4.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4951239Z Collecting httpcore==1.* (from httpx>=0.27->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.4959216Z   Using cached httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.7246414Z Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.27->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.7253883Z   Using cached h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.7552084Z Collecting mypy_extensions>=1.0.0 (from mypy>=1.10.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.7559618Z   Using cached mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.7730108Z Collecting pathspec>=1.0.0 (from mypy>=1.10.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.7737734Z   Using cached pathspec-1.1.1-py3-none-any.whl.metadata (14 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.8434020Z Collecting librt>=0.13.0 (from mypy>=1.10.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.8442314Z   Using cached librt-0.15.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.8915592Z Collecting ast-serialize<1.0.0,>=0.6.0 (from mypy>=1.10.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.8923378Z   Using cached ast_serialize-0.11.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.9091075Z Collecting et-xmlfile (from openpyxl>=3.1->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.9098141Z   Using cached et_xmlfile-2.0.0-py3-none-any.whl.metadata (2.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.9261670Z Collecting python-dateutil>=2.8.2 (from pandas>=2.2->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:17.9268695Z   Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.0127466Z Collecting psycopg-binary==3.3.6 (from psycopg[binary]>=3.1.19->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.0135782Z   Using cached psycopg_binary-3.3.6-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.0300712Z Collecting annotated-types>=0.6.0 (from pydantic>=2.7.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.0307715Z   Using cached annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.3968812Z Collecting pydantic-core==2.46.5 (from pydantic>=2.7.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.3978786Z   Using cached pydantic_core-2.46.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.6 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4148538Z Collecting typing-inspection>=0.4.2 (from pydantic>=2.7.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4155517Z   Using cached typing_inspection-0.4.4-py3-none-any.whl.metadata (2.6 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4341521Z Collecting python-dotenv>=0.21.0 (from pydantic-settings>=2.3.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4349091Z   Using cached python_dotenv-1.2.3-py3-none-any.whl.metadata (29 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4522446Z Collecting iniconfig>=1.0.1 (from pytest>=8.2.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4529658Z   Using cached iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4701858Z Collecting packaging>=22 (from pytest>=8.2.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4708876Z   Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4867978Z Collecting pluggy<2,>=1.5 (from pytest>=8.2.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.4875183Z   Using cached pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.5092257Z Collecting pygments>=2.7.2 (from pytest>=8.2.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.5099588Z   Using cached pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.5783879Z Collecting charset_normalizer<4,>=2 (from requests>=2.22.0->akshare>=1.14.0->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.5791929Z   Using cached charset_normalizer-3.5.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (45 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.6987525Z Collecting scipy>=1.10.0 (from scikit-learn>=1.4->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.6996532Z   Using cached scipy-1.18.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (62 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.7251407Z Collecting joblib>=1.4.0 (from scikit-learn>=1.4->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.7259012Z   Using cached joblib-1.6.0-py3-none-any.whl.metadata (6.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.7512120Z Collecting narwhals>=2.0.1 (from scikit-learn>=1.4->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.7519825Z   Using cached narwhals-2.26.0-py3-none-any.whl.metadata (15 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.7684904Z Collecting threadpoolctl>=3.5.0 (from scikit-learn>=1.4->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.7692309Z   Using cached threadpoolctl-3.7.0-py3-none-any.whl.metadata (24 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.7881143Z Collecting cloudpickle>=3.0 (from joblib>=1.4.0->scikit-learn>=1.4->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.7887985Z   Using cached cloudpickle-3.1.2-py3-none-any.whl.metadata (7.1 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.8949634Z Collecting greenlet>=1 (from sqlalchemy>=2.0.30->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.8957684Z   Using cached greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9342054Z Collecting MarkupSafe>=2.0 (from Mako->alembic>=1.13.1->gold-ai==0.2.0)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9349439Z   Using cached markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9382318Z Using cached ruff-0.16.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.4 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9420015Z Using cached aiohttp-3.14.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.8 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9430930Z Using cached multidict-6.9.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (336 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9438064Z Using cached yarl-1.25.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (117 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9444417Z Using cached aiohappyeyeballs-2.7.1-py3-none-any.whl (15 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9450834Z Using cached aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9457004Z Using cached akshare-1.18.97-py3-none-any.whl (1.3 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9465963Z Using cached akracer-0.0.14-py3-none-any.whl (10.1 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9495561Z Using cached alembic-1.20.0-py3-none-any.whl (268 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9502366Z Using cached attrs-26.1.0-py3-none-any.whl (67 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9508741Z Using cached beautifulsoup4-4.15.0-py3-none-any.whl (109 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9515156Z Using cached curl_cffi-0.16.3-cp310-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (13.5 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9550623Z Using cached certifi-2026.7.22-py3-none-any.whl (136 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9557126Z Using cached cffi-2.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (221 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9563586Z Using cached dbnomics-1.2.7-py3-none-any.whl (32 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9569673Z Using cached decorator-5.3.1-py3-none-any.whl (10 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9575668Z Using cached feedparser-6.0.14-py3-none-any.whl (80 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9581870Z Using cached feedparser_sgmllib-2.1.0-py3-none-any.whl (11 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9588084Z Using cached frozenlist-1.8.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (242 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9594457Z Using cached html5lib-1.1-py2.py3-none-any.whl (112 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9600674Z Using cached httpx-0.28.1-py3-none-any.whl (73 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9606693Z Using cached httpcore-1.0.9-py3-none-any.whl (78 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9612650Z Using cached h11-0.16.0-py3-none-any.whl (37 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9618583Z Using cached idna-3.20-py3-none-any.whl (69 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9624732Z Using cached lxml-6.1.3-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl (5.2 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9642220Z Using cached mypy-2.3.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.3 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9686838Z Using cached ast_serialize-0.11.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9695452Z Using cached librt-0.15.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (531 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9702511Z Using cached mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9708573Z Using cached numpy-2.5.3-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.7 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9751371Z Using cached openpyxl-3.1.5-py2.py3-none-any.whl (250 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9758293Z Using cached pandas-3.0.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (10.8 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9798947Z Using cached pathspec-1.1.1-py3-none-any.whl (57 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9808858Z Using cached propcache-0.5.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (250 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9818710Z Using cached psycopg-3.3.6-py3-none-any.whl (215 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9829771Z Using cached psycopg_binary-3.3.6-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (5.2 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9849707Z Using cached py_mini_racer-0.6.0-py2.py3-none-manylinux1_x86_64.whl (5.4 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9869020Z Using cached pydantic-2.13.5-py3-none-any.whl (472 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9876638Z Using cached pydantic_core-2.46.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9887854Z Using cached annotated_types-0.8.0-py3-none-any.whl (13 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9893926Z Using cached pydantic_settings-2.15.0-py3-none-any.whl (69 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9900136Z Using cached pytest-9.1.1-py3-none-any.whl (386 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9907199Z Using cached pluggy-1.6.0-py3-none-any.whl (20 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9913133Z Using cached iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9919088Z Using cached packaging-26.3-py3-none-any.whl (129 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9925250Z Using cached pygments-2.21.0-py3-none-any.whl (1.3 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9934162Z Using cached pytest_asyncio-1.4.0-py3-none-any.whl (16 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9940146Z Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9946587Z Using cached python_dotenv-1.2.3-py3-none-any.whl (22 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9952642Z Using cached pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9960363Z Using cached requests-2.34.2-py3-none-any.whl (73 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9966740Z Using cached charset_normalizer-3.5.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (248 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9972930Z Using cached urllib3-2.8.0-py3-none-any.whl (135 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:18.9979412Z Using cached scikit_learn-1.9.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (9.2 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0005403Z Using cached joblib-1.6.0-py3-none-any.whl (306 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0012005Z Using cached cloudpickle-3.1.2-py3-none-any.whl (22 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0017859Z Using cached narwhals-2.26.0-py3-none-any.whl (474 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0025685Z Using cached scipy-1.18.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (35.3 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0113301Z Using cached six-1.17.0-py2.py3-none-any.whl (11 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0238564Z Downloading soupsieve-2.10-py3-none-any.whl (38 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0497405Z Using cached sqlalchemy-2.0.54-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.5 MB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0512003Z Using cached greenlet-3.5.6-cp312-cp312-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (621 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0519653Z Using cached tabulate-0.10.0-py3-none-any.whl (39 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0525980Z Using cached tenacity-9.1.4-py3-none-any.whl (28 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0532389Z Using cached threadpoolctl-3.7.0-py3-none-any.whl (26 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0538743Z Using cached tqdm-4.70.1-py3-none-any.whl (80 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0545229Z Using cached typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0551406Z Using cached typing_inspection-0.4.4-py3-none-any.whl (14 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0557862Z Using cached tzdata-2026.4-py2.py3-none-any.whl (347 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0564775Z Using cached xlrd-2.0.2-py2.py3-none-any.whl (96 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0571041Z Using cached anyio-4.15.1-py3-none-any.whl (132 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0577267Z Using cached et_xmlfile-2.0.0-py3-none-any.whl (18 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0700711Z Downloading mako-1.4.3-py3-none-any.whl (80 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0842475Z Using cached markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0848645Z Using cached pycparser-3.0-py3-none-any.whl (48 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.0854772Z Using cached webencodings-0.6.1-py3-none-any.whl (8.7 kB)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.2988872Z Building wheels for collected packages: gold-ai
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.2994486Z   Building editable for gold-ai (pyproject.toml): started
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.4399914Z   Building editable for gold-ai (pyproject.toml): finished with status 'done'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.4403671Z   Created wheel for gold-ai: filename=gold_ai-0.2.0-0.editable-py3-none-any.whl size=68588 sha256=d6b28f6fc43c266a9b764b907037cebb546e318c0a79c30a396b8569dcff45af
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.4404541Z   Stored in directory: /tmp/pip-ephem-wheel-cache-gmt2itq_/wheels/e6/b2/79/260e634f5201a46369fad58b586d93074710c71323ec6ce468
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.4459644Z Successfully built gold-ai
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:19.5518369Z Installing collected packages: py-mini-racer, jsonpath, jieba, xlrd, webencodings, urllib3, tzdata, typing_extensions, tqdm, threadpoolctl, tenacity, tabulate, soupsieve, six, ruff, PyYAML, python-dotenv, pygments, pycparser, psycopg-binary, propcache, pluggy, pathspec, packaging, numpy, narwhals, mypy_extensions, multidict, MarkupSafe, lxml, librt, iniconfig, idna, h11, greenlet, frozenlist, feedparser-sgmllib, et-xmlfile, decorator, cloudpickle, charset_normalizer, certifi, attrs, ast-serialize, annotated-types, akracer, aiohappyeyeballs, yarl, typing-inspection, sqlalchemy, scipy, requests, python-dateutil, pytest, pydantic-core, psycopg, openpyxl, mypy, Mako, joblib, httpcore, html5lib, feedparser, cffi, beautifulsoup4, anyio, aiosignal, scikit-learn, pytest-asyncio, pydantic, pandas, httpx, curl_cffi, alembic, aiohttp, pydantic-settings, dbnomics, akshare, gold-ai
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.1161079Z 
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.1196082Z Successfully installed Mako-1.4.3 MarkupSafe-3.0.3 PyYAML-6.0.3 aiohappyeyeballs-2.7.1 aiohttp-3.14.3 aiosignal-1.4.0 akracer-0.0.14 akshare-1.18.97 alembic-1.20.0 annotated-types-0.8.0 anyio-4.15.1 ast-serialize-0.11.2 attrs-26.1.0 beautifulsoup4-4.15.0 certifi-2026.7.22 cffi-2.1.1 charset_normalizer-3.5.1 cloudpickle-3.1.2 curl_cffi-0.16.3 dbnomics-1.2.7 decorator-5.3.1 et-xmlfile-2.0.0 feedparser-6.0.14 feedparser-sgmllib-2.1.0 frozenlist-1.8.0 gold-ai-0.2.0 greenlet-3.5.6 h11-0.16.0 html5lib-1.1 httpcore-1.0.9 httpx-0.28.1 idna-3.20 iniconfig-2.3.0 jieba-0.42.1 joblib-1.6.0 jsonpath-0.82.2 librt-0.15.0 lxml-6.1.3 multidict-6.9.1 mypy-2.3.1 mypy_extensions-1.1.0 narwhals-2.26.0 numpy-2.5.3 openpyxl-3.1.5 packaging-26.3 pandas-3.0.6 pathspec-1.1.1 pluggy-1.6.0 propcache-0.5.4 psycopg-3.3.6 psycopg-binary-3.3.6 py-mini-racer-0.6.0 pycparser-3.0 pydantic-2.13.5 pydantic-core-2.46.5 pydantic-settings-2.15.0 pygments-2.21.0 pytest-9.1.1 pytest-asyncio-1.4.0 python-dateutil-2.9.0.post0 python-dotenv-1.2.3 requests-2.34.2 ruff-0.16.7 scikit-learn-1.9.1 scipy-1.18.1 six-1.17.0 soupsieve-2.10 sqlalchemy-2.0.54 tabulate-0.10.0 tenacity-9.1.4 threadpoolctl-3.7.0 tqdm-4.70.1 typing-inspection-0.4.4 typing_extensions-4.16.0 tzdata-2026.4 urllib3-2.8.0 webencodings-0.6.1 xlrd-2.0.2 yarl-1.25.1
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4884547Z ##[group]Run python -m ruff check .
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4884749Z ^[[36;1mpython -m ruff check .^[[0m
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4940119Z shell: /usr/bin/bash -e {0}
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4940275Z env:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4940443Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4940690Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4940942Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4941162Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4941375Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4941594Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.4941778Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5835648Z All checks passed!
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5868016Z ##[group]Run python -m mypy
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5868202Z ^[[36;1mpython -m mypy^[[0m
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5921824Z shell: /usr/bin/bash -e {0}
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5921969Z env:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5922130Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5922380Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5922624Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5922845Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5923076Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5923299Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:37.5923486Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.1795344Z Success: no issues found in 183 source files
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2110175Z ##[group]Run python -m pytest -q
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2110373Z ^[[36;1mpython -m pytest -q^[[0m
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2161852Z shell: /usr/bin/bash -e {0}
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2161992Z env:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2162148Z   pythonLocation: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2162387Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib/pkgconfig
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2162627Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2162841Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2163053Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.12.14/x64
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2163416Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.12.14/x64/lib
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:18:46.2163595Z ##[endgroup]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:19:03.6171305Z ........................................................................ [  1%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:19:12.1302184Z ........................................................................ [  3%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:19:42.1440716Z ........................................................................ [  5%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:19:51.1482691Z ........................................................................ [  7%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:19:58.2749502Z ........................................................................ [  9%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:05.7673045Z ........................................................................ [ 11%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:13.6520330Z ........................................................................ [ 13%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:16.8103056Z ........................................................................ [ 14%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:26.0315557Z ........................................................................ [ 16%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:32.1354946Z ...................................................F.....F.............. [ 18%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:41.8933606Z ........................................................................ [ 20%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:42.9535316Z ........................................................................ [ 22%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:43.2883845Z ........................................................................ [ 24%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:43.7161705Z ........................................................................ [ 26%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:43.8344968Z ........................................................................ [ 28%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:44.0427101Z ............................................s........................... [ 29%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:44.1876491Z ........................................................................ [ 31%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:44.6579518Z ........................................................................ [ 33%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:44.7835812Z ........................................................................ [ 35%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:44.9914850Z ........................................................................ [ 37%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:45.0330217Z ........................................................................ [ 39%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:45.0817115Z ........................................................................ [ 41%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:45.1184255Z ........................................................................ [ 43%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:46.7363983Z ........................................................................ [ 44%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:47.8087873Z ........................................................................ [ 46%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:47.9863076Z ........................................................................ [ 48%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:48.1718370Z ........................................................................ [ 50%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:48.4016892Z ........................................................................ [ 52%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:48.6742127Z ........................................................................ [ 54%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:48.8759247Z ........................................................................ [ 56%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:50.0110838Z ........................................................................ [ 58%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:51.1712296Z ........................................................................ [ 59%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:51.3472952Z ........................................................................ [ 61%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:51.7595285Z ........................................................................ [ 63%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:52.3540558Z ........................................................................ [ 65%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:52.4405235Z ........................................................................ [ 67%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:52.5820797Z ........................................................................ [ 69%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:52.7224885Z ........................................................................ [ 71%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:53.8596940Z ........................................................................ [ 73%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:53.9476407Z ........................................................................ [ 74%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:54.0775953Z ........................................................................ [ 76%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:54.1337054Z ........................................................................ [ 78%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:54.2447114Z ........................................................................ [ 80%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:54.2846352Z ........................................................................ [ 82%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:20:54.3379670Z ........................................................................ [ 84%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:03.5453356Z ........................................................................ [ 86%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:04.1829644Z ..................s..................................................... [ 88%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:04.6651108Z ........................................................................ [ 89%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:04.7623072Z ........................................................................ [ 91%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:05.0191964Z ........................................................................ [ 93%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:05.1813865Z ........................................................................ [ 95%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:05.2208794Z ........................................................................ [ 97%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:05.8750030Z .....................................................s.................. [ 99%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5722614Z ..........................                                               [100%]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5723006Z =================================== FAILURES ===================================
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5723382Z __________ test_real_repo_matching_candidate_is_ready_and_zero_write ___________
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5723674Z 
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5723888Z     def test_real_repo_matching_candidate_is_ready_and_zero_write() -> None:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5724235Z         before = repo_snapshot()
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5724428Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5724600Z         candidate = make_candidate(
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5724843Z             project_state=consistent_state(),
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5725086Z             review_ledger=load_review_ledger(),
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5725310Z         )
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5725450Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5725612Z         payload = run_light(candidate)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5725812Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5725974Z >       assert payload["reason_codes"] == []
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5726435Z E       AssertionError: assert ['CANDIDATE_S...OINTER_DRIFT'] == []
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5726720Z E         
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5726946Z E         Left contains one more item: 'CANDIDATE_STATE_POINTER_DRIFT'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5727228Z E         
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5727379Z E         Full diff:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5727555Z E         - []
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5727713Z E         + [
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5727894Z E         +     'CANDIDATE_STATE_POINTER_DRIFT',
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5728114Z E         + ]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5728206Z 
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5728902Z tests/integration/test_review_closure_precondition_regression.py:289: AssertionError
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5729353Z ______________ test_real_repo_cli_temp_file_candidate_zero_write _______________
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5729603Z 
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5729807Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_real_repo_cli_temp_file_c0')
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5730235Z capsys = <_pytest.capture.CaptureFixture object at 0x7fe1f5e9b830>
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5730463Z 
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5730582Z     def test_real_repo_cli_temp_file_candidate_zero_write(
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5730855Z         tmp_path: Path, capsys: Any
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5731056Z     ) -> None:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5731358Z         before = repo_snapshot()
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5731583Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5731781Z         candidate_path = tmp_path / "closure-candidate.json"
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5732032Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5732185Z         candidate_path.write_text(
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5732396Z             json.dumps(
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5732582Z                 make_candidate(
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5732807Z                     project_state=consistent_state(),
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5733069Z                     review_ledger=load_review_ledger(),
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5733300Z                 )
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5733452Z             ),
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5733620Z             encoding="utf-8",
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5733807Z         )
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5733950Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5734111Z         exit_code = precondition.main(
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5734319Z             [
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5734475Z                 "--root",
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5734656Z                 str(REPO_ROOT),
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5734865Z                 "--candidate",
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5735061Z                 str(candidate_path),
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5735270Z                 "--generated-at",
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5735471Z                 AUDIT_TIME,
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5735654Z                 "--as-of",
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5735832Z                 AUDIT_TIME,
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5736011Z             ]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5736315Z         )
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5736456Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5736619Z         captured = capsys.readouterr()
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5736825Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5736988Z         payload = json.loads(captured.out)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5737197Z     
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5737369Z >       assert exit_code == precondition.EXIT_OK
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5737599Z E       assert 2 == 0
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5737788Z E        +  where 0 = precondition.EXIT_OK
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5737942Z 
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5738142Z tests/integration/test_review_closure_precondition_regression.py:465: AssertionError
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5738629Z =========================== short test summary info ============================
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5739412Z SKIPPED [1] tests/unit/test_ai_orchestrator_recovery_state_machine.py:1154: tasklist 鍙湪 Windows 涓婂瓨鍦?lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5740129Z SKIPPED [1] tests/unit/test_prompt_opinion.py:313: 璇勬祴璇枡 logs/annotation_sample.csv 涓嶅瓨鍦紙logs/ 涓嶅叆搴擄級
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5740887Z SKIPPED [1] tests/unit/test_text_similarity.py:79: 鏈幆澧冨凡瀹夎 jieba锛岃烦杩囨湭瀹夎鍒嗘敮
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5741705Z FAILED tests/integration/test_review_closure_precondition_regression.py::test_real_repo_matching_candidate_is_ready_and_zero_write - AssertionError: assert ['CANDIDATE_S...OINTER_DRIFT'] == []
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5742357Z   
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5742574Z   Left contains one more item: 'CANDIDATE_STATE_POINTER_DRIFT'
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5742841Z   
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5742978Z   Full diff:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5743127Z   - []
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5743271Z   + [
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5743438Z   +     'CANDIDATE_STATE_POINTER_DRIFT',
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5743658Z   + ]
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5744105Z FAILED tests/integration/test_review_closure_precondition_regression.py::test_real_repo_cli_temp_file_candidate_zero_write - assert 2 == 0
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5744619Z  +  where 0 = precondition.EXIT_OK
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:06.5744880Z 2 failed, 3837 passed, 3 skipped in 138.74s (0:02:18)
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2117121Z ##[error]Process completed with exit code 1.
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2203385Z Post job cleanup.
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2748740Z [command]/usr/bin/git version
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2779226Z git version 2.55.0
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2801860Z Temporarily overriding HOME='/home/runner/work/_temp/4a0697d5-7bac-4561-afc1-e5b752145c32' before making global git config changes
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2802557Z Adding repository directory to the temporary git global config as a safe directory
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2803927Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/XAUUSD/XAUUSD
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2832343Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.2857466Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.3055009Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.3079731Z http.https://github.com/.extraheader
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.3087152Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.3119306Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.3311372Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.3341506Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.3630564Z Cleaning up orphan processes
+lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T16:21:08.3826013Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-python@v5. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
