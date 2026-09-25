@@ -2819,33 +2819,16 @@ def build_cline_prompt(
     )
 
     return (
-
-        f"读取任务文件 "
-        f"{relative_task}，"
-
-        f"严格按照其中任务执行，"
-
-        f"同时遵守项目根目录 "
-        f".clinerules。"
-
-        f"先分析现有代码和相关文档，"
-        f"再进行最小范围修改。"
-
-        f"完成 task 中的 "
-        f"requirements、acceptance "
-        f"和必要测试。"
-
-        f"不要修改 .ai/tasks，"
-
-        f"不要修改 .ai/results。"
-
-        f"完成后总结："
-
-        f"完成内容、修改文件、"
-        f"测试结果、遗留问题、"
-        f"是否满足 acceptance，"
-
-        f"然后退出。"
+        f"Read the task file "
+        f"{relative_task}, "
+        f"and execute it strictly according to the task. "
+        f"Follow the project root .clinerules. "
+        f"Analyze existing code and docs first, then make minimal changes. "
+        f"Complete the requirements, acceptance, and necessary tests in the task. "
+        f"Do not modify .ai/tasks or .ai/results. "
+        f"After completion, summarize: what was done, changed files, "
+        f"test results, remaining issues, and whether acceptance is satisfied, "
+        f"then exit."
     )
 
 
@@ -3056,7 +3039,8 @@ def build_cline_args(
     args = [
         cline_exe,
         "--json",
-        "--yolo",
+        "--auto-approve",
+        "true",
         "--provider",
         CLINE_PROVIDER,
     ]
@@ -4605,6 +4589,36 @@ def find_cline_executable():
     )
 
 
+def _kill_process_tree(
+    proc
+):
+    """终止 Cline 进程树（超时保护：subprocess.run 的 timeout 只杀直接子进程）。
+
+    Windows 用 ``taskkill /T /F`` 递归终止，POSIX 用进程组 SIGKILL；
+    兜底 ``proc.kill()``。任何异常一律吞掉，保证上层能继续走超时返回路径。
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+            )
+        else:
+            os.killpg(
+                os.getpgid(
+                    proc.pid
+                ),
+                9,
+            )
+    except Exception:
+        with contextlib.suppress(Exception):
+            proc.kill()
+
+
 # ============================================================
 # Cline JSON 解析
 # ============================================================
@@ -4846,6 +4860,27 @@ def run_cline(
         prompt
     )
 
+    # 防护：prompt 必须纯 ASCII，避免 Windows cmd 代码页（GBK）破坏中文，
+    # 导致 Cline 报 "Prompt text must be passed as a single quoted argument"。
+    if not prompt.isascii():
+        _logger.error(
+            "Cline prompt contains non-ASCII characters; refusing to run."
+        )
+        return {
+            "returncode": -1,
+            "stdout": "",
+            "stderr": "Non-ASCII Cline prompt rejected (code page safety).",
+            "timed_out": False,
+            "summary": {
+                "finish_reason": None,
+                "final_text": "",
+                "iterations": None,
+                "duration_ms": None,
+                "usage": None,
+                "model": None,
+            },
+        }
+
     _logger.info(
         "Starting Cline..."
     )
@@ -4876,140 +4911,44 @@ def run_cline(
         )
     )
 
+    proc = None
+    stdout = ""
+    stderr = ""
     try:
 
-        # ====================================================
-        # Windows
-        # ====================================================
-        #
-        # 这里保留我们已经实际验证成功的方案：
-        #
-        # Python
-        #   ↓
-        # Windows Shell
-        #   ↓
-        # cline.cmd
-        #   ↓
-        # Cline headless
-        #
-        # 不使用 stdin pipe。
-        #
-        if os.name == "nt":
+        # 统一 Windows / POSIX：list 传参 + shell=False，不经过 cmd 解析，
+        # 避免 prompt 被系统代码页破坏。Windows 上 subprocess 对 .cmd 文件
+        # 会自动经 COMSPEC 处理，仍能正常执行。
+        proc = subprocess.Popen(
 
-            command_line = (
-                subprocess
-                .list2cmdline(
-                    args
-                )
-            )
+            args,
 
-            result = subprocess.run(
+            cwd=ROOT,
 
-                command_line,
+            stdout=subprocess.PIPE,
 
-                cwd=ROOT,
+            stderr=subprocess.PIPE,
 
-                shell=True,
+            text=True,
 
-                capture_output=True,
+            encoding="utf-8",
 
-                text=True,
+            errors="replace",
 
-                encoding="utf-8",
-
-                errors="replace",
-
-                timeout=(
-                    CLINE_TIMEOUT_SECONDS
-                    +
-                    60
-                )
-            )
-
-        # ====================================================
-        # Linux / macOS
-        # ====================================================
-        else:
-
-            result = subprocess.run(
-
-                args,
-
-                cwd=ROOT,
-
-                capture_output=True,
-
-                text=True,
-
-                encoding="utf-8",
-
-                errors="replace",
-
-                timeout=(
-                    CLINE_TIMEOUT_SECONDS
-                    +
-                    60
-                )
-            )
-
-        parsed = (
-            parse_cline_json_output(
-                result.stdout
+            creationflags=(
+                0x08000000
+                if os.name == "nt"
+                else 0
             )
         )
 
-        return {
-
-            "returncode":
-                result.returncode,
-
-            "stdout":
-                result.stdout,
-
-            "stderr":
-                result.stderr,
-
-            "timed_out":
-                False,
-
-            "summary":
-                parsed
-        }
-
-    except subprocess.TimeoutExpired as exc:
-
-        stdout = (
-            exc.stdout
-            or
-            ""
+        stdout, stderr = proc.communicate(
+            timeout=CLINE_TIMEOUT_SECONDS + 60
         )
 
-        stderr = (
-            exc.stderr
-            or
-            ""
-        )
+    except subprocess.TimeoutExpired:
 
-        if isinstance(
-            stdout,
-            bytes
-        ):
-
-            stdout = stdout.decode(
-                "utf-8",
-                errors="replace"
-            )
-
-        if isinstance(
-            stderr,
-            bytes
-        ):
-
-            stderr = stderr.decode(
-                "utf-8",
-                errors="replace"
-            )
-
+        _kill_process_tree(proc)
         return {
 
             "returncode":
@@ -5019,11 +4958,7 @@ def run_cline(
                 stdout,
 
             "stderr":
-                (
-                    stderr
-                    +
-                    "\nCline process timed out."
-                ),
+                stderr + "\nCline process timed out.",
 
             "timed_out":
                 True,
@@ -5033,6 +4968,30 @@ def run_cline(
                     stdout
                 )
         }
+
+    parsed = (
+        parse_cline_json_output(
+            stdout
+        )
+    )
+
+    return {
+
+        "returncode":
+            proc.returncode,
+
+        "stdout":
+            stdout,
+
+        "stderr":
+            stderr,
+
+        "timed_out":
+            False,
+
+        "summary":
+            parsed
+    }
 
 
 # ============================================================
