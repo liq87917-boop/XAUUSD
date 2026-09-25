@@ -15,27 +15,27 @@
     },
     {
       "code": "RESULT_TERMINAL_CONSISTENCY_RECURRENCE",
-      "detail": "The immutable GOLD-047 result at commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b records status=completed and normalized_finish_reason=completed while its final attempt records cline_finish_reason_raw=aborted. GPT review of remote HEAD ac0400c8a4c72599c1a61577068681c419c0bef2 confirms GitHub Actions runs 36125652989 and 36124398637 both concluded failure; GOLD-047 remains fail-closed. Historical result must remain unchanged. No executor task may auto-start until the CONTROL_PLANE_FRESH_PROCESS_RESTART human gate is cleared with startup evidence.",
+      "detail": "The immutable GOLD-047 result at commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b records status=completed and normalized_finish_reason=completed while its final attempt records cline_finish_reason_raw=aborted. GPT review of prior remote HEAD confirms GOLD-047 remains fail-closed. Historical result must remain unchanged. No executor task may auto-start until the CONTROL_PLANE_FRESH_PROCESS_RESTART human gate is cleared with startup evidence.",
       "retryable": true,
       "moved_at": "2026-09-25T18:43:41+08:00"
     },
     {
       "code": "GOLD_047_REMOTE_CI_FAILURE",
-      "detail": "GPT review at remote HEAD ac0400c8a4c72599c1a61577068681c419c0bef2: GitHub Actions CI runs 36125652989 (HEAD ac0400c) and 36124398637 (HEAD 1974585) concluded failure. Prior runs 36026387906 (3ea96d4), 36027627116 (cc9213b), 36034679803 (490c1de), 36048709353 (271f66c), 36055545594 (6d7c7ec), 36083054452 (096098c) all failure. Job-level logs (.ai/ci_evidence/README.md) show stable failure categories: (A) CANDIDATE_STATE_POINTER_DRIFT in tests/integration/test_review_closure_precondition_regression.py (2 tests) since run 1; (B) queue_status expected ACTIVE but observed BLOCKED in 4 regression files since run 2. GOLD-047 cannot be accepted until a subsequent matching remote HEAD has green Python 3.12, Python 3.13, and PostgreSQL jobs.",
+      "detail": "Historical CI evidence: GitHub Actions runs on earlier HEADs (36026387906, 36027627116, 36034679803, 36048709353, 36055545594, 36083054452, 36124398637, 36125652989) concluded failure with stable failure categories: (A) CANDIDATE_STATE_POINTER_DRIFT in tests/integration/test_review_closure_precondition_regression.py; (B) queue_status expected ACTIVE but observed BLOCKED in 4 regression files. Wait: newer runs on HEAD 439f81c (36130656107, success) and HEAD a98e7dd (36131680799, success) and HEAD db41637 (36133733460, success) have superseded the historical failures. GOLD-047 still cannot be accepted until GPT-only content-bound adjudication is completed and a downstream recovery task (GOLD-048/049 path) demonstrates green CI on the relevant repaired HEAD. Retained as fail-closed pending GPT adjudication of history.",
       "retryable": true,
-      "moved_at": "2026-09-25T18:43:41+08:00"
+      "moved_at": "2026-09-25T20:13:39+08:00"
     },
     {
       "code": "GPT_REVIEW_TERMINAL_HISTORY",
-      "detail": "Formal review remains continuous only through GOLD-027. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, GOLD-044, GOLD-046, GOLD-047 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GPT-only content-bound adjudication and continuous substantive review remain pending until the actual completion path is demonstrably repaired and matching remote CI is green.",
+      "detail": "Formal review remains continuous only through GOLD-027. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, GOLD-044, GOLD-046, GOLD-047 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GPT-only content-bound adjudication and continuous substantive review remain pending until the actual completion path is demonstrably repaired and matching remote CI is green. GOLD-050 provides the read-only legacy adjudication candidate packet; GPT retains exclusive authority to issue any real adjudication.",
       "retryable": true,
-      "moved_at": "2026-09-25T18:43:41+08:00"
+      "moved_at": "2026-09-25T20:13:39+08:00"
     },
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
-      "detail": "Automatic task execution remains paused. Human/operator must stop the existing local orchestrator/launcher, verify the old process is no longer running, fetch origin/cline-agent, verify the local checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task executes. Restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs for the recovery runs. This operational safety precondition does not by itself prove root cause, repair terminal history, pass CI, or authorize review closure.",
+      "detail": "Automatic task execution remains paused. Human/operator must stop the existing local orchestrator/launcher, verify the old process is no longer running, fetch origin/cline-agent, verify the local checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task executes. Restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs for the recovery runs. GOLD-051 provides the machine-checkable schema for this evidence; nothing in it clears the gate.",
       "retryable": true,
-      "moved_at": "2026-09-25T18:43:41+08:00"
+      "moved_at": "2026-09-25T20:13:39+08:00"
     }
   ],
   "history_blockers": [],
@@ -65,7 +65,7 @@
       "resolved_by": "2026-09-24: GOLD-041 commit 0a9234b84f1dc7e39870c821c2a7db82a2f319c9 restored STATE_RESULT_DRIFT issue/blocking consistency; GitHub Actions CI #151 attempt 2 passed Python 3.12, Python 3.13, and PostgreSQL jobs."
     }
   ],
-  "next_action": "Automatic task execution remains paused. Human/operator must (1) satisfy CONTROL_PLANE_FRESH_PROCESS_RESTART with startup/fresh-process evidence and job-level logs, (2) then allow GOLD-048 (CANDIDATE_STATE_POINTER_DRIFT real-repo fix) and GOLD-049 (queue_status single-source invariant test fix) to execute. After executor commits, provide matching remote HEAD CI runs for Python 3.12, Python 3.13, and PostgreSQL. GPT will then resume review. Do not rewrite historical results, do not create Executor-signed adjudication, do not auto-sign review, do not advance last_reviewed_task, keep PHASE3_3_DATA blocked, and do not enter Phase 3.4.",
+  "next_action": "Automatic task execution remains paused. Human/operator must (1) satisfy CONTROL_PLANE_FRESH_PROCESS_RESTART with startup/fresh-process evidence and job-level logs (GOLD-051 defines the machine-checkable schema for this evidence), (2) then allow GOLD-048 (CANDIDATE_STATE_POINTER_DRIFT real-repo fix) and GOLD-049 (queue_status single-source invariant test fix) to execute. After executor commits, provide matching remote HEAD CI runs for Python 3.12, Python 3.13, and PostgreSQL. In parallel, GOLD-050 (read-only legacy adjudication candidate packet for GOLD-047) and GOLD-052 (read-only fail-closed backlog report) remain queued under the same human gate; neither produces PASS/FAIL and GPT retains exclusive authority to issue real adjudications. Do not rewrite historical results, do not create Executor-signed adjudication, do not auto-sign review, do not advance last_reviewed_task, keep PHASE3_3_DATA blocked, and do not enter Phase 3.4.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -77,7 +77,7 @@
     },
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
-      "detail": "Human/operator must stop the current local orchestrator/launcher, verify the old process has terminated, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task runs. Restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs of the subsequent recovery runs for the next GPT review cycle."
+      "detail": "Human/operator must stop the current local orchestrator/launcher, verify the old process has terminated, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task runs. Restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs of the subsequent recovery runs for the next GPT review cycle. GOLD-051 defines the machine-checkable schema for this evidence; recording it does not by itself clear the gate."
     }
   ],
   "invariants": [
@@ -93,9 +93,10 @@
   ],
   "queue_target_size": 3,
   "task_queue": [
-    "GOLD-048",
-    "GOLD-049"
+    "GOLD-050",
+    "GOLD-051",
+    "GOLD-052"
   ],
-  "queue_status": "BLOCKED",
+  "queue_status": "HOLD",
   "planner_lookahead_size": 3
 }
