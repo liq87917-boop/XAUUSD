@@ -1,0 +1,67 @@
+{
+  "task_id": "GOLD-048",
+  "type": "CONTROL_PLANE_REVIEW_CLOSURE_PRECONDITION_REAL_REPO_ALIGNMENT",
+  "title": "修复真实仓库候选状态指针漂移误报导致的 CI 失败",
+  "max_attempts": 3,
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": true,
+  "human_gate": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
+  "goal": "修复 GitHub Actions Python 3.12/3.13 上持续失败的 review closure precondition 回归：在真实仓库、完整历史、匹配候选下，CANDIDATE_STATE_POINTER_DRIFT 不得被误触发；真实漂移仍必须 fail-closed。不得改写历史 result/ledger/state，不得放宽终端一致性门禁。",
+  "requirements": [
+    "先在完整 Git 历史的 Linux/CI 语义下复现 tests/integration/test_review_closure_precondition_regression.py::test_real_repo_matching_candidate_is_ready_and_zero_write 与 ::test_real_repo_cli_temp_file_candidate_zero_write 的失败，并定位 CANDIDATE_STATE_POINTER_DRIFT 在匹配候选下被误触发的原因。",
+    "审查 orchestrator/review_closure_precondition.py 与 orchestrator/planner_snapshot_output.py 中指针事实计算：候选 PROJECT_STATE 的 last_reviewed_task/last_completed_task/current_task 与已提交 store/HEAD 的对齐必须在真实仓库结构下确定性计算，不得依赖 cwd、平台路径、walk 顺序、临时文件相对路径等非确定性因素。",
+    "真实指针漂移（例如候选 last_reviewed_task 落后或超前于已提交 store、删除 PHASE3_3_DATA、提前进入 Phase 3.4、交易安全开关变化）必须继续 fail-closed；禁止删除或降级 CANDIDATE_STATE_POINTER_DRIFT reason code，只能修复误判来源。",
+    "补充最小回归测试：匹配候选 ⇒ reason_codes=[] 且 EXIT_OK；指针漂移候选（多种漂移形态）⇒ 稳定 reason code 且 exit_code!=0；测试必须在 Linux 与 Windows 上都确定性通过。",
+    "不得改写 .ai/results/*、.ai/GPT_REVIEW_LEDGER.json、.ai/PROJECT_STATE.json、.ai/adjudications/**；不得修改 .github/workflows/**；不得引入新的网络访问或真实数据采集。",
+    "本地全量 pytest/ruff/mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 的 pytest 必须通过；PostgreSQL native schema+seeds 不得回退。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/review_closure_precondition.py",
+      "orchestrator/planner_snapshot_output.py",
+      "orchestrator/review_binding.py",
+      "orchestrator/review_backlog.py",
+      "orchestrator/review_ledger_integrity.py",
+      "tests/integration/test_review_closure_precondition_regression.py",
+      "tests/integration/**",
+      "tests/unit/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行本任务。",
+    "历史 result/ledger/state/adjudication 永久只读；不得为让 CI 变绿而改写或删除既有审计事实。",
+    "CANDIDATE_STATE_POINTER_DRIFT 必须保持 fail-closed；只修复真实仓库下的误判，不放宽真实漂移的检测。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "本任务禁止在无 fresh-process 证据的情况下 auto_start；由宿主人工解除 human gate 后再执行。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/integration/test_review_closure_precondition_regression.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "真实仓库匹配候选下 review closure precondition 返回 EXIT_OK 且 reason_codes=[]，不再误报 CANDIDATE_STATE_POINTER_DRIFT。",
+    "真实指针漂移（至少覆盖 last_reviewed_task 倒退、超前、删除 PHASE3_3_DATA、提前进入 Phase 3.4、交易安全开关变化）仍稳定 fail-closed 且 reason code 不变。",
+    "本地全量 pytest/ruff/mypy 通过；GitHub Actions Python 3.12/3.13 pytest 通过，PostgreSQL job 未回退。",
+    "不改写任何历史 result/ledger/state/adjudication，不改变 Phase 3.3 blocker、L3/L4、GPT 独占规划权与交易安全开关。"
+  ]
+}

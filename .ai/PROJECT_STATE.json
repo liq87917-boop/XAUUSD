@@ -3,40 +3,41 @@
   "project": "XAUUSD",
   "branch": "cline-agent",
   "phase": "Phase 3",
-  "status": "ACTIVE",
-  "current_task": "GOLD-047",
+  "status": "BLOCKED",
+  "current_task": "GOLD-048",
   "last_completed_task": "GOLD-044",
   "last_reviewed_task": "GOLD-027",
-  "blockers": [],
-  "history_blockers": [
-    {
-      "code": "PHASE3_3_DATA",
-      "detail": "Business Phase 3.3 evidence remains blocked pending legally authorized Author/News evidence with trustworthy independent time/availability semantics. This blocker remains independent of the control-plane review recovery queue and must not be treated as resolved by code, tests, CI, review adjudication, or ledger closure.",
-      "retryable": false,
-      "moved_at": "2026-09-25T18:43:41+08:00"
-    },
-    {
-      "code": "GPT_REVIEW_TERMINAL_HISTORY",
-      "detail": "Formal review remains continuous only through GOLD-027. GOLD-036 and GOLD-037 have individually complete review-binding facts, but cannot be appended past unresolved earlier gaps. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, GOLD-044, GOLD-046, and GOLD-047 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GPT-only content-bound adjudication and continuous substantive review remain pending until the actual completion path is demonstrably repaired and matching remote CI is green.",
-      "retryable": true,
-      "moved_at": "2026-09-25T18:43:41+08:00"
-    },
+  "blockers": [
     {
       "code": "RESULT_TERMINAL_CONSISTENCY_RECURRENCE",
-      "detail": "The immutable GOLD-047 result at commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b records status=completed and normalized_finish_reason=completed while its final attempt records cline_finish_reason_raw=aborted. This is a second post-repair recurrence after GOLD-044 and occurred even though GOLD-047's isolated canary regression suite passed locally. The historical result must remain unchanged. No further executor task may run until the host orchestrator has been stopped, the old process has been verified terminated, and a demonstrably fresh process has been started from the then-current fetched origin/cline-agent HEAD, no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. GPT must review the actual failing-path evidence before task execution resumes.",
+      "detail": "The immutable GOLD-047 result at commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b records status=completed and normalized_finish_reason=completed while its final attempt records cline_finish_reason_raw=aborted. GPT review of remote HEAD ac0400c8a4c72599c1a61577068681c419c0bef2 confirms GitHub Actions runs 36125652989 and 36124398637 both concluded failure; GOLD-047 remains fail-closed. Historical result must remain unchanged. No executor task may auto-start until the CONTROL_PLANE_FRESH_PROCESS_RESTART human gate is cleared with startup evidence.",
       "retryable": true,
       "moved_at": "2026-09-25T18:43:41+08:00"
     },
     {
       "code": "GOLD_047_REMOTE_CI_FAILURE",
-      "detail": "GitHub Actions CI runs 36026387906 for GOLD-047 commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b, 36027627116 for cc9213beb50907504e993af1f0e448369f6a16f3, 36034679803 for 490c1decf1ba4b316019c7a272726d04601b8fab, and 36048709353 for current remote HEAD 271f66c66a3f29d5019ce7c9a0c2d8baec04dee9 all completed with conclusion=failure. Job-level logs and failing assertions were not supplied, so GPT cannot safely infer or prescribe a code fix. GOLD-047 cannot be accepted until a subsequent matching remote HEAD has green Python 3.12, Python 3.13, and PostgreSQL jobs.",
+      "detail": "GPT review at remote HEAD ac0400c8a4c72599c1a61577068681c419c0bef2: GitHub Actions CI runs 36125652989 (HEAD ac0400c) and 36124398637 (HEAD 1974585) concluded failure. Prior runs 36026387906 (3ea96d4), 36027627116 (cc9213b), 36034679803 (490c1de), 36048709353 (271f66c), 36055545594 (6d7c7ec), 36083054452 (096098c) all failure. Job-level logs (.ai/ci_evidence/README.md) show stable failure categories: (A) CANDIDATE_STATE_POINTER_DRIFT in tests/integration/test_review_closure_precondition_regression.py (2 tests) since run 1; (B) queue_status expected ACTIVE but observed BLOCKED in 4 regression files since run 2. GOLD-047 cannot be accepted until a subsequent matching remote HEAD has green Python 3.12, Python 3.13, and PostgreSQL jobs.",
+      "retryable": true,
+      "moved_at": "2026-09-25T18:43:41+08:00"
+    },
+    {
+      "code": "GPT_REVIEW_TERMINAL_HISTORY",
+      "detail": "Formal review remains continuous only through GOLD-027. GOLD-028, GOLD-031, GOLD-035, GOLD-038, GOLD-039, GOLD-040, GOLD-041, GOLD-044, GOLD-046, GOLD-047 are fail-closed because their immutable results record completed semantics while the final raw finish_reason is aborted. No historical result or ledger entry may be rewritten. GPT-only content-bound adjudication and continuous substantive review remain pending until the actual completion path is demonstrably repaired and matching remote CI is green.",
       "retryable": true,
       "moved_at": "2026-09-25T18:43:41+08:00"
     },
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
-      "detail": "Automatic task execution is paused to prevent additional immutable completed+raw-aborted results. A human/operator must stop the existing local orchestrator/launcher, verify the old process is no longer running, fetch origin/cline-agent, verify the local checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process. The restart must use a commit no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. This operational safety precondition does not by itself prove root cause, repair terminal history, pass CI, or authorize review closure.",
+      "detail": "Automatic task execution remains paused. Human/operator must stop the existing local orchestrator/launcher, verify the old process is no longer running, fetch origin/cline-agent, verify the local checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task executes. Restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs for the recovery runs. This operational safety precondition does not by itself prove root cause, repair terminal history, pass CI, or authorize review closure.",
       "retryable": true,
+      "moved_at": "2026-09-25T18:43:41+08:00"
+    }
+  ],
+  "history_blockers": [
+    {
+      "code": "PHASE3_3_DATA",
+      "detail": "Business Phase 3.3 evidence remains blocked pending legally authorized Author/News evidence with trustworthy independent time/availability semantics. This blocker remains independent of the control-plane review recovery queue and must not be treated as resolved by code, tests, CI, review adjudication, or ledger closure.",
+      "retryable": false,
       "moved_at": "2026-09-25T18:43:41+08:00"
     }
   ],
@@ -66,7 +67,7 @@
       "resolved_by": "2026-09-24: GOLD-041 commit 0a9234b84f1dc7e39870c821c2a7db82a2f319c9 restored STATE_RESULT_DRIFT issue/blocking consistency; GitHub Actions CI #151 attempt 2 passed Python 3.12, Python 3.13, and PostgreSQL jobs."
     }
   ],
-  "next_action": "Rolling task mode resumed after human gate cleared by operator on 2026-09-25. Previous blockers archived to history_blockers. status=ACTIVE, queue_status=ACTIVE. GPT may replenish task_queue up to queue_target_size=3 with dependency-safe tasks.",
+  "next_action": "Automatic task execution remains paused. Human/operator must (1) satisfy CONTROL_PLANE_FRESH_PROCESS_RESTART with startup/fresh-process evidence and job-level logs, (2) then allow GOLD-048 (CANDIDATE_STATE_POINTER_DRIFT real-repo fix) and GOLD-049 (queue_status single-source invariant test fix) to execute. After executor commits, provide matching remote HEAD CI runs for Python 3.12, Python 3.13, and PostgreSQL. GPT will then resume review. Do not rewrite historical results, do not create Executor-signed adjudication, do not auto-sign review, do not advance last_reviewed_task, keep PHASE3_3_DATA blocked, and do not enter Phase 3.4.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -78,7 +79,7 @@
     },
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
-      "detail": "Human/operator must stop the current local orchestrator/launcher, verify the old process has terminated, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task is permitted. The restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs for CI runs 36026387906, 36027627116, 36034679803, and 36048709353 for the next GPT review cycle."
+      "detail": "Human/operator must stop the current local orchestrator/launcher, verify the old process has terminated, fetch origin/cline-agent, verify the checkout equals the then-current remote branch HEAD, and restart from that checkout in a demonstrably fresh process before any further executor task runs. Restart commit must be no earlier than reviewed snapshot 490c1decf1ba4b316019c7a272726d04601b8fab. Provide startup/fresh-process evidence and job-level logs of the subsequent recovery runs for the next GPT review cycle."
     }
   ],
   "invariants": [
@@ -89,10 +90,14 @@
     "不得用 Mock/模板/示例数据宣称真实数据资格",
     "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行已批准任务，不得生成后续任务或决定 Phase",
     "Phase 3.3 数据资格未解除前不得进入 Phase 3.4",
-    "测试、CI、裁决或预检通过均不自动等于 GPT Review PASS"
+    "测试、CI、裁决或预检通过均不自动等于 GPT Review PASS",
+    "历史 result/ledger/state/adjudication 永久只读"
   ],
   "queue_target_size": 3,
-  "task_queue": [],
-  "queue_status": "ACTIVE",
+  "task_queue": [
+    "GOLD-048",
+    "GOLD-049"
+  ],
+  "queue_status": "BLOCKED",
   "planner_lookahead_size": 3
 }

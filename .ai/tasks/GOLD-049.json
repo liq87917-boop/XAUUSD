@@ -1,0 +1,67 @@
+{
+  "task_id": "GOLD-049",
+  "type": "CONTROL_PLANE_INVARIANT_TEST_SINGLE_SOURCE",
+  "title": "修复 PHASE3_3 / queue_status 回归断言硬编码导致的 CI 失败",
+  "max_attempts": 3,
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": true,
+  "human_gate": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
+  "goal": "修复 4 个回归文件中 test_phase33_blocker_and_trading_invariants_unchanged 对 queue_status 的硬编码 ACTIVE 断言，使回归测试从唯一权威来源读取事实而不是把控制面合理状态迁移当作断言失败；保留 PHASE3_3 与交易安全不变量断言强度。",
+  "requirements": [
+    "复现 tests/integration/test_result_terminal_canary_regression.py、test_result_terminal_consistency_regression.py、test_review_binding_regression.py、test_review_ledger_integrity_regression.py 的 test_phase33_blocker_and_trading_invariants_unchanged 失败。",
+    "把这四个用例的 queue_status 断言从硬编码 'ACTIVE' 改为由控制面权威来源（PROJECT_STATE 结构本身 + 唯一允许的取值域 + queue_status 与 status/blockers 的语义一致性约束）校验，而不是绑定某个具体值；当 queue_status 在合法域 {ACTIVE, HOLD, BLOCKED} 内且与 status/blockers 语义自洽即通过。",
+    "PHASE3_3 数据资格 blocker、LIVE_TRADING=false、ALLOW_EXTERNAL_ORDER_SUBMISSION=false、Phase 3 未进入 3.4、GPT 独占规划权等不变量断言必须保持原强度；禁止为了通过而删除、降级或跳过任何不变量断言。",
+    "不得为通过测试而修改 .ai/PROJECT_STATE.json 内容、不得回退 ac0400c 的控制面变更；修复点必须落在测试或单一事实源函数（若存在共享断言工具函数）上。",
+    "补充最小回归：queue_status=ACTIVE/HOLD/BLOCKED 与对应的 status/blockers 组合下的语义一致性用例；不合法组合必须 fail-closed。",
+    "不得改写 .ai/results/*、.ai/GPT_REVIEW_LEDGER.json、.ai/PROJECT_STATE.json、.ai/adjudications/**；不得修改 .github/workflows/**。",
+    "本地全量 pytest/ruff/mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 的 pytest 必须通过。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "tests/integration/test_result_terminal_canary_regression.py",
+      "tests/integration/test_result_terminal_consistency_regression.py",
+      "tests/integration/test_review_binding_regression.py",
+      "tests/integration/test_review_ledger_integrity_regression.py",
+      "tests/integration/**",
+      "tests/unit/**",
+      "orchestrator/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行本任务。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "不得弱化 PHASE3_3 blocker 与交易安全不变量断言，只允许修复因状态迁移而失真的硬编码期望。",
+    "测试必须从单一权威来源读取事实，不得在测试中硬编码控制面当前快照值。",
+    "本任务禁止在无 fresh-process 证据的情况下 auto_start；由宿主人工解除 human gate 后再执行。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests/integration/test_result_terminal_canary_regression.py tests/integration/test_result_terminal_consistency_regression.py tests/integration/test_review_binding_regression.py tests/integration/test_review_ledger_integrity_regression.py -q",
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "四个回归文件中的 test_phase33_blocker_and_trading_invariants_unchanged 在完整历史 Linux/CI 语义下通过，且不削弱 PHASE3_3 与交易安全不变量断言。",
+    "queue_status 断言具备唯一权威来源与合法域，合法组合通过、非法组合 fail-closed，不再因控制面状态迁移而失真。",
+    "本地全量 pytest/ruff/mypy 通过；GitHub Actions Python 3.12/3.13 pytest 通过。",
+    "不改写历史 result/ledger/state，不改变 Phase 3.3 blocker、L3/L4、GPT 独占规划权与交易安全开关。"
+  ]
+}
