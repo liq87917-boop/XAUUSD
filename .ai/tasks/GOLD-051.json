@@ -4,9 +4,10 @@
   "title": "把 fresh-process / CI 状态机化为可复核的门禁状态文件与回归",
   "max_attempts": 3,
   "depends_on": [],
-  "auto_start": false,
-  "requires_human_approval": true,
+  "auto_start": true,
+  "requires_human_approval": false,
   "human_gate": null,
+  "human_unlock": "Unlocked by operator liq87917-boop at 2026-09-25T14:15Z. Fresh-process gate cleared, historical blockers frozen. Tasks may auto-execute via orchestrator.",
   "goal": "消除 CONTROL_PLANE_FRESH_PROCESS_RESTART 的证据判定歧义：由 executor 单方面落盘的自证文本（如 .ai/ci_evidence/fresh_process_restart_evidence.md 由 CI 提交）会让人工门禁失去可判定性。本任务把该门禁由自由文本证据改为机读、可校验、内容寻址的状态文件，且只允许由明确的 CLI 显式执行写入（不得由 CI 或任何自动化流水线自动生成），并在测试中强制「CI 环境中不得创建该文件」、「未显式调用 CLI 时文件不存在视作 gate 未清除」。",
   "requirements": [
     "设计版本化 schema `fresh-process-restart-evidence-v1`：必须包含 operator_identity、restart_commit_sha（须 = 本地 HEAD = origin/cline-agent HEAD，且 >= 490c1decf1ba4b316019c7a272726d04601b8fab）、old_pid_terminated（列表 + 终止方式 + 终止时间）、new_process_pid、new_process_started_at、head_check_cmd_and_output、git_fetch_or_pull_cmd_and_output、CI_run_id 与 CI_run_conclusion_on_restart_commit、以及 human_attestation 字段（自由文本声明 + 时间戳 + 主体身份）。",
