@@ -20,6 +20,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from orchestrator import control_plane_invariants
 from orchestrator import review_ledger as ledger_mod
 from orchestrator import review_ledger_integrity as integrity
 
@@ -311,9 +312,7 @@ def test_phase33_blocker_and_trading_invariants_unchanged() -> None:
     assert "PHASE3_3_DATA" in (blocker_codes | history_codes)
     assert "LIVE_TRADING=false" in state["invariants"]
     assert "ALLOW_EXTERNAL_ORDER_SUBMISSION=false" in state["invariants"]
-    assert state["queue_status"] in {"ACTIVE", "HOLD", "BLOCKED"}
-    if state["status"] == "BLOCKED":
-        assert state["queue_status"] in {"BLOCKED", "HOLD"}
+    assert control_plane_invariants.queue_status_consistency_violations(state) == []
 
 
 

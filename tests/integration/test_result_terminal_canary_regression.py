@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from orchestrator import control_plane_invariants
 from orchestrator import result_terminal_canary as canary
 from orchestrator import result_terminal_consistency as terminal
 
@@ -397,6 +398,4 @@ def test_phase33_blocker_and_trading_invariants_unchanged() -> None:
 
     assert "ALLOW_EXTERNAL_ORDER_SUBMISSION=false" in state["invariants"]
 
-    assert state["queue_status"] in {"ACTIVE", "HOLD", "BLOCKED"}
-    if state["status"] == "BLOCKED":
-        assert state["queue_status"] in {"BLOCKED", "HOLD"}
+    assert control_plane_invariants.queue_status_consistency_violations(state) == []
