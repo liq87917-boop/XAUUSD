@@ -1191,6 +1191,37 @@ Orchestrator 必须把 Cline 任务失败与 Provider 外部失败分开处理�
   仓库零改写、两场景语义独立、两次运行稳定、父进程 monkeypatch 免疫、新进程边界被污染
   必 fail-closed、Phase 3.3 / 交易安全不变量不变）。
 
+## 2.21 Supervisor 通信边界与事件驱动 GPT 闭环
+
+- **唯一决策者**：GPT 是唯一 Planner / Reviewer / Architect。只有 GPT 可以判定任务
+  `PASS` / `FAIL`、签发 review ledger、创建或排序 `GOLD-*` 任务、修改项目 Phase、解除
+  blocker。测试通过、CI 通过、Cline 退出码、Supervisor 路由判断都只是证据，不是 verdict。
+- **Supervisor 仅是通信层**：AI_SUPERVISOR 只允许执行 Git fetch/隔离审查、上下文采集、
+  调用 GPT、结构/路径校验、原子 control commit/push、状态同步、进程锁、退避与重试。
+  Supervisor 不得自行把结果改成 PASS/FAIL，不得自行编写 GOLD 任务，不得自行推进 Phase。
+- **Executor 边界**：Cline 负责领取 GPT 已批准的任务并调用 DeepSeek 完成开发/整改，随后
+  运行任务声明的验证、写不可变 result 并 commit/push。Cline/DeepSeek 不得签 review、补队列
+  或把失败自行降级成通过。
+- **Git 是唯一中转载体**：task、immutable result、PROJECT_STATE、GPT_REVIEW_LEDGER、
+  adjudication/brain request 与代码提交共同组成 GPT 和本地执行器之间的可审计状态；运行时
+  日志或 `.ai/runtime/**` 只能作为诊断副本，不得成为唯一任务/整改来源。
+- **事件触发，不等小时轮询**：Supervisor 发现远端/本地新 commit、
+  `completed-but-unreviewed` 或队列为空时必须立即唤醒 GPT review；周期审查只作兜底。事件
+  只触发 GPT，不得由 Supervisor 直接补任务或改变 verdict。
+- **PASS 闭环**：GPT 验收 PASS 后，如已批准队列低于 `planner_lookahead_size`，由 GPT 在同一
+  control plan 中写完整 dependency-safe task 文件及兼容的 PROJECT_STATE/队列更新；
+  Supervisor 只校验和发布该 GPT 输出。
+- **FAIL 闭环**：GPT 验收 FAIL 时必须在 `required_fixes` 中给出明确失败证据和整改要求，
+  并写入 runner 可读的整改 task、`.ai/brain/requests/**` 或 PROJECT_STATE。Supervisor 对
+  “只有日志通知、没有 Git 整改载体”的 FAIL 必须 fail-closed 拒绝发布；Cline 随后按该
+  GPT 整改任务再次调用 DeepSeek。
+- **BLOCKED 语义**：仅当缺少外部证据、需要人工门禁或无法安全形成 Executor 整改任务时
+  使用 `BLOCKED`。这时允许队列为空，但 Supervisor 仍按受控退避重试 GPT review；不得伪造
+  修复任务来清空 blocker。
+- **并发与历史安全**：GPT 思考期间远端 HEAD 改变则整份计划作废并重审；禁止 force push，
+  禁止改写历史 `.ai/results/**`，禁止静默删除 blocker，禁止越过 L3/L4、
+  `LIVE_TRADING=false` 与 `ALLOW_EXTERNAL_ORDER_SUBMISSION=false`。
+
 
 
 
