@@ -121,7 +121,7 @@ def verify_evidence(
             "detail": f"schema mismatch: {data.get('schema')!r}",
         }
 
-    missing = [f for f in REQUIRED_FIELDS if not data.get(f)]
+    missing = [f for f in REQUIRED_FIELDS if f not in data or data.get(f) is None]
     if missing:
         return {
             "verdict": VERDICT_INVALID,

@@ -95,6 +95,25 @@ def test_verify_schema_mismatch(monkeypatch, tmp_path) -> None:
     assert result["verdict"] == fpe.VERDICT_INVALID
 
 
+def test_verify_empty_old_pid_list_is_valid(monkeypatch, tmp_path) -> None:
+    # 回归：old_pid_terminated=[]（空列表）是合法值，不得被误判为「缺失字段」
+    _mock_git(monkeypatch)
+    result = fpe.verify_evidence(
+        _write(tmp_path, _evidence(old_pid_terminated=[])), tmp_path
+    )
+    assert result["verdict"] == fpe.VERDICT_CLEARED
+
+
+def test_verify_empty_operator_identity_blocked(monkeypatch, tmp_path) -> None:
+    # 回归：operator_identity="" 仍应在 REASON_MISSING_OPERATOR_IDENTITY 被拦下（.strip() 判断）
+    _mock_git(monkeypatch)
+    result = fpe.verify_evidence(
+        _write(tmp_path, _evidence(operator_identity="")), tmp_path
+    )
+    assert result["verdict"] == fpe.VERDICT_NOT_CLEARED
+    assert fpe.REASON_MISSING_OPERATOR_IDENTITY in result["reason_codes"]
+
+
 # ---- CLI ----
 
 def _import_cli():
