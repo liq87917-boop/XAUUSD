@@ -1202,9 +1202,17 @@ def candidate_state_facts(
             )
         )
 
-    committed_blockers = set(planner.gate_codes(committed_state.get("blockers")))
+    # history_blockers 里的归档 blocker（如 PHASE3_3_DATA）同样受只读保护：
+    # 候选删除它们也必须 fail-closed，否则 GPT 归档后 PHASE3_3_DATA 失去保护。
+    committed_gates = (committed_state.get("blockers") or []) + (
+        committed_state.get("history_blockers") or []
+    )
+    committed_blockers = set(planner.gate_codes(committed_gates))
 
-    candidate_blockers = set(planner.gate_codes(candidate_state.get("blockers")))
+    candidate_gates = (candidate_state.get("blockers") or []) + (
+        candidate_state.get("history_blockers") or []
+    )
+    candidate_blockers = set(planner.gate_codes(candidate_gates))
 
     for code in sorted(committed_blockers - candidate_blockers):
         if code == PHASE3_3_BLOCKER:

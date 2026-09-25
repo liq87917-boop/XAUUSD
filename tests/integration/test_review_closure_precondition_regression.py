@@ -188,10 +188,9 @@ def consistent_state() -> dict[str, Any]:
 
     state["last_completed_task"] = latest_completed_task()
 
-    head = pending_task()
-
-    if head is not None:
-        state["current_task"] = head
+    # current_task 必须始终对齐真实 results：pending 为 None 时清空，否则会残留
+    # 指向已有终态 result 的旧值，被 pointer_section 误判为 CANDIDATE_STATE_POINTER_DRIFT。
+    state["current_task"] = pending_task()
 
     return state
 
@@ -370,9 +369,10 @@ def test_real_repo_phase3_3_blocker_removal_fails_closed() -> None:
 
     state = consistent_state()
 
-    state["blockers"] = [
+    # PHASE3_3_DATA 已被 GPT 归档到 history_blockers；从 history_blockers 删除它验证 fail-closed。
+    state["history_blockers"] = [
         blocker
-        for blocker in state.get("blockers", [])
+        for blocker in state.get("history_blockers", [])
         if blocker.get("code") != precondition.PHASE3_3_BLOCKER
     ]
 

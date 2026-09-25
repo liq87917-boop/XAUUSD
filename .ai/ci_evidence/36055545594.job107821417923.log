@@ -1,4 +1,4 @@
-﻿lint + type check + tests (py3.12)	UNKNOWN STEP	锘?026-09-24T20:32:24.6763791Z Current runner version: '2.337.0'
+lint + type check + tests (py3.12)	UNKNOWN STEP	锘?026-09-24T20:32:24.6763791Z Current runner version: '2.337.0'
 lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T20:32:24.6792510Z ##[group]Runner Image Provisioner
 lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T20:32:24.6793722Z Hosted Compute Agent
 lint + type check + tests (py3.12)	UNKNOWN STEP	2026-09-24T20:32:24.6794459Z Version: 20260828.587
