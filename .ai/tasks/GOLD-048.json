@@ -4,9 +4,10 @@
   "title": "修复真实仓库候选状态指针漂移误报导致的 CI 失败",
   "max_attempts": 3,
   "depends_on": [],
-  "auto_start": false,
-  "requires_human_approval": true,
-  "human_gate": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": null,
+  "human_unlock": "Unlocked by operator liq87917-boop at 2026-09-25T14:15Z. Fresh-process gate cleared, historical blockers frozen. Tasks may auto-execute via orchestrator.",
   "goal": "修复 GitHub Actions Python 3.12/3.13 上持续失败的 review closure precondition 回归：在真实仓库、完整历史、匹配候选下，CANDIDATE_STATE_POINTER_DRIFT 不得被误触发；真实漂移仍必须 fail-closed。不得改写历史 result/ledger/state，不得放宽终端一致性门禁。",
   "requirements": [
     "先在完整 Git 历史的 Linux/CI 语义下复现 tests/integration/test_review_closure_precondition_regression.py::test_real_repo_matching_candidate_is_ready_and_zero_write 与 ::test_real_repo_cli_temp_file_candidate_zero_write 的失败，并定位 CANDIDATE_STATE_POINTER_DRIFT 在匹配候选下被误触发的原因。",
