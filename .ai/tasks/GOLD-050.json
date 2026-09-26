@@ -8,6 +8,7 @@
   "requires_human_approval": false,
   "human_gate": null,
   "human_unlock": "Unlocked by operator liq87917-boop at 2026-09-25T14:15Z. Fresh-process gate cleared, historical blockers frozen. Tasks may auto-execute via orchestrator.",
+  "superseded_reason": "Superseded 2026-09-26: GOLD-047 terminal-state inconsistency was frozen as technical debt by human operator (commit f48c433), so this GPT adjudication candidate packet is no longer required. Cline aborted repeatedly (raw=aborted, 132/56/52 iterations, 2-27M input tokens) due to task weight. Removed from queue; GPT to issue smaller-granularity forward tasks.",
   "goal": "复用 GOLD-042/043/044 已交付的 legacy adjudication 契约与 evidence manifest，为 GOLD-047 不可变结果（commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b，status=completed 而最终 attempt raw finish_reason=aborted）生成一份只读的、内容寻址的、GPT-only 的裁决候选包与校验输出。本任务不写任何真实裁决、不动历史 result、不写 GPT_REVIEW_LEDGER、不推进 last_reviewed_task、不修改 PROJECT_STATE；只能生成候选材料与校验报告，交回 GPT 由 GPT 决定是否签发正式裁决。",
   "requirements": [
     "使用 orchestrator/review_evidence_manifest.py（GOLD-043）对 GOLD-047 生成 manifest，逐项输出 task/result sha256、completion commit sha/branch/subject、changed paths、validation return codes、terminal consistency findings 与既有 ledger/adjudication 状态；不得复制或改写 .ai/results 原文件。",

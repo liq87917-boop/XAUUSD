@@ -105,9 +105,7 @@
   ],
   "queue_target_size": 3,
   "task_queue": [
-    "GOLD-050",
-    "GOLD-051",
-    "GOLD-052"
+    "GOLD-051"
   ],
   "queue_status": "HOLD",
   "planner_lookahead_size": 3,

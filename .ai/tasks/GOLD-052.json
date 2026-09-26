@@ -8,6 +8,7 @@
   "requires_human_approval": false,
   "human_gate": null,
   "human_unlock": "Unlocked by operator liq87917-boop at 2026-09-25T14:15Z. Fresh-process gate cleared, historical blockers frozen. Tasks may auto-execute via orchestrator.",
+  "superseded_reason": "Superseded 2026-09-26: fail-closed historical tasks were frozen as technical debt by human operator (commit f48c433), so this read-only backlog report generator is no longer required. Cline aborted repeatedly (raw=aborted, 180/35/65 iterations, 2-36M input tokens) due to task weight. Removed from queue; GPT to issue smaller-granularity forward tasks.",
   "goal": "当前 PROJECT_STATE 明确列出 GOLD-028、GOLD-031、GOLD-035、GOLD-038、GOLD-039、GOLD-040、GOLD-041、GOLD-044、GOLD-046、GOLD-047 因历史终态不一致而 fail-closed。建立一个只读报告工具，把这些任务的「历史事实 + 现有裁决状态 + 是否可被 GOLD-042 契约恢复绑定」一次性聚合成确定性、可复核的清单，供 GPT 逐项内容级复审；工具不得产生 PASS/FAIL，不得推进任何指针，不得写任何审计文件。",
   "requirements": [
     "新增只读 CLI `scripts/failclosed_backlog_report.py`，复用 orchestrator/review_evidence_manifest.py（GOLD-043）与 orchestrator/legacy_result_adjudication.py（GOLD-042）的既有事实算法；不得另造 result/commit 身份口径。",
