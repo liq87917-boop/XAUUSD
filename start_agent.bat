@@ -2,7 +2,7 @@
 
 cd /d %~dp0
 
-title Cline AI Orchestrator
+title XAUUSD Orchestrator
 
 echo ========================================
 echo        Cline AI Orchestrator
