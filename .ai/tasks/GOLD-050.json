@@ -4,11 +4,11 @@
   "title": "为 GOLD-047 历史终态矛盾建立合法 GPT 裁决候选包",
   "max_attempts": 3,
   "depends_on": [],
-  "auto_start": true,
-  "requires_human_approval": false,
-  "human_gate": null,
-  "human_unlock": "Unlocked by operator liq87917-boop at 2026-09-25T14:15Z. Fresh-process gate cleared, historical blockers frozen. Tasks may auto-execute via orchestrator.",
-  "superseded_reason": "Superseded 2026-09-26: GOLD-047 terminal-state inconsistency was frozen as technical debt by human operator (commit f48c433), so this GPT adjudication candidate packet is no longer required. Cline aborted repeatedly (raw=aborted, 132/56/52 iterations, 2-27M input tokens) due to task weight. Removed from queue; GPT to issue smaller-granularity forward tasks.",
+  "auto_start": false,
+  "requires_human_approval": true,
+  "human_gate": "L1",
+  "blocked_reason": "BLOCKED_UNTIL_HISTORICAL_FREEZE_LIFTED: GOLD-050 attempt at ae26cd5 was aborted in orchestrator context triggered by historical terminal inconsistencies on GOLD-044/046/047. Attempts must not resume until GPT explicitly lifts the RESULT_TERMINAL_CONSISTENCY_RECURRENCE / GPT_REVIEW_TERMINAL_HISTORY / GOLD_047_REMOTE_CI_FAILURE freeze for this task via a real adjudication path. Executors must not self-unlock.",
+  "superseded_reason": "Currently blocked; retained in task_queue as a dependency-safe control-plane candidate. Superseded only when GPT explicitly issues a new adjudication task with a higher-priority id; task file must remain read-only in history until then.",
   "goal": "复用 GOLD-042/043/044 已交付的 legacy adjudication 契约与 evidence manifest，为 GOLD-047 不可变结果（commit 3ea96d44058f65241fcf22c0ef917877f9b47b5b，status=completed 而最终 attempt raw finish_reason=aborted）生成一份只读的、内容寻址的、GPT-only 的裁决候选包与校验输出。本任务不写任何真实裁决、不动历史 result、不写 GPT_REVIEW_LEDGER、不推进 last_reviewed_task、不修改 PROJECT_STATE；只能生成候选材料与校验报告，交回 GPT 由 GPT 决定是否签发正式裁决。",
   "requirements": [
     "使用 orchestrator/review_evidence_manifest.py（GOLD-043）对 GOLD-047 生成 manifest，逐项输出 task/result sha256、completion commit sha/branch/subject、changed paths、validation return codes、terminal consistency findings 与既有 ledger/adjudication 状态；不得复制或改写 .ai/results 原文件。",
@@ -49,7 +49,7 @@
     "历史 result/ledger/state/adjudication 永久只读；本任务不得以任何形式改写或删除既有审计事实。",
     "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
     "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
-    "本任务禁止在无 fresh-process 证据的情况下 auto_start；由宿主人工解除 human gate 后再执行。"
+    "本任务禁止在无 fresh-process 证据与 GPT 显式解除历史冻结的情况下 auto_start。"
   ],
   "validation_commands": [
     ".venv\\Scripts\\python.exe -m pytest tests -q",

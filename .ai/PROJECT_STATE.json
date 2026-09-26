@@ -81,7 +81,7 @@
       "resolved_by": "2026-09-25: GOLD-051 code delivery landed on cline-agent (commits 4b3be98 / 4838d0f / 8616563): orchestrator/fresh_process_evidence.py provides a read-only schema/verifier with verdicts cleared|not_cleared|invalid and stable reason codes (HEAD_MISMATCH, RESTART_COMMIT_PRECEDES_MIN_SNAPSHOT, CI_NOT_GREEN, MISSING_OPERATOR_IDENTITY, MISSING_HUMAN_ATTESTATION), and scripts/record_fresh_process_evidence.py is fail-closed in CI. This resolves only the schema/CLI landing requirement; it does NOT clear the CONTROL_PLANE_FRESH_PROCESS_RESTART gate and does NOT constitute a GPT review PASS for GOLD-051, which remains pending genuine human fresh-process evidence and green CI on the final HEAD."
     }
   ],
-  "next_action": "Historical GOLD-047 blockers frozen by human operator at 2026-09-25T14:05Z. PHASE3_3_DATA remains the only active blocker (business authorization, non-blocking for control-plane rolling tasks). GPT is now expected to replenish the queue with new forward-looking tasks or mark current tasks as executable. LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "next_action": "Await GPT-only content-bound adjudication of historical fail-closed tasks (see GOLD-050/GOLD-052 frozen pending historical freeze lift) and genuine human fresh-process evidence for GOLD-051. PHASE3_3_DATA remains active pending legally authorized Author/News evidence and L3 human decision; the control-plane rolling queue is restored to target_size=3.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -105,7 +105,9 @@
   ],
   "queue_target_size": 3,
   "task_queue": [
-    "GOLD-051"
+    "GOLD-050",
+    "GOLD-051",
+    "GOLD-052"
   ],
   "queue_status": "HOLD",
   "planner_lookahead_size": 3,
@@ -131,6 +133,13 @@
       ],
       "reason": "Irreconcilable historical immutable result conflict; frozen to allow forward progress",
       "evidence_commit": "f48c433"
+    },
+    {
+      "at": "2026-09-26T09:00Z",
+      "operator": "gpt",
+      "action": "replenish_control_plane_task_queue",
+      "reason": "Previous round wrote GOLD-050/051/052 task files but omitted them from PROJECT_STATE.task_queue, violating the replenish contract (queue_count=1 < queue_target_size=3). This audit restores the dependency-safe control-plane queue [GOLD-050, GOLD-051, GOLD-052] with queue_status=HOLD; GOLD-050/GOLD-052 remain blocked on the human-frozen historical terminal-inconsistency blocker and are not auto-startable.",
+      "requires_manual_resolution": false
     }
   ]
 }
