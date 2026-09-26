@@ -50,7 +50,7 @@
       "code": "GOLD-053",
       "type": "control_plane_refactor_deferred",
       "frozen_at": "2026-09-26T11:00Z",
-      "frozen_reason": "Frozen by human operator. GOLD-053 is a broad control-plane refactor (queue_status single source of truth) that exceeded Cline's execution budget: attempt 1 produced 7 assertion failures plus a Windows pytest tmpdir PermissionError, causing terminal_not_completed. Same class as frozen GOLD-050/052. Freezing to allow rolling mechanism to proceed. GPT should propose a smaller-grained replacement task."
+      "frozen_reason": "Frozen by human operator. GOLD-053 is a broad control-plane refactor (queue_status single source of truth) that exceeded Cline's execution budget. Attempt 1's real failure was 9 pre-existing assertion failures, NOT introduced by GOLD-053 (its own 6 files passed): PHASE3_3_DATA was frozen into history_blockers (blockers=[]) by the freeze_phase33_data_blocker override, but 8 regression files still assert PHASE3_3_DATA in blockers (see .ai/runtime/GOLD-053-failures.md). The Windows pytest tmpdir PermissionError was secondary environment noise in sessionfinish that only suppressed the FAILURES summary and caused terminal_not_completed. Same class as frozen GOLD-050/052. Freezing to allow rolling mechanism to proceed. GPT should propose a smaller-grained replacement task after establishing a green pytest baseline."
     }
   ],
   "resolved_blockers": [
