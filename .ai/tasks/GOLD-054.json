@@ -7,8 +7,8 @@
   "auto_start": true,
   "requires_human_approval": false,
   "human_gate": null,
-  "human_unlock": "Authorized by GPT review FAIL on GOLD-054 at remote HEAD 2c83aa57 (previously fail at f22d2f7 and cee3f8d): 远端工作树仍无 GOLD-054 验收所需的实现交付 (orchestrator/control_plane_status.py、scripts/control_plane_consistency.py、两段分离断言、非法组合 fail-closed 回归)，且最新 HEAD 2c83aa5 CI run 36226721827 conclusion=failure。Control-plane only; does not touch business gates.",
-  "goal": "GOLD-054 在远端 HEAD 2c83aa57 上仍无实现交付：diff 仅为 chore (start_agent.bat) 与元数据提交；实测 tests 仍存在 `PHASE3_3_DATA in (blockers | history_blockers)` 的宽松写法（违反两段分离要求）；最新 HEAD GitHub Actions Python 3.12/3.13/PostgreSQL 三 job 未见全绿（run 36226721827 conclusion=failure）。本任务把 GOLD-053/GOLD-054 的完整实现落地、对断言做两段分离纠偏，并以包含实现的最新远端 HEAD 上三 job 全绿作为复审前提。",
+  "human_unlock": "Authorized by GPT review FAIL on GOLD-054 at remote HEAD 811b77a6 (previously fail at 2c83aa57 / f22d2f7 / cee3f8d): 远端工作树仍无 GOLD-054 验收所需的实现交付 (orchestrator/control_plane_status.py、scripts/control_plane_consistency.py、两段分离断言、非法组合 fail-closed 回归)，且最新 HEAD 811b77a CI run 36227155303 conclusion=failure，前一 HEAD 2c83aa5 CI run 36226721827 conclusion=failure。Control-plane only; does not touch business gates.",
+  "goal": "GOLD-054 在远端 HEAD 811b77a6 上仍无实现交付：相对审查基线 2c83aa57 的 diff 仅为 .ai/PROJECT_STATE.json 与 .ai/tasks/GOLD-054.json 两个元数据文件；HEAD 811b77a 本身为 control 提交，前序 2c83aa5 为 chore(start_agent.bat) 且 CI=failure；实测 tests 仍存在 `PHASE3_3_DATA in (blockers | history_blockers)` 的宽松写法（违反两段分离要求）；最新远端 HEAD 的 GitHub Actions Python 3.12/3.13/PostgreSQL 三 job 未见全绿。本任务把 GOLD-053/GOLD-054 的完整实现落地、对断言做两段分离纠偏，并以包含实现的最新远端 HEAD 上三 job 全绿作为复审前提。",
   "requirements": [
     "新增 orchestrator/control_plane_status.py 作为 queue_status 唯一权威来源：输入已提交 PROJECT_STATE 的 status/blockers/human_gates/history_blockers 与 queue_status 本身，输出规范化 queue_status（合法域 {ACTIVE,HOLD,BLOCKED}）及稳定 reason codes；计算必须确定性，不得依赖 cwd、平台路径或目录扫描顺序。",
     "派生规则必须严格：status=BLOCKED 时必须存在至少一个活跃 blocker 或需要人工门禁的 human gate，否则判非法；queue_status=ACTIVE 时不得存在活跃 blocker 或禁止 ACTIVE 的 human gate（PHASE3_3_AUTHORIZED_EVIDENCE / PHASE3_3_L3_DECISION 视为禁止 ACTIVE）；queue_status=HOLD 必须引用显式 hold 原因码（业务门禁或人工冻结）；queue_status=BLOCKED 必须与 status=BLOCKED 且至少一个活跃 blocker / human gate 对齐。",
@@ -18,7 +18,7 @@
     "新增只读 CLI scripts/control_plane_consistency.py，打印 status、queue_status、blockers、human_gates、派生规则判定与稳定 reason codes；默认 dry-run 且允许 stdout；仅当提供 --output 才可落盘，且仅允许 .ai/runtime/** 或系统临时目录（复用 orchestrator/planner_snapshot_output.py 白名单）。不得写任何关键审计文件。",
     "运行本任务全流程前后，.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/** 的 sha256 必须逐字节一致（至少由回归断言或自有哈希工具证明）。",
     "不得撰写 .ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/**、.ai/tasks/**；不得修改 .github/workflows/**；不得引入真实网络访问；不得调用外部模型 API。",
-    "全量 pytest / ruff / mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL jobs 在最新远端 HEAD 上结论必须全部为 success，且该 HEAD 必须包含上述实现交付（而非仅元数据）。在此之前任何本地通过或元数据-only CI 绿都不能被视作 GOLD-053/GOLD-054 的实现性验收证据。"
+    "全量 pytest / ruff / mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL jobs 在最新远端 HEAD 上结论必须全部为 success，且该 HEAD 必须包含上述实现交付（而非仅元数据 / chore）。在此之前任何本地通过或元数据-only CI 绿都不能被视作 GOLD-053/GOLD-054 的实现性验收证据。"
   ],
   "scope_guard": {
     "allowed_primary_paths": [
