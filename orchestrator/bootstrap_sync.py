@@ -274,7 +274,7 @@ def synchronize(
         return _finish_failed(
             outcome,
             SYNC_RESULT_FAILED,
-            f"无法读取当前分支：{first_line(current)}",
+            f"cannot read current branch: {first_line(current)}",
         )
 
     outcome.branch = current.stdout.strip()
@@ -283,8 +283,8 @@ def synchronize(
         return _finish_failed(
             outcome,
             SYNC_RESULT_WRONG_BRANCH,
-            f"当前分支是 {outcome.branch or '<detached>'}，要求 {target_branch}："
-            "已 fail-closed，绝不自动 checkout/switch",
+            f"current branch is {outcome.branch or '<detached>'} but {target_branch} required: "
+            "fail-closed, never auto checkout/switch",
         )
 
     head = call("rev-parse HEAD")
@@ -293,7 +293,7 @@ def synchronize(
         return _finish_failed(
             outcome,
             SYNC_RESULT_FAILED,
-            f"无法读取本地 HEAD：{first_line(head)}",
+            f"cannot read local HEAD: {first_line(head)}",
         )
 
     outcome.head_before = head.stdout.strip()
@@ -308,7 +308,7 @@ def synchronize(
         return _finish_failed(
             outcome,
             SYNC_RESULT_FAILED,
-            f"无法读取工作区状态（不是 Git 仓库？）：{first_line(status)}",
+            f"cannot read worktree status (not a git repo?): {first_line(status)}",
         )
 
     dirty_lines = [line for line in status.stdout.splitlines() if line.strip()]
@@ -317,9 +317,9 @@ def synchronize(
         return _finish_failed(
             outcome,
             SYNC_RESULT_SKIPPED_DIRTY,
-            "工作区存在未提交修改"
-            f"（{len(dirty_lines)} 项）：已 fail-closed，"
-            "未 fetch、未 merge、未 rebase，本地修改与本地 commit 一律保留",
+            "worktree has uncommitted changes"
+            f" ({len(dirty_lines)} items): fail-closed, "
+            "no fetch/merge/rebase, local changes and commits preserved",
         )
 
     # --------------------------------------------------------
@@ -332,7 +332,7 @@ def synchronize(
         return _finish_failed(
             outcome,
             SYNC_RESULT_FETCH_FAILED,
-            f"git fetch 失败（网络/权限？）：{first_line(fetch)}",
+            f"git fetch failed (network/permission?): {first_line(fetch)}",
         )
 
     remote_ref = call(f"rev-parse {remote_name}/{target_branch}")
@@ -341,7 +341,7 @@ def synchronize(
         return _finish_failed(
             outcome,
             SYNC_RESULT_REMOTE_REF_MISSING,
-            f"无法解析 {remote_name}/{target_branch}：{first_line(remote_ref)}",
+            f"cannot resolve {remote_name}/{target_branch}: {first_line(remote_ref)}",
         )
 
     outcome.remote_sha = remote_ref.stdout.strip()
@@ -382,7 +382,7 @@ def _sync_divergence(
             return _finish_failed(
                 outcome,
                 SYNC_RESULT_FAILED,
-                f"fast-forward 合并失败：{first_line(merge)}",
+                f"fast-forward merge failed: {first_line(merge)}",
             )
 
         return _verify_after_sync(outcome, call, SYNC_RESULT_FAST_FORWARD)
@@ -391,7 +391,7 @@ def _sync_divergence(
         return _finish_failed(
             outcome,
             SYNC_RESULT_FAILED,
-            f"无法判断本地与远端关系：{first_line(behind)}",
+            f"cannot determine local vs remote: {first_line(behind)}",
         )
 
     # --------------------------------------------------------
@@ -410,7 +410,7 @@ def _sync_divergence(
         return _finish_failed(
             outcome,
             SYNC_RESULT_FAILED,
-            f"无法判断本地与远端关系：{first_line(ahead)}",
+            f"cannot determine local vs remote: {first_line(ahead)}",
         )
 
     # --------------------------------------------------------
@@ -423,12 +423,12 @@ def _sync_divergence(
         abort = call("rebase --abort")
 
         reason = (
-            "rebase 冲突：已 fail-closed 并执行 rebase --abort 恢复原状，"
-            f"本地 commit 保留（{first_line(rebase)}）"
+            "rebase conflict: fail-closed and rebase --abort to restore, "
+            f"local commits preserved ({first_line(rebase)})"
         )
 
         if not abort.ok:
-            reason += f"；rebase --abort 亦失败（{first_line(abort)}），请人工检查"
+            reason += f"; rebase --abort also failed ({first_line(abort)}), check manually"
 
         return _finish_failed(outcome, SYNC_RESULT_REBASE_CONFLICT, reason)
 
@@ -448,7 +448,7 @@ def _verify_after_sync(
         return _finish_failed(
             outcome,
             SYNC_RESULT_FAILED,
-            f"同步后无法读取 HEAD：{first_line(after)}",
+            f"cannot read HEAD after sync: {first_line(after)}",
         )
 
     head_after = after.stdout.strip()
@@ -457,7 +457,7 @@ def _verify_after_sync(
         return _finish_failed(
             outcome,
             SYNC_RESULT_FAILED,
-            "同步后 HEAD 与远端不一致：已 fail-closed，请人工检查",
+            "HEAD after sync differs from remote: fail-closed, check manually",
         )
 
     outcome.head_after = head_after
@@ -509,22 +509,22 @@ def render_report(outcome: SyncOutcome, root: Path) -> str:
     if outcome.ok:
         if outcome.code_updated:
             lines.append(
-                f"bootstrap sync OK：磁盘代码已更新为 {abbrev_sha(outcome.head_after)}，"
-                "随后启动的 Python/Orchestrator 进程将加载该版本。"
+                f"bootstrap sync OK: on-disk code updated to {abbrev_sha(outcome.head_after)}, "
+                "subsequent Python/Orchestrator processes will load this version."
             )
         else:
             lines.append(
-                f"bootstrap sync OK（{outcome.result}）："
-                f"磁盘代码保持 {abbrev_sha(outcome.head_after)}，"
-                "随后启动的 Python/Orchestrator 进程将加载该版本。"
+                f"bootstrap sync OK ({outcome.result}): "
+                f"on-disk code stays {abbrev_sha(outcome.head_after)}, "
+                "subsequent Python/Orchestrator processes will load this version."
             )
     else:
         lines.extend(
             [
                 "*** bootstrap sync FAILED (fail-closed) ***",
                 f"Reason     : {outcome.reason}",
-                "已停止启动 Orchestrator：本地修改与本地 commit 一律保留，",
-                "请人工处理（提交 / 恢复网络 / 切回要求分支）后重新运行 start_agent.bat。",
+                "Orchestrator launch stopped: local changes and commits preserved, ",
+                "resolve manually (commit / restore network / switch branch) then re-run start_agent.bat.",
             ]
         )
 
@@ -577,7 +577,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         outcome = SyncOutcome(
             result=SYNC_RESULT_FAILED,
             ok=False,
-            reason="找不到 git 可执行文件：无法在启动前完成同步",
+            reason="git executable not found: cannot sync before launch",
             branch=args.branch,
             remote=args.remote or REMOTE_NAME,
             checked_at=now_iso(),
@@ -602,7 +602,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     except OSError as exc:
         # 状态落盘失败不影响同步结论，但必须显式告警（Orchestrator 会记录 not recorded）。
-        print(f"[WARN] 无法写入 bootstrap 状态 {state_path}: {exc}")
+        print(f"[WARN] cannot write bootstrap state {state_path}: {exc}")
 
     print(render_report(outcome, root))
 
