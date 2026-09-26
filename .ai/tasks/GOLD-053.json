@@ -1,0 +1,65 @@
+{
+  "task_id": "GOLD-053",
+  "type": "CONTROL_PLANE_QUEUE_STATUS_SINGLE_SOURCE",
+  "title": "把 queue_status 与 status/blockers/human_gates 的语义一致性收敛为单一权威来源",
+  "max_attempts": 3,
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": null,
+  "human_unlock": "Authorized by GPT review failure on GOLD-048 lineage at meeting 2026-09-26; control-plane only, does not touch business gates.",
+  "goal": "当前 PROJECT_STATE 同时存在 status=BLOCKED、human_gates.PHASE3_3_AUTHORIZED_EVIDENCE 与 queue_status=HOLD，但缺少机读的派生规则与回归，导致 GOLD-049 声称修复的 queue_status 断言无法被 GPT 直接核验。建立一个单一权威来源函数与只读报告 CLI，使 queue_status 只由 status/blockers/human_gates 确定性派生，合法域为 {ACTIVE,HOLD,BLOCKED}，非法组合一律 fail-closed，并用回归强制。",
+  "requirements": [
+    "新增单一权威来源模块（例如 orchestrator/control_plane_status.py），输入为已提交的 PROJECT_STATE 事实（status、blockers、human_gates、history_blockers 中的冻结码、queue_status 本身），输出规范化的 queue_status 及其派生原因码；不得依赖 cwd、平台路径或扫描顺序。",
+    "派生规则必须严格：status=BLOCKED 时必须存在至少一个活跃 blocker 或 human gate，否则判非法；queue_status=ACTIVE 时不得存在活跃 blocker 或需要人工门禁的 human gate（其中 PHASE3_3_AUTHORIZED_EVIDENCE / PHASE3_3_L3_DECISION 视为禁止 ACTIVE）；queue_status=HOLD 必须引用显式的 hold 原因码（例如依赖业务门禁或人工冻结）；queue_status=BLOCKED 必须与 status=BLOCKED 对齐。",
+    "重写 GOLD-049 涉及的四个回归（tests/integration/test_result_terminal_canary_regression.py、test_result_terminal_consistency_regression.py、test_review_binding_regression.py、test_review_ledger_integrity_regression.py）中 test_phase33_blocker_and_trading_invariants_unchanged 的 queue_status 断言：从单一权威来源派生期望值，禁止硬编码具体值（包括 ACTIVE/HOLD/BLOCKED）；PHASE3_3 不变量与 LIVE_TRADING=false / ALLOW_EXTERNAL_ORDER_SUBMISSION=false / 未进入 Phase 3.4 / GPT 独占规划权 的断言强度不得削弱。",
+    "新增非法组合 fail-closed 回归，至少覆盖：queue_status=ACTIVE 且 status=BLOCKED；queue_status=ACTIVE 且 blockers 含 PHASE3_3_DATA；queue_status=HOLD 但无 hold 原因码；queue_status=BLOCKED 但 status 不为 BLOCKED 且无 blocker；以及合法组合 ACTIVE/HOLD/BLOCKED 各一例。",
+    "新增只读 CLI（例如 scripts/control_plane_consistency.py），输出 status、queue_status、blockers、human_gates、派生规则判定与稳定 reason codes；默认 dry-run 且允许 std-out 输出；若提供 --output 仅允许 .ai/runtime/** 或系统临时目录，复用 orchestrator/planner_snapshot_output.py 的受控白名单。零写入关键审计文件。",
+    "不得撰写 .ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/**、.ai/tasks/**；不得修改 .github/workflows/**；不得引入真实网络访问；不得调用外部模型 API。",
+    "全量 pytest/ruff/mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL jobs 必须通过。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "orchestrator/control_plane_status.py",
+      "orchestrator/**",
+      "scripts/control_plane_consistency.py",
+      "tests/unit/**",
+      "tests/integration/**",
+      ".ai/DEVELOPMENT_PROTOCOL.md",
+      "README.md",
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "src/alpha/**",
+      "src/execution/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行本任务，不得自行修改控制面事实或改变 queue_status。",
+    "本任务只修复回归与落地单一权威来源；不得为通过而删除、降级或跳过 PHASE3_3 blocker 与交易安全不变量断言。",
+    "不得撰写任何历史 result/ledger/state/adjudication；如需要，只读读取并按内容摘要校验。",
+    "PHASE3_3_DATA 保持 BLOCKED；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。"
+  ],
+  "validation_commands": [
+    ".venv\\Scripts\\python.exe -m pytest tests -q",
+    ".venv\\Scripts\\python.exe -m ruff check .",
+    ".venv\\Scripts\\python.exe -m mypy config database src scripts"
+  ],
+  "acceptance": [
+    "queue_status 只由单一权威来源从 status/blockers/human_gates 派生，取值域为 {ACTIVE,HOLD,BLOCKED}，非法组合稳定 fail-closed 并输出稳定 reason codes。",
+    "GOLD-049 涉及的四个回归用例不再硬编码 queue_status 具体值；PHASE3_3 与交易安全不变量断言强度不变。",
+    "只读 CLI 在默认 dry-run 下零写入关键审计文件，自身运行前后 .ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/** 的 sha256 不变。",
+    "本地全量 pytest/ruff/mypy 通过；GitHub Actions Python 3.12/3.13/PostgreSQL 三项在最新远端 HEAD 上绿。",
+    "不改写历史 result/ledger/state/adjudication，不改变 Phase 3.3 blocker、L3/L4、GPT 独占规划权与交易安全开关。"
+  ]
+}
