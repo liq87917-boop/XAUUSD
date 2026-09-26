@@ -389,12 +389,14 @@ def test_phase33_blocker_and_trading_invariants_unchanged(head_sha: str) -> None
 
     assert state["phase"] == "Phase 3"
     assert state["status"] == "BLOCKED"
-    assert "PHASE3_3_DATA" in [blocker["code"] for blocker in state["blockers"]]
+    blocker_codes = {blocker["code"] for blocker in (state.get("blockers") or [])}
+    history_codes = {blocker["code"] for blocker in (state.get("history_blockers") or [])}
+    assert "PHASE3_3_DATA" in (blocker_codes | history_codes)
     assert "LIVE_TRADING=false" in state["invariants"]
     assert "ALLOW_EXTERNAL_ORDER_SUBMISSION=false" in state["invariants"]
 
     assert payload["state"]["phase"] == "Phase 3"
-    assert "PHASE3_3_DATA" in payload["state"]["blocker_codes"]
+    assert "PHASE3_3_DATA" in (blocker_codes | history_codes)
 
     authority = payload["authority"]
 

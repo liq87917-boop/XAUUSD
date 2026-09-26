@@ -102,10 +102,15 @@ def refill_payload() -> dict[str, Any]:
 
 
 def blocker_codes(state: dict[str, Any]) -> list[str]:
-    entries = state.get("blockers")
+    entries: list[Any] = []
 
-    if not isinstance(entries, list):
-        return []
+    blockers = state.get("blockers")
+    history = state.get("history_blockers")
+
+    if isinstance(blockers, list):
+        entries.extend(blockers)
+    if isinstance(history, list):
+        entries.extend(history)
 
     return [str(entry["code"]) for entry in entries if isinstance(entry, dict) and "code" in entry]
 

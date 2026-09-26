@@ -369,10 +369,15 @@ def test_real_repo_phase3_3_blocker_removal_fails_closed() -> None:
 
     state = consistent_state()
 
-    # PHASE3_3_DATA 是 active blocker；删除它必须 fail-closed。
+    # PHASE3_3_DATA 是冻结 blocker（在 history_blockers）；删除它必须 fail-closed。
     state["blockers"] = [
         blocker
         for blocker in state.get("blockers", [])
+        if blocker.get("code") != precondition.PHASE3_3_BLOCKER
+    ]
+    state["history_blockers"] = [
+        blocker
+        for blocker in state.get("history_blockers", [])
         if blocker.get("code") != precondition.PHASE3_3_BLOCKER
     ]
 

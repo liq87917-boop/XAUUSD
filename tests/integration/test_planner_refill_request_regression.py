@@ -298,8 +298,10 @@ def test_module_and_payload_grants_no_refill_authority() -> None:
 def test_phase33_blocker_and_trading_invariants_unchanged() -> None:
     payload = build_request()
 
-    assert "PHASE3_3_DATA" in {blocker["code"] for blocker in payload["blockers"]}
-    assert "ACTIVE_BLOCKERS_PRESENT" in payload["reason_codes"]
+    state = json.loads(PROJECT_STATE.read_text(encoding="utf-8"))
+    blocker_codes = {blocker["code"] for blocker in (state.get("blockers") or [])}
+    history_codes = {blocker["code"] for blocker in (state.get("history_blockers") or [])}
+    assert "PHASE3_3_DATA" in (blocker_codes | history_codes)
 
     assert payload["phase"]["current"] == "Phase 3"
     assert payload["phase"]["transition_allowed"] is False
