@@ -85,7 +85,7 @@
       "resolved_by": "2026-09-26: GPT review FAIL on GOLD-053 lineage at remote HEAD be038e6 — implementation files absent from delivered diff, and latest HEAD CI pending/failure. Superseded by GOLD-054 (CONTROL_PLANE_QUEUE_STATUS_SINGLE_SOURCE_REDO). No adjudication, ledger entry or pointer advance is implied."
     }
   ],
-  "next_action": "GOLD-054 在远端 HEAD cee3f8d 上仍无实现交付；本轮 GPT fail：cee3f8d 的 9 文件 diff 仅含元数据与断言宽松化（PHASE3_3_DATA in (blockers | history_blockers)），未见 orchestrator/control_plane_status.py、scripts/control_plane_consistency.py、非法组合 fail-closed 回归。已重写 GOLD-054 task 文件要求两段分离语义并落地实现；队列 [GOLD-051,GOLD-053,GOLD-054] 已满足 queue_target_size=3，queue_status=HOLD。PHASE3_3_DATA 保持 BLOCKED（history_blockers frozen）。LIVE_TRADING=false，ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+  "next_action": "本轮 GPT review of remote HEAD f22d2f7 判定 GOLD-054 fail-closed：相对基线 399f4fd 仅 .ai/PROJECT_STATE.json 与 .ai/tasks/GOLD-054.json 两个元数据文件的改动（+103/-16），未见 orchestrator/control_plane_status.py、scripts/control_plane_consistency.py、非法组合 fail-closed 回归与两段分离语义。f22d2f7 的 CI 36226299113 success 仅为元数据-only。已按硬约束重写 .ai/tasks/GOLD-054.json 作为整改派发，task_queue 保持 [GOLD-051, GOLD-053, GOLD-054]（queue_count=3=queue_target_size），queue_status=HOLD。PHASE3_3_DATA 保持 frozen in history_blockers，未在活跃 blockers；LIVE_TRADING=false，ALLOW_EXTERNAL_ORDER_SUBMISSION=false，不进入 Phase 3.4。",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -184,6 +184,16 @@
         "GOLD-054"
       ],
       "reason": "GPT review of remote HEAD cee3f8d: cee3f8d CI green but only verifies metadata (PROJECT_STATE + GOLD-054 task + 7 regression files with a relaxed PHASE3_3_DATA in (blockers | history_blockers) assertion). No orchestrator/control_plane_status.py, no scripts/control_plane_consistency.py, no illegal-combination fail-closed regressions. Rewrote .ai/tasks/GOLD-054.json to require two-segment semantics (history_blockers must contain code AND frozen-state active blockers must not contain it) and implementation delivery; task_queue unchanged [GOLD-051, GOLD-053, GOLD-054]; queue_status=HOLD. No historical file rewritten; no business gate changed; LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+      "requires_manual_resolution": false
+    },
+    {
+      "at": "2026-09-26T15:20:00+08:00",
+      "operator": "gpt",
+      "action": "fail_gold054_at_f22d2f7_reiterate_task_file",
+      "codes": [
+        "GOLD-054"
+      ],
+      "reason": "GPT review of remote HEAD f22d2f7 (vs baseline 399f4fd) found only 2 metadata files changed (+103/-16): .ai/PROJECT_STATE.json and .ai/tasks/GOLD-054.json. No implementation delivery (orchestrator/control_plane_status.py, scripts/control_plane_consistency.py), no illegal-combination fail-closed regressions, and the relaxed PHASE3_3_DATA in (blockers | history_blockers) assertion remains in tests. GitHub Actions 36226299113 success on f22d2f7 is metadata-only. GOLD-054 remains fail-closed. Re-emitted .ai/tasks/GOLD-054.json to satisfy the fail-closed write contract and updated next_action/override_audit. Queue unchanged [GOLD-051, GOLD-053, GOLD-054] (queue_count=3=queue_target_size); queue_status=HOLD; PHASE3_3_DATA frozen in history_blockers and absent from active blockers; LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false; no Phase 3.4 entry.",
       "requires_manual_resolution": false
     }
   ]
