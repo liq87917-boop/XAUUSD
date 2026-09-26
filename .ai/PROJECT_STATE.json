@@ -4,7 +4,7 @@
   "branch": "cline-agent",
   "phase": "Phase 3",
   "status": "BLOCKED",
-  "current_task": "GOLD-048",
+  "current_task": "GOLD-054",
   "last_completed_task": "GOLD-044",
   "last_reviewed_task": "GOLD-027",
   "blockers": [],
@@ -79,9 +79,13 @@
     {
       "code": "GOLD_051_SCHEMA_AND_CLI_LANDED",
       "resolved_by": "2026-09-25: GOLD-051 code delivery landed on cline-agent (commits 4b3be98 / 4838d0f / 8616563): orchestrator/fresh_process_evidence.py provides a read-only schema/verifier with verdicts cleared|not_cleared|invalid and stable reason codes (HEAD_MISMATCH, RESTART_COMMIT_PRECEDES_MIN_SNAPSHOT, CI_NOT_GREEN, MISSING_OPERATOR_IDENTITY, MISSING_HUMAN_ATTESTATION), and scripts/record_fresh_process_evidence.py is fail-closed in CI. This resolves only the schema/CLI landing requirement; it does NOT clear the CONTROL_PLANE_FRESH_PROCESS_RESTART gate and does NOT constitute a GPT review PASS for GOLD-051, which remains pending genuine human fresh-process evidence and green CI on the final HEAD."
+    },
+    {
+      "code": "GOLD_053_SINGLE_SOURCE_REDO_REQUIRED",
+      "resolved_by": "2026-09-26: GPT review FAIL on GOLD-053 lineage at remote HEAD be038e6 — implementation files (orchestrator/control_plane_status.py, scripts/control_plane_consistency.py, illegal-combination fail-closed regressions, GOLD-049 de-hardcoding) absent from delivered diff, and latest HEAD CI pending/failure. Superseded by GOLD-054 (CONTROL_PLANE_QUEUE_STATUS_SINGLE_SOURCE_REDO). This entry records only that the immediate review has determined GOLD-053 as fail-closed for this round; no adjudication, ledger entry or pointer advance is implied."
     }
   ],
-  "next_action": "Baseline fixed (9 assertions aligned). GOLD-053 may be re-executed.",
+  "next_action": "Execute GOLD-054: land orchestrator/control_plane_status.py + scripts/control_plane_consistency.py, correct the 9-assertion alignment from `in (blockers | history_blockers)` to separated active/frozen semantics, and push to a HEAD whose GitHub Actions Python 3.12/3.13/PostgreSQL jobs are all success. GOLD-050/GOLD-052 remain auto_start=false pending GOLD-054 landing. Do not begin GOLD-050/052 or any business Phase 3.3 work without explicit GPT authorization.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -105,10 +109,9 @@
   ],
   "queue_target_size": 3,
   "task_queue": [
-    "GOLD-050",
     "GOLD-051",
-    "GOLD-052",
-    "GOLD-053"
+    "GOLD-053",
+    "GOLD-054"
   ],
   "queue_status": "HOLD",
   "planner_lookahead_size": 3,
@@ -159,7 +162,18 @@
       "codes": [
         "GOLD-053"
       ],
-      "reason": "GPT review failed on GOLD-048 lineage: queue_status/status/human_gates semantic coupling not landed and CI conclusion unverifiable (REDACTED). Appended GOLD-053 (single-source queue_status derivation + non-hardcoded regression + read-only consistency CLI) to task_queue, keeping queue_status=HOLD as-is. No historical file was rewritten; no business gate changed.",
+      "reason": "GPT review failed on GOLD-048 lineage: queue_status/status/human_gates semantic coupling not landed and CI conclusion unverifiable. Appended GOLD-053 (single-source queue_status derivation + non-hardcoded regression + read-only consistency CLI) to task_queue, keeping queue_status=HOLD as-is. No historical file was rewritten; no business gate changed.",
+      "requires_manual_resolution": false
+    },
+    {
+      "at": "2026-09-26T11:40:00+08:00",
+      "operator": "gpt",
+      "action": "fail_gold053_and_replenish_with_gold054",
+      "codes": [
+        "GOLD-053",
+        "GOLD-054"
+      ],
+      "reason": "GPT review of remote HEAD be038e6 determined GOLD-053 fail-closed: required implementation files (orchestrator/control_plane_status.py, scripts/control_plane_consistency.py, illegal-combination fail-closed regressions, GOLD-049 de-hardcoding) are absent from the delivered 13-file diff, and latest HEAD GitHub Actions has no success conclusion. Created GOLD-054 as the correction task, updated task_queue to [GOLD-051, GOLD-053, GOLD-054], and removed GOLD-050/GOLD-052 from the current executable queue (they remain auto_start=false + human_gate=L1 pending GOLD-054 landing). No historical file was rewritten; no business gate changed.",
       "requires_manual_resolution": false
     }
   ]
