@@ -1,24 +1,24 @@
 {
   "task_id": "GOLD-054",
   "type": "CONTROL_PLANE_QUEUE_STATUS_SINGLE_SOURCE_REDO",
-  "title": "重做 GOLD-053/GOLD-054：落地 queue_status 单一权威来源 + 两段分离断言 + 最新 HEAD 强制绿 CI",
+  "title": "重做 GOLD-053/GOLD-054：落地 queue_status 单一权威来源 + 两段分离断言 + 实现包含型 HEAD 强制绿 CI",
   "max_attempts": 3,
   "depends_on": [],
   "auto_start": true,
   "requires_human_approval": false,
   "human_gate": null,
-  "human_unlock": "Authorized by GPT review FAIL on GOLD-054 at remote HEAD 811b77a6 (previously fail at 2c83aa57 / f22d2f7 / cee3f8d): 远端工作树仍无 GOLD-054 验收所需的实现交付 (orchestrator/control_plane_status.py、scripts/control_plane_consistency.py、两段分离断言、非法组合 fail-closed 回归)，且最新 HEAD 811b77a CI run 36227155303 conclusion=failure，前一 HEAD 2c83aa5 CI run 36226721827 conclusion=failure。Control-plane only; does not touch business gates.",
-  "goal": "GOLD-054 在远端 HEAD 811b77a6 上仍无实现交付：相对审查基线 2c83aa57 的 diff 仅为 .ai/PROJECT_STATE.json 与 .ai/tasks/GOLD-054.json 两个元数据文件；HEAD 811b77a 本身为 control 提交，前序 2c83aa5 为 chore(start_agent.bat) 且 CI=failure；实测 tests 仍存在 `PHASE3_3_DATA in (blockers | history_blockers)` 的宽松写法（违反两段分离要求）；最新远端 HEAD 的 GitHub Actions Python 3.12/3.13/PostgreSQL 三 job 未见全绿。本任务把 GOLD-053/GOLD-054 的完整实现落地、对断言做两段分离纠偏，并以包含实现的最新远端 HEAD 上三 job 全绿作为复审前提。",
+  "human_unlock": "Authorized by GPT review FAIL on GOLD-054 at remote HEAD 7be6992e16b2b3ce1de4299e3aaca2b6fe151398 (baseline 2c83aa57；previously fail at 811b77a6 / 2c83aa57 / f22d2f7 / cee3f8d)：远端工作树仍无 GOLD-054 完成所需实现交付 (orchestrator/control_plane_status.py、scripts/control_plane_consistency.py、两段分离断言、非法组合 fail-closed 回归)。HEAD 7be6992 与前一 HEAD 811b77a 均为纯 control 提交，2c83aa5 为 chore(start_agent.bat) 且 CI=failure；最新 HEAD CI run 36230447126 conclusion=failure。Control-plane only; does not touch business gates.",
+  "goal": "GOLD-054 在远端 HEAD 7be6992e 上仍无实现交付：相对审查基线 2c83aa57 的 diff 仅为 .ai/PROJECT_STATE.json (排版压缩 + 文本缩短) 与 .ai/tasks/GOLD-054.json (12 行文字调整) 两个元数据文件；HEAD 7be6992 与前一 HEAD 811b77a 均为 control 提交，2c83aa5 为 chore(start_agent.bat) 且 CI=failure；tests 仍存在 `PHASE3_3_DATA in (blockers | history_blockers)` 宽松写法 (违反两段分离要求)；最新远端 HEAD 的 GitHub Actions Python 3.12/3.13/PostgreSQL 三 job 未见全绿 (HEAD 7be6992 run 36230447126=failure，前一 HEAD 811b77a run 36227155303=failure，前一 2c83aa5 run 36226721827=failure；元数据-only f22d2f7 run 36226299113=success 不构成实现性证据)。本任务把 GOLD-053/GOLD-054 的完整实现落地、对断言做两段分离纠偏，并以包含实现的最新远端 HEAD 上三 job 全绿作为复审前提。",
   "requirements": [
-    "新增 orchestrator/control_plane_status.py 作为 queue_status 唯一权威来源：输入已提交 PROJECT_STATE 的 status/blockers/human_gates/history_blockers 与 queue_status 本身，输出规范化 queue_status（合法域 {ACTIVE,HOLD,BLOCKED}）及稳定 reason codes；计算必须确定性，不得依赖 cwd、平台路径或目录扫描顺序。",
-    "派生规则必须严格：status=BLOCKED 时必须存在至少一个活跃 blocker 或需要人工门禁的 human gate，否则判非法；queue_status=ACTIVE 时不得存在活跃 blocker 或禁止 ACTIVE 的 human gate（PHASE3_3_AUTHORIZED_EVIDENCE / PHASE3_3_L3_DECISION 视为禁止 ACTIVE）；queue_status=HOLD 必须引用显式 hold 原因码（业务门禁或人工冻结）；queue_status=BLOCKED 必须与 status=BLOCKED 且至少一个活跃 blocker / human gate 对齐。",
-    "【本轮修正关键】严禁停留在 `PHASE3_3_DATA in (blockers | history_blockers)` 这种『出现即通过』的形式（cee3f8d 已出现该宽松写法，必须撤销）。改为两段分离断言：① `PHASE3_3_DATA` 必须出现在 history_blockers（frozen）；② 冻结态下 `PHASE3_3_DATA` 不得出现在活跃 blockers。并在下列当前使用宽松写法的文件中同步落地该两段语义：tests/integration/test_planner_autopilot_contract_regression.py（blocker_codes 辅助函数）、test_planner_mutation_precondition_regression.py、test_planner_refill_request_regression.py、test_review_backlog_regression.py、test_review_closure_adjudication_regression.py（valid adjudication 用例）、test_review_evidence_manifest_regression.py。",
-    "重写 tests/integration/test_result_terminal_canary_regression.py / test_result_terminal_consistency_regression.py / test_review_binding_regression.py / test_review_ledger_integrity_regression.py 中 test_phase33_blocker_and_trading_invariants_unchanged 的 queue_status 断言：期望值必须由 orchestrator.control_plane_status 派生，禁止硬编码具体值（包括 ACTIVE/HOLD/BLOCKED）。",
-    "新增非法组合 fail-closed 回归（至少覆盖）：queue_status=ACTIVE 且 status=BLOCKED；queue_status=ACTIVE 且活跃 blockers 含 PHASE3_3_DATA；queue_status=HOLD 但无显式 hold 原因码；queue_status=BLOCKED 但 status!=BLOCKED 且无活跃 blocker/human gate；合法组合 ACTIVE / HOLD / BLOCKED 各一例。全部必须稳定输出 reason code、exit_code!=0。",
-    "新增只读 CLI scripts/control_plane_consistency.py，打印 status、queue_status、blockers、human_gates、派生规则判定与稳定 reason codes；默认 dry-run 且允许 stdout；仅当提供 --output 才可落盘，且仅允许 .ai/runtime/** 或系统临时目录（复用 orchestrator/planner_snapshot_output.py 白名单）。不得写任何关键审计文件。",
-    "运行本任务全流程前后，.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/** 的 sha256 必须逐字节一致（至少由回归断言或自有哈希工具证明）。",
+    "新增 orchestrator/control_plane_status.py 作为 queue_status 唯一权威来源：输入已提交 PROJECT_STATE 的 status/blockers/human_gates/history_blockers 与 queue_status 本身，输出规范化 queue_status (合法域 {ACTIVE,HOLD,BLOCKED}) 及稳定 reason codes；计算必须确定性，不得依赖 cwd、平台路径或目录扫描顺序。",
+    "派生规则必须严格：status=BLOCKED 时必须存在至少一个活跃 blocker 或需要人工门禁的 human gate，否则判非法；queue_status=ACTIVE 时不得存在活跃 blocker 或禁止 ACTIVE 的 human gate (PHASE3_3_AUTHORIZED_EVIDENCE / PHASE3_3_L3_DECISION 视为禁止 ACTIVE)；queue_status=HOLD 必须引用显式 hold 原因码 (业务门禁或人工冻结)；queue_status=BLOCKED 必须与 status=BLOCKED 且至少一个活跃 blocker / human gate 对齐。",
+    "【本轮修正关键】严禁停留在 `PHASE3_3_DATA in (blockers | history_blockers)` 这种『出现即通过』的形式 (cee3f8d 已出现该宽松写法，必须撤销)。改为两段分离断言：① `PHASE3_3_DATA` 必须出现在 history_blockers (frozen)；② 冻结态下 `PHASE3_3_DATA` 不得出现在活跃 blockers。并在下列当前使用宽松写法的文件中同步落地该两段语义：tests/integration/test_planner_autopilot_contract_regression.py (blocker_codes 辅助函数)、test_planner_mutation_precondition_regression.py、test_planner_refill_request_regression.py、test_review_backlog_regression.py、test_review_closure_adjudication_regression.py (valid adjudication 用例)、test_review_evidence_manifest_regression.py。",
+    "重写 tests/integration/test_result_terminal_canary_regression.py / test_result_terminal_consistency_regression.py / test_review_binding_regression.py / test_review_ledger_integrity_regression.py 中 test_phase33_blocker_and_trading_invariants_unchanged 的 queue_status 断言：期望值必须由 orchestrator.control_plane_status 派生，禁止硬编码具体值 (包括 ACTIVE/HOLD/BLOCKED)。",
+    "新增非法组合 fail-closed 回归 (至少覆盖)：queue_status=ACTIVE 且 status=BLOCKED；queue_status=ACTIVE 且活跃 blockers 含 PHASE3_3_DATA；queue_status=HOLD 但无显式 hold 原因码；queue_status=BLOCKED 但 status!=BLOCKED 且无活跃 blocker/human gate；合法组合 ACTIVE / HOLD / BLOCKED 各一例。全部必须稳定输出 reason code、exit_code!=0。",
+    "新增只读 CLI scripts/control_plane_consistency.py，打印 status、queue_status、blockers、human_gates、派生规则判定与稳定 reason codes；默认 dry-run 且允许 stdout；仅当提供 --output 才可落盘，且仅允许 .ai/runtime/** 或系统临时目录 (复用 orchestrator/planner_snapshot_output.py 白名单)。不得写任何关键审计文件。",
+    "运行本任务全流程前后，.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/** 的 sha256 必须逐字节一致 (至少由回归断言或自有哈希工具证明)。",
     "不得撰写 .ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/**、.ai/tasks/**；不得修改 .github/workflows/**；不得引入真实网络访问；不得调用外部模型 API。",
-    "全量 pytest / ruff / mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL jobs 在最新远端 HEAD 上结论必须全部为 success，且该 HEAD 必须包含上述实现交付（而非仅元数据 / chore）。在此之前任何本地通过或元数据-only CI 绿都不能被视作 GOLD-053/GOLD-054 的实现性验收证据。"
+    "全量 pytest / ruff / mypy 必须通过；提交后 GitHub Actions Python 3.12、Python 3.13 与 PostgreSQL jobs 在最新远端 HEAD 上结论必须全部为 success，且该 HEAD 必须包含上述实现交付 (而非仅元数据 / chore)。在此之前任何本地通过或元数据-only CI 绿都不能被视作 GOLD-053/GOLD-054 的实现性验收证据。"
   ],
   "scope_guard": {
     "allowed_primary_paths": [
@@ -59,10 +59,10 @@
   ],
   "acceptance": [
     "queue_status 只由 orchestrator/control_plane_status.py 单一权威来源从 status/blockers/human_gates/history_blockers 派生，合法域 {ACTIVE,HOLD,BLOCKED}，非法组合稳定 fail-closed 并输出稳定 reason codes。",
-    "PHASE3_3_DATA 断言全面改为两段分离语义（history_blockers 必须出现 + 冻结态活跃 blockers 不得出现），不再出现 `in (blockers | history_blockers)` 形式的放宽断言。",
+    "PHASE3_3_DATA 断言全面改为两段分离语义 (history_blockers 必须出现 + 冻结态活跃 blockers 不得出现)，不再出现 `in (blockers | history_blockers)` 形式的放宽断言。",
     "GOLD-049 涉及的四个回归与新增回归不再硬编码 queue_status 具体值，且期望值从单一权威来源派生。",
     "只读 CLI 默认 dry-run 零写入，运行前后 .ai/PROJECT_STATE.json / .ai/GPT_REVIEW_LEDGER.json / .ai/results/** / .ai/adjudications/** 的 sha256 不变。",
-    "本地全量 pytest / ruff / mypy 通过；最新远端 HEAD（包含上述实现交付）上 GitHub Actions Python 3.12 / 3.13 / PostgreSQL 三 job 结论均为 success。",
+    "本地全量 pytest / ruff / mypy 通过；最新远端 HEAD (包含上述实现交付) 上 GitHub Actions Python 3.12 / 3.13 / PostgreSQL 三 job 结论均为 success。",
     "不改写历史 result/ledger/state/adjudication，不改变 Phase 3.3 blocker、L3/L4、GPT 独占规划权与交易安全开关。"
   ]
 }
