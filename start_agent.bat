@@ -46,11 +46,11 @@ if errorlevel 1 (
     echo         Local changes and local commits preserved; nothing overwritten.
     echo         Please resolve manually and re-run start_agent.bat.
     echo.
-    pause
+    timeout /t 3 /nobreak >nul
     exit /b 1
 )
 
 echo.
 py -u orchestrator\ai_orchestrator.py
 
-pause
+timeout /t 3 /nobreak >nul
