@@ -1,0 +1,56 @@
+{
+  "task_id": "GOLD-055",
+  "type": "CONTROL_PLANE_EXECUTION_ENVIRONMENT_TERMINAL_DIAGNOSTIC",
+  "title": "执行环境一次性终端诊断：CLINE_EXECUTION_ENVIRONMENT_MISMATCH 或恢复受支持模型",
+  "max_attempts": 1,
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": null,
+  "human_unlock": "Authorized by GPT at 2026-09-27T18:00+08:00 as a one-shot terminal diagnosis to break the control-plane stall. GOLD-055 is NOT an implementation task; it is the explicit, single, auditable terminal action Cline must take before any further metadata-only commit. If the execution environment is healthy (supported model deepseek-flash or deepseek-v4-pro) it MUST immediately yield to GOLD-054 and produce ZERO changes under this task. If the model name is still unsupported (e.g. deepseek-v4.1-flash) it MUST write exactly one CLINE_EXECUTION_ENVIRONMENT_MISMATCH terminal result and stop. Do not modify control-plane audit files except the executor-owned result recording for this task.",
+  "goal": "终止 37+ 连续 metadata-only 提交造成的控制面 stall。本任务在**单次尝试内**做一次性执行环境终端判定：读取当前 Cline 运行时模型名与 CLI 调用契约，判定执行环境是否与仓库要求的受支持模型集（deepseek-flash / deepseek-v4-pro）一致。若一致，任务空跑并通过（不产生任何源码/测试/控制面文件变更，产出零差异），随即交给 GOLD-054；若不一致（例如仍是 deepseek-v4.1-flash 或任何未在支持集内取值），任务必须一次性输出终态 CLINE_EXECUTION_ENVIRONMENT_MISMATCH，之后必须停止创建新的提交，交由人类修复运行环境。严禁在本任务中写任何实现代码、修改任何测试、改动任何控制面文件（除本任务自身的结果记录）。",
+  "requirements": [
+    "只读检查执行环境：读取 Cline 运行时配置（例如 start_agent.bat / .clinerules / orchestrator 中传入 CLI 的 model 参数）中实际生效的模型名，判定是否属于受支持集 {deepseek-flash, deepseek-v4-pro}。不得修改任何配置或凭据。",
+    "若模型名属于受支持集：本任务视为一次性空跑通过，输出结果文件记录 execution_outcome=healthy / finish_reason=completed，且**工作树必须零差异**（除本任务需要落盘的结果记录外不得新增/修改/删除任何仓库文件）；不得触发任何后续提交；执行器必须立即让位于 GOLD-054。",
+    "若模型名不属于受支持集（含深seek-v4.1-flash）：本任务必须一次性输出终态结果 execution_outcome=blocked / normalized_finish_reason=CLINE_EXECUTION_ENVIRONMENT_MISMATCH，并在结果中记录：观测到的模型名、与受支持集的差异、以及明确指令「人类必须先把 Cline 运行时模型改为 deepseek-flash 或 deepseek-v4-pro，再重启 orchestrator 循环」。此后不得再创建任何新的元数据/结果/杂项 commit；本任务终止后控制面进入人工修复等待。",
+    "禁止写：orchestrator/**、scripts/**、tests/**、src/**、database/**、.github/workflows/**、.ai/tasks/**、.ai/results/**（本任务自身的结果记录除外）、.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/adjudications/**。本任务是诊断，不是实现。",
+    "不引入网络访问；不调用任何外部模型 API；不执行真实数据采集；不得尝试以任何方式自动修改 Cline 运行时配置（凭据属于人类域）。",
+    "若执行器发现自身无法可靠读取运行时模型名（例如配置不可读或环境变量缺失），必须 fail-closed：写 CLINE_EXECUTION_ENVIRONMENT_MISMATCH 终态并停止，而不是猜测为 healthy。",
+    "本任务不解除任何 blocker；一旦写出 CLINE_EXECUTION_ENVIRONMENT_MISMATCH，控制面 stall 判定为人因，后续必须由人类修复模型名并重启循环。",
+    "若在受支持模型下判定 healthy，本任务不消耗 GOLD-054 的尝试次数；GOLD-054 仍按自身 max_attempts 独立执行。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      "PROGRESS_LOG.md",
+      "TECH_DEBT.md"
+    ],
+    "forbidden_paths": [
+      ".ai/tasks/**",
+      ".ai/results/**",
+      ".ai/PROJECT_STATE.json",
+      ".ai/GPT_REVIEW_LEDGER.json",
+      ".ai/adjudications/**",
+      ".github/workflows/**",
+      "orchestrator/**",
+      "scripts/**",
+      "tests/**",
+      "src/**",
+      "database/**",
+      "data/**"
+    ]
+  },
+  "constraints": [
+    "GPT 是唯一 Planner/Reviewer/Architect；Cline/DeepSeek 仅执行本任务，不得改变受支持模型集、不得修改凭据、不得自行判定 blocker 已解除。",
+    "本任务只能做一次性终端诊断；无论 healthy 或 mismatched，完成后都不得再产生任何新的控制面元数据 commit（mismatched 时人类先修环境；healthy 时立刻交给 GOLD-054）。",
+    "PHASE3_3_DATA 保持 BLOCKED（frozen in history_blockers）；不得进入 Phase 3.4 或跨 L3/L4。",
+    "LIVE_TRADING=false；ALLOW_EXTERNAL_ORDER_SUBMISSION=false。",
+    "本任务不得写任何实现代码、不得修改任何测试、不得修改任何控制面文件（除本任务自身的结果记录）。"
+  ],
+  "validation_commands": [],
+  "acceptance": [
+    "任务以单次尝试完成，结果文件记录明确的 execution_outcome：healthy（受支持模型，工作树零差异）或 blocked + CLINE_EXECUTION_ENVIRONMENT_MISMATCH（不受支持模型，观测到模型名与受支持集差异已落盘）。",
+    "任务本身未产生任何实现修改：orchestrator/**、scripts/**、tests/**、src/**、database/**、.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/adjudications/** 逐字节不变。",
+    "任务完成后不再由同一 agent 自动产生新的控制面元数据提交；mismatched 情况下控制面显式进入人工修复等待，等待人类把 Cline 运行时模型改为 deepseek-flash 或 deepseek-v4-pro。",
+    "不改变 Phase 3.3 blocker、L3/L4 门禁、GPT 独占规划权与交易安全开关。"
+  ]
+}
