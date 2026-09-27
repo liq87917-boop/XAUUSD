@@ -1,0 +1,52 @@
+{
+  "task_id": "GOLD-057",
+  "type": "IMPLEMENTATION_RECOVERY",
+  "title": "直接交付控制面一致性实现，禁止再次生成修复任务元数据",
+  "depends_on": [],
+  "auto_start": true,
+  "max_attempts": 1,
+  "requires_human_approval": false,
+  "goal": "绕过已失效的 GOLD-053/054/056 元数据循环，直接完成控制面一致性代码交付。Cline/DeepSeek 本轮必须修改实现与测试文件；不得创建新的 CONTROL_PLANE_FIX、reset_failed_tasks、clear_circuit_breaker 或其它任务文件。",
+  "requirements": [
+    "新增 orchestrator/control_plane_status.py：以 committed PROJECT_STATE 的 status/blockers/human_gates/history_blockers/queue_status 为输入，确定性派生 ACTIVE/HOLD/BLOCKED，并输出稳定 reason codes；非法组合 fail-closed。",
+    "新增 scripts/control_plane_consistency.py：默认只读 stdout；仅显式 --output 才可写 .ai/runtime/** 或系统临时目录。",
+    "将 PHASE3_3_DATA 回归断言改为两段语义：必须位于 history_blockers，且冻结期间不得位于 active blockers；删除 blockers|history_blockers 的宽松并集判断。",
+    "移除相关集成回归中对 queue_status 具体值的硬编码，统一调用 control_plane_status 派生结果；不得削弱 LIVE_TRADING=false、ALLOW_EXTERNAL_ORDER_SUBMISSION=false、Phase 3.3/L3/L4 与 GPT 独占 Planner/Reviewer 约束。",
+    "新增合法 ACTIVE/HOLD/BLOCKED 与非法组合回归；非法组合必须非零退出并输出稳定 reason codes。",
+    "本轮至少一个提交必须包含 orchestrator/**、scripts/** 或 tests/** 的实现变更；仅 .ai/**、README/PROGRESS_LOG/TECH_DEBT 的提交直接判失败。",
+    "运行 pytest tests -q、ruff check .、mypy config database src scripts；修复本任务引入的问题。提交后等待 GitHub Actions Python 3.12、Python 3.13、PostgreSQL 验证。",
+    "不得创建/修改 .ai/tasks/**（除本文件由 GPT 发布）、.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/adjudications/**、历史 .ai/results/**；不得自行宣布 GPT Review PASS。"
+  ],
+  "allowed_primary_paths": [
+    "orchestrator/**",
+    "scripts/control_plane_consistency.py",
+    "tests/unit/**",
+    "tests/integration/**"
+  ],
+  "forbidden_paths": [
+    ".ai/tasks/**",
+    ".ai/PROJECT_STATE.json",
+    ".ai/GPT_REVIEW_LEDGER.json",
+    ".ai/adjudications/**",
+    ".ai/results/**",
+    ".github/workflows/**",
+    "src/alpha/**",
+    "src/execution/**",
+    "database/**",
+    "data/**"
+  ],
+  "safety_invariants": [
+    "LIVE_TRADING=false",
+    "ALLOW_EXTERNAL_ORDER_SUBMISSION=false",
+    "PHASE3_3_DATA remains frozen in history_blockers",
+    "不得进入 Phase 3.4",
+    "GPT 是唯一 Planner/Reviewer/Architect"
+  ],
+  "acceptance": [
+    "存在 implementation-bearing commit，不是 metadata-only/result-only/chore。",
+    "control_plane_status.py 与 control_plane_consistency.py 存在并有对应回归。",
+    "PHASE3_3_DATA 两段语义与 queue_status 派生回归通过。",
+    "本地 pytest/ruff/mypy 通过；远端实现 HEAD 的 Python 3.12/Python 3.13/PostgreSQL jobs 全绿。",
+    "任务执行期间未新增 GOLD-CPF-* 或其它控制面修复任务文件，未改写历史审计事实。"
+  ]
+}
