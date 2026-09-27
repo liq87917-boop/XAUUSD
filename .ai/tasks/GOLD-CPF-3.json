@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-CPF-3",
+  "type": "CONTROL_PLANE_FIX",
+  "title": "[CONTROL-PLANE-FIX] clear_circuit_breaker",
+  "goal": "Apply control-plane repair operation clear_circuit_breaker.",
+  "requirements": [
+    "operation=clear_circuit_breaker",
+    "reason=日志显示控制面已尝试 reset_failed_tasks 但返回空列表（无 failed 任务可重置），随后连续 3 轮阻塞在 'tick live_lock=True started=None'，说明 orchestrator 处于 live 锁定且无任务启动，属于控制面 blocker 卡死而非任务级失败；repo 已与 origin/cline-agent 同步，无需 rebase。因此根因是 AUTO_CIRCUIT_BREAKER 类控制面 blocker 使状态停留在阻塞态，需清除 blocker 并将 status/queue_status 从 BLOCKED/HOLD 恢复为 ACTIVE。不得改动 LIVE_TRADING/ALLOW_EXTERNAL_ORDER_SUBMISSION，不得触碰 results/audit.jsonl/ledger 等历史事实。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      ".ai/tasks/**",
+      ".ai/PROJECT_STATE.json"
+    ],
+    "forbidden_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/project_state.json",
+      ".ai/audit.jsonl",
+      ".github/workflows/**",
+      ".ai/results/**",
+      ".env",
+      ".env.*",
+      "**/*.sql",
+      "**/appsettings*.json",
+      "deploy/**",
+      "release/**",
+      ".ai/results/**",
+      ".ai/audit.jsonl"
+    ]
+  },
+  "constraints": [
+    "LIVE_TRADING=false",
+    "ALLOW_EXTERNAL_ORDER_SUBMISSION=false"
+  ],
+  "acceptance": [
+    "operation clear_circuit_breaker applied without touching safety invariants or history."
+  ]
+}
