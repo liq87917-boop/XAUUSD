@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-CPF-2",
+  "type": "CONTROL_PLANE_FIX",
+  "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
+  "goal": "Apply control-plane repair operation reset_failed_tasks.",
+  "requirements": [
+    "operation=reset_failed_tasks",
+    "reason=控制面连续 3 轮 stall：GPT 评审反复判定 GOLD-056 lineage 为 fail（metadata-only 提交、无实现交付），orchestrator 因失败任务无法重试而空转（live_lock 长期占用、tick started=None）。GOLD-CPF-1 提议的 reset_failed_tasks CONTROL_PLANE_FIX 被评审拒绝，但该动作正是打破失败-停滞循环的最小必要手段：把 status=failed 的任务恢复为 status=retry、attempts=0，保留 acceptance_criteria/allowed_paths 原样，让执行器能重新尝试 GOLD-056 的单次尝试收敛（落 GOLD-054 实现或写唯一终态），从而解除 CONTROL_PLANE_STALL。该操作不触碰 LIVE_TRADING=false / ALLOW_EXTERNAL_ORDER_SUBMISSION=false，不修改控制面元数据、生产配置或任何历史记录，可随时回退。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      ".ai/tasks/**",
+      ".ai/PROJECT_STATE.json"
+    ],
+    "forbidden_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/project_state.json",
+      ".ai/audit.jsonl",
+      ".github/workflows/**",
+      ".ai/results/**",
+      ".env",
+      ".env.*",
+      "**/*.sql",
+      "**/appsettings*.json",
+      "deploy/**",
+      "release/**",
+      ".ai/results/**",
+      ".ai/audit.jsonl"
+    ]
+  },
+  "constraints": [
+    "LIVE_TRADING=false",
+    "ALLOW_EXTERNAL_ORDER_SUBMISSION=false"
+  ],
+  "acceptance": [
+    "operation reset_failed_tasks applied without touching safety invariants or history."
+  ]
+}
