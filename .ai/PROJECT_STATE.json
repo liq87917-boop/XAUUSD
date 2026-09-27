@@ -3,11 +3,17 @@
   "project": "XAUUSD",
   "branch": "cline-agent",
   "phase": "Phase 3",
-  "status": "ACTIVE",
+  "status": "BLOCKED",
   "current_task": "GOLD-057",
   "last_completed_task": "GOLD-044",
   "last_reviewed_task": "GOLD-027",
-  "blockers": [],
+  "blockers": [
+    {
+      "code": "GPT_FAIL_WITHOUT_WRITES",
+      "detail": "GPT returned fail but no correction task in writes. Protocol §17 violated.",
+      "retryable": true
+    }
+  ],
   "history_blockers": [
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_RESTART",
@@ -122,7 +128,7 @@
   "task_queue": [
     "GOLD-057"
   ],
-  "queue_status": "HOLD",
+  "queue_status": "BLOCKED",
   "planner_lookahead_size": 3,
   "override_audit": [
     {
