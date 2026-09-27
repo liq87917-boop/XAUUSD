@@ -15,7 +15,8 @@
     "新增非法组合 fail-closed 回归：queue_status=ACTIVE 且 status=BLOCKED；queue_status=ACTIVE 且 active blocker 含 PHASE3_3_DATA；queue_status=HOLD 但无显式 hold 原因码；queue_status=BLOCKED 但 status!=BLOCKED 且无 active blocker/human gate；以及合法 ACTIVE/HOLD/BLOCKED 各一例。非法组合必须非零退出并输出稳定 reason codes。",
     "本轮至少一个提交必须包含 orchestrator/**、scripts/** 或 tests/** 的实现变更；仅 .ai/**、README/PROGRESS_LOG/TECH_DEBT 的提交直接判失败。禁止新增任何 CONTROL_PLANE_FIX / reset_failed_tasks / clear_circuit_breaker 类新任务文件；禁止创建或改写 .ai/tasks/**（本文件由 GPT 发布除外）、.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/adjudications/**、历史 .ai/results/**。",
     "运行 `.venv\\Scripts\\python.exe -m pytest tests -q`、`.venv\\Scripts\\python.exe -m ruff check .`、`.venv\\Scripts\\python.exe -m mypy config database src scripts`；修复本任务引入的问题。提交后等待 GitHub Actions Python 3.12、Python 3.13、PostgreSQL 三个 job 在含实现的 HEAD 上全绿。",
-    "不得引入真实网络访问；不得调用外部模型 API；不得执行真实数据采集；不得自行宣布 GPT Review PASS。"
+    "不得引入真实网络访问；不得调用外部模型 API；不得执行真实数据采集；不得自行宣布 GPT Review PASS。",
+    "若下一次尝试仍无法产出实现交付（例如执行环境模型不受支持或 CLI 契约不允许写文件），必须写唯一终态 .ai/results/GOLD-057.json，normalized_finish_reason ∈ {CLINE_EXECUTION_ENVIRONMENT_MISMATCH, CONTROL_PLANE_STALL_TERMINAL}，记录观测到的模型名、与受支持集 {deepseek-flash, deepseek-v4-pro} 的差异，并停止创建任何控制面提交。"
   ],
   "allowed_primary_paths": [
     "orchestrator/control_plane_status.py",
@@ -23,6 +24,7 @@
     "scripts/control_plane_consistency.py",
     "tests/unit/**",
     "tests/integration/**",
+    ".ai/results/GOLD-057.json",
     ".ai/DEVELOPMENT_PROTOCOL.md",
     "README.md",
     "PROGRESS_LOG.md",
@@ -33,7 +35,6 @@
     ".ai/PROJECT_STATE.json",
     ".ai/GPT_REVIEW_LEDGER.json",
     ".ai/adjudications/**",
-    ".ai/results/**",
     ".github/workflows/**",
     "src/alpha/**",
     "src/execution/**",
@@ -51,7 +52,8 @@
     "存在 implementation-bearing commit，不是 metadata-only/result-only/chore；不新增 GOLD-CPF-* 或其它控制面修复任务文件，未改写历史审计事实。",
     "control_plane_status.py 与 control_plane_consistency.py 存在并有对应回归；非法组合稳定 fail-closed。",
     "PHASE3_3_DATA 两段语义（必须位于 history_blockers 且冻结期间不得位于 active blockers）与 queue_status 派生回归通过；宽松并集写法已从树内移除。",
-    "本地 pytest/ruff/mypy 通过；远端实现 HEAD 的 Python 3.12/Python 3.13/PostgreSQL jobs 全绿。",
-    "运行前后 .ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/** 的 sha256 逐字节一致。"
+    "本地 pytest/ruff/mypy 通过；远端含实现的 HEAD 上 Python 3.12/Python 3.13/PostgreSQL jobs 全绿。",
+    "运行前后 .ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/results/**、.ai/adjudications/** 的 sha256 逐字节一致。",
+    "若无法产出实现，.ai/results/GOLD-057.json 存在且 normalized_finish_reason ∈ {CLINE_EXECUTION_ENVIRONMENT_MISMATCH, CONTROL_PLANE_STALL_TERMINAL}。"
   ]
 }
