@@ -1,0 +1,38 @@
+{
+  "task_id": "GOLD-CPF-1",
+  "type": "CONTROL_PLANE_FIX",
+  "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
+  "goal": "Apply control-plane repair operation reset_failed_tasks.",
+  "requirements": [
+    "operation=reset_failed_tasks",
+    "reason=控制面连续 3 轮 tick 只有 'scan failed tasks'，没有新任务被调度；orchestrator 从 live=True 退化为 live=False，说明失败任务未被重置为可重试状态，导致扫描后无任何可执行任务而停滞。日志未显示分支分叉（每轮 repo synced 成功）也未显示 AUTO_CIRCUIT_BREAKER 阻塞（status 非 BLOCKED/HOLD），因此根因是失败任务卡在 status=failed 阻止后续重试。执行 reset_failed_tasks 将失败任务恢复为 retry/attempts=0，保留 acceptance_criteria 与 allowed_paths 原样，不触碰控制面、历史与交易安全开关。"
+  ],
+  "scope_guard": {
+    "allowed_primary_paths": [
+      ".ai/tasks/**",
+      ".ai/PROJECT_STATE.json"
+    ],
+    "forbidden_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/project_state.json",
+      ".ai/audit.jsonl",
+      ".github/workflows/**",
+      ".ai/results/**",
+      ".env",
+      ".env.*",
+      "**/*.sql",
+      "**/appsettings*.json",
+      "deploy/**",
+      "release/**",
+      ".ai/results/**",
+      ".ai/audit.jsonl"
+    ]
+  },
+  "constraints": [
+    "LIVE_TRADING=false",
+    "ALLOW_EXTERNAL_ORDER_SUBMISSION=false"
+  ],
+  "acceptance": [
+    "operation reset_failed_tasks applied without touching safety invariants or history."
+  ]
+}
