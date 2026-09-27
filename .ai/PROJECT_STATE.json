@@ -48,10 +48,10 @@
     },
     {
       "code": "CONTROL_PLANE_STALL",
-      "detail": "自 2533c6f 起 40+ 次连续 metadata-only / result-only / chore 提交，控制面未产出实现交付。GOLD-053 / GOLD-054 / GOLD-056 lineage 未收敛。HEAD 78fa78149 又新增 CONTROL_PLANE_FIX 任务文件 GOLD-CPF-1.json，进一步违反 GOLD-056 唯一终态约束。需 GOLD-056 单次尝试内二选一收敛（落实现或写唯一终态）。",
+      "detail": "自 2533c6f 起 40+ 次连续 metadata-only / result-only / chore 提交，控制面未产出实现交付。GOLD-053 / GOLD-054 / GOLD-056 lineage 未收敛。HEAD 152d6ec 相对 baseline c2d4d00 仅 3 个 .ai/** 控制面文件变更（74 ins / 15 del），新增 .ai/tasks/GOLD-057.json 仅为任务定义文件，无 orchestrator/** 或 scripts/** 实现；HEAD run 36287105666 = failure。GOLD-CPF-1/2/3 任务文件已被拒绝（reset_failed_tasks / clear_circuit_breaker 属于人类 orchestrator runtime 运维动作，不是任务文件）。需 GOLD-057 单次尝试内落实现交付，或写出唯一终态并停止全部控制面元数据提交。",
       "retryable": false,
-      "moved_at": "2026-09-28T02:30:00+08:00",
-      "frozen_reason": "Control-plane stall; must be resolved by human fixing Cline runtime model to a supported value (deepseek-flash or deepseek-v4-pro) and restarting the orchestrator loop; alternating with GOLD-056 single-attempt convergence. Newly added GOLD-CPF-1.json (reset_failed_tasks) is rejected as further stall behavior."
+      "moved_at": "2026-09-27T10:30:00+08:00",
+      "frozen_reason": "Control-plane stall; must be resolved by GPT-issued GOLD-057 implementation delivery on top of a supported Cline model (deepseek-flash or deepseek-v4-pro), or by a single terminal result. GOLD-CPF-* task files remain rejected."
     }
   ],
   "resolved_blockers": [
@@ -93,10 +93,10 @@
     },
     {
       "code": "GOLD_055_ENVIRONMENT_DIAGNOSTIC_LANDED",
-      "resolved_by": "2026-09-27: GOLD-055 result .ai/results/GOLD-055.json recorded completion with model=deepseek-v4-pro, exit 0, changed_files=[]. Report does NOT constitute evidence that GOLD-054 implementation will follow; every subsequent commit remained metadata-only and CI is failing. Superseded by GOLD-056 as the mandatory convergence attempt."
+      "resolved_by": "2026-09-27: GOLD-055 result .ai/results/GOLD-055.json recorded completion with model=deepseek-v4-pro, exit 0, changed_files=[]. Report does NOT constitute evidence that GOLD-054 implementation will follow; every subsequent commit remained metadata-only and CI is failing. Superseded by GOLD-056/GOLD-057 as the mandatory convergence attempt."
     }
   ],
-  "next_action": "GPT review at 2026-09-27T09:57+08:00: GOLD-056 lineage failed acceptance because latest reviewed HEADs remained metadata-only and CI red. GOLD-057 is the sole runnable recovery task. Cline/DeepSeek must now produce implementation-bearing changes in orchestrator/**, scripts/** and tests/**; no GOLD-CPF/reset_failed_tasks/clear_circuit_breaker task-file generation is permitted. After implementation, run pytest/ruff/mypy and push the implementation HEAD for GPT review. PHASE3_3_DATA remains frozen in history_blockers; LIVE_TRADING=false; ALLOW_EXTERNAL_ORDER_SUBMISSION=false; do not enter Phase 3.4.",
+  "next_action": "GPT review at 2026-09-27T10:30+08:00: GOLD-057 lineage still failed acceptance — latest reviewed HEAD 152d6ec (baseline c2d4d00) contains only 74 ins / 15 del across .ai/PROJECT_STATE.json + .ai/tasks/GOLD-056.json + new .ai/tasks/GOLD-057.json, all control-plane metadata, ZERO implementation files, GH Actions on 152d6ec run 36287105666 = failure. GOLD-057 (re-emitted) is the sole runnable implementation recovery task; its commit MUST contain orchestrator/** (orchestrator/control_plane_status.py) and/or scripts/control_plane_consistency.py plus tests/** implementation changes; metadata-only delivery is rejected. No GOLD-CPF/reset_failed_tasks/clear_circuit_breaker task-file generation is permitted. After implementation, run pytest/ruff/mypy and push the implementation HEAD for GPT review. PHASE3_3_DATA remains frozen in history_blockers; CONTROL_PLANE_STALL remains a frozen history blocker requiring GPT-issued implementation delivery or a single terminal result; LIVE_TRADING=false; ALLOW_EXTERNAL_ORDER_SUBMISSION=false; do not enter Phase 3.4.",
   "human_gates": [
     {
       "code": "PHASE3_3_AUTHORIZED_EVIDENCE",
@@ -122,7 +122,7 @@
   "task_queue": [
     "GOLD-057"
   ],
-  "queue_status": "ACTIVE",
+  "queue_status": "HOLD",
   "planner_lookahead_size": 3,
   "override_audit": [
     {
@@ -293,7 +293,18 @@
         "GOLD-056",
         "GOLD-057"
       ],
-      "reason": "Remote review found no implementation delivery: latest lineage commits remained control-plane metadata, including GOLD-CPF reset/clear task files. GOLD-057 supersedes the stalled lineage and requires an implementation-bearing commit; metadata-only delivery is rejected.",
+      "reason": "Remote review of HEAD c2d4d00 found no implementation delivery: latest lineage commits remained control-plane metadata, including GOLD-CPF reset/clear task files. GOLD-057 supersedes the stalled lineage and requires an implementation-bearing commit; metadata-only delivery is rejected.",
+      "requires_manual_resolution": false
+    },
+    {
+      "at": "2026-09-27T10:30:00+08:00",
+      "operator": "gpt",
+      "action": "fail_gold057_lineage_at_152d6ec_reemit_gold057_and_set_queue_status_hold",
+      "codes": [
+        "GOLD-057",
+        "CONTROL_PLANE_STALL"
+      ],
+      "reason": "GPT review of remote HEAD 152d6ec (baseline c2d4d00): 3f / 74i / 15d, all .ai/** control-plane metadata; ZERO implementation. GH Actions 36287105666 (152d6ec) failure; 36287096806 (c463f20) cancelled; 36286094837 (f382fd9) failure; 36285134258 (c2d4d00) failure; 36284035140 (da49a93) failure; 36283035806 (750f86f) failure. Re-emitted GOLD-057 as the sole runnable implementation recovery task; set queue_status=HOLD to align with frozen CONTROL_PLANE_STALL history blocker; queue.action=hold.",
       "requires_manual_resolution": false
     }
   ]
