@@ -524,7 +524,8 @@ def render_report(outcome: SyncOutcome, root: Path) -> str:
                 "*** bootstrap sync FAILED (fail-closed) ***",
                 f"Reason     : {outcome.reason}",
                 "Orchestrator launch stopped: local changes and commits preserved, ",
-                "resolve manually (commit / restore network / switch branch) then re-run start_agent.bat.",
+                "resolve manually (commit / restore network / switch branch) "
+                "then re-run start_agent.bat.",
             ]
         )
 

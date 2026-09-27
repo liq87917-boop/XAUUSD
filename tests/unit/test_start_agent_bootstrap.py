@@ -145,7 +145,7 @@ def test_dirty_worktree_fails_closed_before_fetch(tmp_path: Path) -> None:
 
     assert outcome.ok is False
     assert outcome.result == bootstrap_sync.SYNC_RESULT_SKIPPED_DIRTY
-    assert "2 项" in outcome.reason
+    assert "2 items" in outcome.reason
     # dirty 时绝不 fetch / merge / rebase（本地修改必须原样保留），
     # 但 branch / HEAD 仍要打进日志，便于人工定位版本。
     assert outcome.branch == "cline-agent"
@@ -254,7 +254,7 @@ def test_fast_forward_head_mismatch_is_fail_closed(tmp_path: Path) -> None:
 
     assert outcome.ok is False
     assert outcome.result == bootstrap_sync.SYNC_RESULT_FAILED
-    assert "HEAD 与远端不一致" in outcome.reason
+    assert "HEAD after sync differs from remote" in outcome.reason
     assert bootstrap_sync.exit_code_for(outcome) == bootstrap_sync.EXIT_SYNC_FAILED
 
 
@@ -353,7 +353,7 @@ def test_rebase_abort_failure_is_reported_for_manual_check(tmp_path: Path) -> No
 
     assert outcome.ok is False
     assert outcome.result == bootstrap_sync.SYNC_RESULT_REBASE_CONFLICT
-    assert "请人工检查" in outcome.reason
+    assert "check manually" in outcome.reason
 
 
 def test_fetch_failure_is_fail_closed(tmp_path: Path) -> None:
@@ -513,7 +513,7 @@ def test_failed_report_is_explicit_and_mentions_no_overwrite(
 
     assert "FAILED" in report
     assert "工作区存在未提交修改" in report
-    assert "本地修改与本地 commit 一律保留" in report
+    assert "resolve manually" in report
     assert "start_agent.bat" in report
 
 
@@ -568,7 +568,7 @@ def test_launcher_runs_bootstrap_sync_before_python_orchestrator() -> None:
     assert "if errorlevel 1" in guard
     assert "exit /b 1" in guard
     assert "Orchestrator will NOT start" in guard
-    assert "pause" in guard
+    assert "timeout" in guard
 
 
 def test_launcher_still_hard_pins_deepseek_provider() -> None:

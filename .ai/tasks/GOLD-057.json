@@ -16,6 +16,7 @@
     "本轮至少一个提交必须包含 orchestrator/**、scripts/** 或 tests/** 的实现变更；仅 .ai/**、README/PROGRESS_LOG/TECH_DEBT 的提交直接判失败。禁止新增任何 CONTROL_PLANE_FIX / reset_failed_tasks / clear_circuit_breaker 类新任务文件；禁止创建或改写 .ai/tasks/**（本文件由 GPT 发布除外）、.ai/PROJECT_STATE.json、.ai/GPT_REVIEW_LEDGER.json、.ai/adjudications/**、历史 .ai/results/**。",
     "运行 `.venv\\Scripts\\python.exe -m pytest tests -q`、`.venv\\Scripts\\python.exe -m ruff check .`、`.venv\\Scripts\\python.exe -m mypy config database src scripts`；修复本任务引入的问题。提交后等待 GitHub Actions Python 3.12、Python 3.13、PostgreSQL 三个 job 在含实现的 HEAD 上全绿。",
     "不得引入真实网络访问；不得调用外部模型 API；不得执行真实数据采集；不得自行宣布 GPT Review PASS。",
+    "不得改写 .ai/PROJECT_STATE.json / .ai/GPT_REVIEW_LEDGER.json / .ai/adjudications/** 与历史 .ai/results/**；运行前后其 sha256 必须逐字节一致。",
     "若下一次尝试仍无法产出实现交付（例如执行环境模型不受支持或 CLI 契约不允许写文件），必须写唯一终态 .ai/results/GOLD-057.json，normalized_finish_reason ∈ {CLINE_EXECUTION_ENVIRONMENT_MISMATCH, CONTROL_PLANE_STALL_TERMINAL}，记录观测到的模型名、与受支持集 {deepseek-flash, deepseek-v4-pro} 的差异，并停止创建任何控制面提交。"
   ],
   "allowed_primary_paths": [

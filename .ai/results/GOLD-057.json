@@ -1,0 +1,41 @@
+{
+  "task_id": "GOLD-057",
+  "title": "直接交付控制面一致性实现，禁止再次生成修复任务元数据",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "completed",
+  "finished_at": "2026-09-27T10:37:46+08:00",
+  "attempt_count": 1,
+  "max_attempts": 1,
+  "changed_files": [
+    "orchestrator/control_plane_status.py",
+    "scripts/control_plane_consistency.py",
+    "tests/unit/test_control_plane_status.py",
+    "tests/integration/test_planner_mutation_precondition_regression.py",
+    "tests/integration/test_planner_refill_request_regression.py",
+    "tests/integration/test_review_backlog_regression.py",
+    "tests/integration/test_review_closure_adjudication_regression.py",
+    "tests/integration/test_review_evidence_manifest_regression.py"
+  ],
+  "git_diff_stat": "8 files changed",
+  "attempts": [
+    {
+      "attempt": 1,
+      "started_at": "2026-09-27T10:35:00+08:00",
+      "finished_at": "2026-09-27T10:37:46+08:00",
+      "cline_exit_code": 0,
+      "cline_timed_out": false,
+      "failure_class": "none",
+      "failure_code": null,
+      "execution_outcome": "completed",
+      "normalized_finish_reason": "completed",
+      "finish_reason": "completed",
+      "cline_finish_reason_raw": "completed",
+      "model": "deepseek-v4-pro",
+      "iterations": 1,
+      "duration_ms": 166000
+    }
+  ],
+  "cline_final_text": "完成 GOLD-057 控制面一致性实现交付。\n\n## 变更文件\n\n新增：\n- orchestrator/control_plane_status.py — 单一事实源模块，提供 derive_queue_status 确定性派生、status_violations 语义一致性校验（含 HOLD/BLOCKED 需显式依据）、phase33_violations 两段语义（冻结期必须位于 history_blockers 且不得位于 active blockers），稳定 reason codes，fail-closed。\n- scripts/control_plane_consistency.py — 控制面一致性检查 CLI：默认 dry-run 只写 stdout，仅 --output 可写 .ai/runtime/** 或系统临时目录（复用 planner_snapshot_output 白名单）。\n- tests/unit/test_control_plane_status.py — 14 个用例覆盖 queue_status 派生回归、PHASE3_3_DATA 两段分离断言、非法组合 fail-closed 回归、合法组合通过。\n\n修改（5 个回归文件）：删除 `PHASE3_3_DATA in (blocker_codes | history_codes)` 松散并集写法，改为两段分离断言 `PHASE3_3_DATA in history_codes` 且 `PHASE3_3_DATA not in blocker_codes`。\n\n## 执行的测试\n1. pytest tests/unit/test_control_plane_status.py + test_control_plane_invariants.py：29 passed\n2. pytest 5 个集成回归文件：53 passed\n3. ruff check（改动文件）：All checks passed\n4. mypy scripts：Success: no issues found in 62 source files\n\n## 不变量保留强度（未削弱）\nLIVE_TRADING=false、ALLOW_EXTERNAL_ORDER_SUBMISSION=false、Phase 3.3 不进入 Phase 3.4、GPT 独占 Planner/Reviewer 约束全部保留。未改写任何历史 result/ledger/state。",
+  "cline_error_tail": ""
+}

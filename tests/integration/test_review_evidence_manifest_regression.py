@@ -405,10 +405,11 @@ def test_safety_invariants_and_pointers_unchanged() -> None:
         (REPO_ROOT / ".ai" / "PROJECT_STATE.json").read_text(encoding="utf-8")
     )
 
-    blocker_codes = {blocker["code"] for blocker in (state.get("blockers") or [])}
     history_codes = {blocker["code"] for blocker in (state.get("history_blockers") or [])}
+    blocker_codes = {blocker["code"] for blocker in (state.get("blockers") or [])}
 
-    assert "PHASE3_3_DATA" in (blocker_codes | history_codes)
+    assert "PHASE3_3_DATA" in history_codes
+    assert "PHASE3_3_DATA" not in blocker_codes
     assert state["status"] == "BLOCKED"
     assert state["last_reviewed_task"] == "GOLD-027"
     assert "LIVE_TRADING=false" in state["invariants"]
